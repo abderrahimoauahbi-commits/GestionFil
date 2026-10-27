@@ -28,12 +28,14 @@ import { toast } from 'sonner'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { Check, Link2, Pencil, Plus, Trash2, Unlink2 } from 'lucide-react'
 import { Badge, Bouton, Champ, Selecteur } from './ui/base'
+import { EnteteIndice } from './ui/Indice'
 import { ChampRecherche, type Suggestion } from './ChampRecherche'
 import { cn, fmt } from '../lib/utils'
 import { useEstMobile } from '../lib/mediaQuery'
 import { largeurDeClasse, repartirCases, useLargeurConteneur } from '../lib/rangeeAdaptative'
 import { GrilleLignesMobile } from './GrilleLignesMobile'
 import { couleurEcart } from '../lib/lots'
+import { libelleStatut } from '../lib/statuts'
 import { AvisColisage } from './AvisColisage'
 import {
   type ChampColis,
@@ -45,6 +47,9 @@ import {
   facteurVersKg,
   pourChamp,
 } from '../lib/conditionnement'
+
+/** Les états d'une référence au moteur de couverture (27/10/2026). */
+const ETATS_MOTEUR = ['PLAN_NON_COUVERT', 'SOUS_SECURITE', 'COUVERT']
 
 /**
  * LA NATURE D'UNE LIGNE, et ce qu'elle implique jusqu'au quai.
@@ -81,7 +86,8 @@ export interface RefLigne extends Record<string, unknown> {
   id_proposition?: string | null
   couleur?: string | null
   code_couleur?: string | null
-  stock_projete_kg?: number | null
+  /** L'état au moteur de couverture (27/10/2026) et la 1re rupture du plan. */
+  premiere_rupture?: string | null
   statut_stock?: string | null
   qte_a_commander_kg?: number | null
   prix_suggere_devise?: number
@@ -1002,7 +1008,8 @@ function GrilleLignesBureau(props: ProprietesGrille) {
       detail:
         [
           r.designation,
-          r.stock_projete_kg != null ? `projeté ${fmt.nombre(r.stock_projete_kg, 0)} kg` : null,
+          // L'état au moteur de couverture (27/10/2026) : la 1re rupture du plan.
+          r.premiere_rupture ? `rupture le ${fmt.date(r.premiere_rupture)}` : null,
           etranger ? `habituellement chez ${r.fournisseur_nom ?? r.code_fournisseur}` : null,
         ]
           .filter(Boolean)
@@ -1010,10 +1017,19 @@ function GrilleLignesBureau(props: ProprietesGrille) {
       mention:
         suggere > 0
           ? `plan : ${fmt.nombre(suggere, 0)} kg`
-          : r.statut_stock && r.statut_stock !== 'OK'
-            ? r.statut_stock
+          : r.statut_stock && r.statut_stock !== 'COUVERT'
+            ? // Un état du moteur se traduit ; une mention libre (le stock du magasin
+              // d'une sortie, « RUPTURE » quand il est vide) passe telle quelle.
+              ETATS_MOTEUR.includes(r.statut_stock)
+              ? libelleStatut('statut_stock', r.statut_stock)
+              : r.statut_stock
             : undefined,
-      ton: suggere > 0 ? 'primaire' : r.statut_stock === 'RUPTURE' ? 'alerte' : 'neutre',
+      ton:
+        suggere > 0
+          ? 'primaire'
+          : r.statut_stock === 'PLAN_NON_COUVERT' || r.statut_stock === 'RUPTURE'
+            ? 'alerte'
+            : 'neutre',
       desactivee: prises.has(r.code_reference),
       ...(presentes.has(r.code_reference)
         ? { mention: 'déjà sur le bon : s’ajoute', ton: 'alerte' as const }
@@ -1109,27 +1125,28 @@ function GrilleLignesBureau(props: ProprietesGrille) {
             <thead>
               <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
                 <th className="px-1 py-2 text-right">#</th>
-                <th className="px-1.5 py-2 text-left">{libelles?.reference ?? 'Notre référence'}</th>
+                <th className="px-1.5 py-2 text-left"><EnteteIndice texte={libelles?.reference ?? 'Notre référence'} /></th>
                 {/* L'UNITE NE COMMANDE PLUS LA SAISIE. La quantite est toujours
                     en kilos : l'unite ne decide que de ce qui sera imprime sur le
                     bon et de la base de facturation. */}
-                <th className="truncate px-1.5 py-2 text-left" title={libelles?.unite ?? 'Unité au bon'}>
-                  {libelles?.unite ?? 'Unité au bon'}
+                <th className="overflow-hidden px-1.5 py-2 text-left">
+                  <EnteteIndice texte={libelles?.unite ?? 'Unité au bon'} />
                 </th>
-                <th className="px-1.5 py-2 text-right">Qté (kg)</th>
+                <th className="overflow-hidden px-1.5 py-2 text-right"><EnteteIndice texte="Qté (kg)" /></th>
                 {colonnesEnLigne.map((c) => (
                   <th
                     key={c.cle}
-                    className={cn('truncate px-1.5 py-2', c.alignement === 'right' ? 'text-right' : 'text-left')}
-                    title={c.entete}
+                    className={cn('overflow-hidden px-1.5 py-2', c.alignement === 'right' ? 'text-right' : 'text-left')}
                   >
-                    {c.entete}
+                    <EnteteIndice texte={c.entete} />
                   </th>
                 ))}
                 {!sansPrix && (
                   <>
-                    <th className="truncate px-1.5 py-2 text-right" title={`Prix ${devise} par kg`}>Prix {devise}</th>
-                    <th className="px-1.5 py-2 text-right">Total</th>
+                    <th className="overflow-hidden px-1.5 py-2 text-right" title={`Prix ${devise} par kg`}>
+                      <EnteteIndice texte={`Prix ${devise}`} cle="Prix" />
+                    </th>
+                    <th className="overflow-hidden px-1.5 py-2 text-right"><EnteteIndice texte="Total" /></th>
                   </>
                 )}
                 <th className="px-1 py-2"></th>
@@ -1450,9 +1467,11 @@ function GrilleLignesBureau(props: ProprietesGrille) {
                       <div className="flex flex-wrap items-start gap-x-4 gap-y-2 px-1.5 pb-2 empty:hidden">
                         {colonnesDessous.map((c) => (
                           <div key={c.cle} className="flex flex-col gap-0.5" style={{ width: c.largeur }}>
-                            <span className="truncate text-[10.5px] uppercase tracking-wider text-attenue-texte" title={c.entete}>
-                              {colonnesDessous[0]?.cle === c.cle ? '↳ ' : ''}
-                              {c.entete}
+                            <span className="flex min-w-0 text-[10.5px] uppercase tracking-wider text-attenue-texte">
+                              <EnteteIndice
+                                texte={`${colonnesDessous[0]?.cle === c.cle ? '↳ ' : ''}${c.entete}`}
+                                cle={c.entete}
+                              />
                             </span>
                             {c.rendu(l)}
                           </div>

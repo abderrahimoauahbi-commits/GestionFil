@@ -759,6 +759,35 @@ mod tests {
     }
 
     #[test]
+    fn fenetre_d_inclus_f_exclu_trente_jours_pleins() {
+        // ARBITRAGE DU 27/10/2026 : la fenêtre est [D, F[ — D inclus, F exclu —,
+        // F = D + couverture, soit 30 jours pleins par défaut.
+        let c = calculer(2000.0, &plan_100(), &[], &reglages());
+        let p = &c.propositions[0];
+        assert_eq!(p.date_disponibilite, j(16), "D");
+        assert_eq!(p.date_fin_fenetre, j(46), "F = D + 30");
+        assert_eq!(p.dernier_jour_couvert, j(45), "F exclu : le dernier jour couvert est F − 1");
+        assert_eq!(p.jours_fenetre, 30, "30 jours pleins");
+        assert!(proche(p.plan_fenetre_kg, 3000.0), "plan de D inclus à F exclu : {}", p.plan_fenetre_kg);
+        assert_eq!(p.jour_determinant, j(45), "le dernier jour de la fenêtre est F − 1");
+        // Un arrivage le jour F est HORS de la fenêtre : il ne réduit pas le besoin.
+        let en_f = calculer(2000.0, &plan_100(), &[Arrivee { date: j(46), kg: 1000.0 }], &reglages());
+        assert!(proche(en_f.propositions[0].arrivages_fenetre_kg, 0.0));
+        assert!(proche(en_f.propositions[0].besoin_theorique_kg, p.besoin_theorique_kg));
+        // La veille de F (F − 1), il est dedans : compté dans la fenêtre, il couvre
+        // son jour, et le jour déterminant recule à F − 2 (un jour de plan de moins).
+        let veille = calculer(2000.0, &plan_100(), &[Arrivee { date: j(45), kg: 1000.0 }], &reglages());
+        let pv = &veille.propositions[0];
+        assert!(proche(pv.arrivages_fenetre_kg, 1000.0));
+        assert_eq!(pv.jour_determinant, j(44));
+        assert!(proche(pv.besoin_theorique_kg, p.besoin_theorique_kg - 100.0), "besoin {}", pv.besoin_theorique_kg);
+        // (Le jour D lui-même : l'arrivage compte dans S(D), pas dans ]D, t] —
+        // voir `arrivage_pile_a_d_compte_dans_s_de_d`.)
+        // La ligne de sécurité d'un jour t se calcule sur la même fenêtre [t, t + 30[.
+        assert!(proche(c.jours[15].securite_kg, p.securite_kg));
+    }
+
+    #[test]
     fn delai_au_dela_de_l_horizon() {
         let mut r = reglages();
         r.delai_j = 400;

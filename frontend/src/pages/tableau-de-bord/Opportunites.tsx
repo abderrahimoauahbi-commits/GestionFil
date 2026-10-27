@@ -178,8 +178,8 @@ export function Opportunites() {
                         <td className="max-w-64 truncate px-4 py-1.5 font-medium text-texte">{m.code_reference}</td>
                         <td className="px-3 py-1.5">{m.fournisseur_nom ?? '—'}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{m.delai_livraison_jours == null ? '—' : `${m.delai_livraison_jours} j`}</td>
-                        <td className={cn('px-3 py-1.5 text-right tabular-nums', (m.jours_couverture ?? 0) < 30 && 'text-danger')}>
-                          {m.jours_couverture == null ? '—' : `${fmt.nombre(m.jours_couverture, 0)} j`}
+                        <td className={cn('px-3 py-1.5 text-right tabular-nums', m.jours_couverture != null && m.jours_couverture < 30 && 'text-danger')}>
+                          {m.jours_couverture == null ? 'horizon' : `${fmt.nombre(m.jours_couverture, 0)} j`}
                         </td>
                         <td className="px-3 py-1.5">
                           <StatutBadge entite="statut_stock" code={m.statut} />

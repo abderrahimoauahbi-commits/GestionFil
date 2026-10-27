@@ -166,10 +166,16 @@ async fn ouvrir_mouvement(
 /// Seule la SORTIE est ecrite. La marchandise quitte le magasin source et n'est
 /// nulle part ailleurs : elle est en transit, et le restera jusqu'a ce que
 /// quelqu'un constate son arrivee.
+///
+/// LE FIL EN ROUTE EST UN ARRIVAGE (27/10/2026) : il part avec une DATE PREVUE
+/// DE DISPONIBILITE au magasin destinataire — celle passee ici, sinon celle deja
+/// saisie sur le transfert en preparation. Sans elle, la base refuse le depart
+/// (TRF-DATE) ; le moteur de couverture le compte a cette date.
 pub async fn expedier(
     db: &Db,
     user: &Utilisateur,
     id_transfert: &str,
+    date_disponibilite_prevue: Option<&str>,
 ) -> AppResult<ResultatTransfert> {
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -244,10 +250,12 @@ pub async fn expedier(
     sqlx::query(
         "UPDATE transfert
             SET statut = 'VALIDE',
-                date_sortie = now()
+                date_sortie = now(),
+                date_disponibilite_prevue = COALESCE(fn_jour_casablanca($2), date_disponibilite_prevue)
           WHERE id_transfert = $1",
     )
     .bind(id_transfert)
+    .bind(date_disponibilite_prevue)
     .execute(&mut *tx)
     .await?;
 

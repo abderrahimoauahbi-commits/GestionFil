@@ -3,8 +3,9 @@
  *
  * Deux choses distinctes cohabitent ici, et il faut les garder separees.
  *
- *   Le CALCUL — `v_plan_achat` — se refait a chaque lecture et ne garde aucune
- *   trace. Il repond a « que faudrait-il commander aujourd'hui ? ».
+ *   Le CALCUL — le moteur de couverture (onglet « À commander ») — se refait a
+ *   chaque lecture et ne garde aucune trace. Il repond a « que faudrait-il
+ *   commander aujourd'hui ? ».
  *
  *   Les PROPOSITIONS — la table — portent un cycle de vie : proposee, ecartee,
  *   convertie en commande. Elles repondent a « qu'a-t-on decide ? ».
@@ -19,8 +20,13 @@
  * besoin, la date limite de commande, l'urgence qui s'en deduit. Prix, devise,
  * unite et fournisseur : inchanges. L'onglet « À commander » montre le calcul ;
  * son bouton « Commander » regenere la proposition de la reference et l'ouvre
- * dans les lignes a commander. Les onglets Situation et Par fournisseur lisent
- * encore l'ancien calcul (`v_plan_achat`), fige a la generation.
+ * dans les lignes a commander.
+ *
+ * UNE SEULE SOURCE DE VERITE (27/10/2026) : l'ancien calcul (`v_plan_achat`,
+ * `v_stock_projete`) est retire. L'onglet Situation compte les references avec
+ * les NOTIONS DU MOTEUR (plan non couvert, sous la securite, couvert, a commander
+ * aujourd'hui, classe A au plan non couvert) ; Par fournisseur compte ses
+ * references au plan non couvert. Les deux sont figes a la generation du plan.
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -54,8 +60,8 @@ const MODULE = 'PLAN_ACHAT'
 
 /** Entetes de la repartition par fournisseur, dans l'ordre de la feuille. */
 const ENTETES_FRS = [
-  'Fournisseur', 'Pays', 'Devise', 'Delai', 'Refs',
-  'Quantite', 'Montant MAD', '% budget', 'TIER 1', 'Contact',
+  'Fournisseur', 'Pays', 'Devise', 'Délai', 'Refs',
+  'Quantité', 'Montant MAD', '% budget', 'TIER 1', 'Plan non couvert', 'Contact',
 ]
 
 interface Proposition extends Record<string, unknown> {
@@ -133,17 +139,21 @@ interface Equivalent extends Record<string, unknown> {
   interchangeable: number
 }
 
-/** Le plan d'achat est une LECTURE DU STOCK : ces colonnes disent pourquoi. */
+/**
+ * Les indicateurs du plan d'achat : la situation au sens du MOTEUR DE COUVERTURE
+ * (27/10/2026) et ce que les propositions ouvertes engagent.
+ */
 interface Kpi {
   /** Le moment du calcul : a la generation du plan (21/10/2026), pas a l'ouverture. */
   calcule_le?: string
   globaux: {
-    refs_en_alerte: number
-    ruptures: number
-    critiques: number
-    attention: number
-    ok: number
-    classe_a_en_alerte: number
+    /** Les references suivies par le moteur (actives, avec plan, stock ou arrivage). */
+    references: number
+    plan_non_couvert: number
+    sous_securite: number
+    couvert: number
+    a_commander_aujourdhui: number
+    classe_a_en_rupture: number
     budget_mad: number
     quantite_kg: number
     refs_a_commander: number
@@ -162,7 +172,8 @@ interface Kpi {
     quantite_kg: number
     montant_mad: number
     nb_tier1: number
-    nb_ruptures: number
+    /** Ses references au plan non couvert, au sens du moteur. */
+    nb_plan_non_couvert: number
   }[]
 }
 
@@ -670,8 +681,8 @@ export function PlanAchat() {
         </OngletContenu>
         <OngletContenu value="situation">
       {/* ---- KPI : les trois blocs de la feuille Plan_Achat -------------------
-           Tout se lit dans le STOCK. Une reference apparait ici parce que son
-           projete est passe sous son minimum, pas parce qu'on l'a saisie. ---- */}
+           La situation est celle du MOTEUR DE COUVERTURE (27/10/2026) : les
+           memes notions que l'onglet « À commander ». ---- */}
       {kpi && (
         <div className="mb-4 grid gap-3 lg:grid-cols-3">
           <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3">
@@ -684,18 +695,18 @@ export function PlanAchat() {
               )}
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
-              <span className="text-attenue-texte">Références en alerte</span>
-              <span className="text-right font-semibold tabular-nums">{kpi.refs_en_alerte}</span>
-              <span className="text-danger">Ruptures</span>
-              <span className="text-right font-semibold tabular-nums text-danger">{kpi.ruptures}</span>
-              <span className="text-danger">Critiques</span>
-              <span className="text-right tabular-nums">{kpi.critiques}</span>
-              <span className="text-alerte">Attention</span>
-              <span className="text-right tabular-nums">{kpi.attention}</span>
-              <span className="text-succes">OK</span>
-              <span className="text-right tabular-nums">{kpi.ok}</span>
-              <span className="text-attenue-texte">Classe A en alerte</span>
-              <span className="text-right font-semibold tabular-nums">{kpi.classe_a_en_alerte}</span>
+              <span className="text-attenue-texte">Références suivies</span>
+              <span className="text-right font-semibold tabular-nums">{kpi.references ?? '—'}</span>
+              <span className="text-danger" title="Une rupture est prévue sur l’horizon du plan">Plan non couvert</span>
+              <span className="text-right font-semibold tabular-nums text-danger">{kpi.plan_non_couvert ?? '—'}</span>
+              <span className="text-alerte" title="Le solde passe sous la sécurité, sans rupture">Sous la sécurité</span>
+              <span className="text-right tabular-nums">{kpi.sous_securite ?? '—'}</span>
+              <span className="text-succes" title="Ni rupture ni passage sous la sécurité">Couvert</span>
+              <span className="text-right tabular-nums">{kpi.couvert ?? '—'}</span>
+              <span className="text-danger" title="Date limite de commande atteinte ou dépassée">À commander aujourd’hui</span>
+              <span className="text-right font-semibold tabular-nums">{kpi.a_commander_aujourdhui ?? '—'}</span>
+              <span className="text-attenue-texte">Classe A au plan non couvert</span>
+              <span className="text-right font-semibold tabular-nums">{kpi.classe_a_en_rupture ?? '—'}</span>
             </div>
           </div>
 
@@ -771,7 +782,7 @@ export function PlanAchat() {
                         key={t}
                         className={cn(
                           'px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte',
-                          i >= 3 && i <= 8 ? 'text-right' : 'text-left',
+                          i >= 3 && i <= 9 ? 'text-right' : 'text-left',
                         )}
                       >
                         {t}
@@ -798,6 +809,13 @@ export function PlanAchat() {
                         <td className="px-2.5 py-1.5 text-right">
                           {f.nb_tier1 > 0 ? <Badge ton="danger">{f.nb_tier1}</Badge> : <span className="text-attenue-texte">—</span>}
                         </td>
+                        <td className="px-2.5 py-1.5 text-right">
+                          {(f.nb_plan_non_couvert ?? 0) > 0 ? (
+                            <Badge ton="danger">{f.nb_plan_non_couvert}</Badge>
+                          ) : (
+                            <span className="text-attenue-texte">—</span>
+                          )}
+                        </td>
                         <td className="px-2.5 py-1.5 text-[11px] text-attenue-texte">{f.contact_principal ?? '—'}</td>
                       </tr>
                     )
@@ -814,7 +832,7 @@ export function PlanAchat() {
                       {fmt.mad((qKpi.data?.fournisseurs ?? []).reduce((s, f) => s + f.montant_mad, 0))}
                     </td>
                     <td className="px-2.5 py-1.5 text-right tabular-nums">100 %</td>
-                    <td colSpan={2} />
+                    <td colSpan={3} />
                   </tr>
                 </tbody>
               </table>

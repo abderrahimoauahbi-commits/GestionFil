@@ -92,7 +92,8 @@ interface MoisRisque {
   entrees_kg: number
   stock_fin_kg: number
   stock_min_kg: number
-  statut: 'COUVERT' | 'TENDU' | 'RUPTURE'
+  /** L'état du mois au moteur de couverture (27/10/2026). */
+  statut: 'COUVERT' | 'SOUS_SECURITE' | 'PLAN_NON_COUVERT'
 }
 
 interface Risque {
@@ -642,8 +643,8 @@ export function Cockpit() {
           <CarteTitre>Tenue du plan de production</CarteTitre>
           <div className="flex flex-wrap items-center gap-3 text-[11px] text-attenue-texte">
             <Legende ton="bg-succes/25" texte="couvert" />
-            <Legende ton="bg-alerte" texte="tendu : sous le stock de sécurité" />
-            <Legende ton="bg-danger" texte="rupture" />
+            <Legende ton="bg-alerte" texte="sous la sécurité" />
+            <Legende ton="bg-danger" texte="plan non couvert" />
           </div>
         </CarteEntete>
         <CarteCorps className="p-0">
@@ -656,8 +657,8 @@ export function Cockpit() {
           ) : risques.length === 0 ? (
             <div className="flex items-center gap-2 p-4 text-sm text-succes">
               <CheckCircle2 className="size-4 shrink-0" />
-              Aucune reference ne descend sous son stock de securite sur l'horizon du plan, commandes
-              en cours comprises.
+              Aucune référence ne passe sous sa sécurité sur l’horizon du plan, arrivages comptés à leur
+              date compris (moteur de couverture).
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -706,14 +707,14 @@ export function Cockpit() {
                       {r.mois.map((m) => (
                         <td key={m.annee_mois} className="px-0.5 py-1.5">
                           <Infobulle
-                            contenu={`${m.annee_mois} · besoin ${fmt.nombre(m.besoin_kg, 0)} kg · entrees ${fmt.nombre(m.entrees_kg, 0)} kg · fin de mois ${fmt.nombre(m.stock_fin_kg, 0)} kg (mini ${fmt.nombre(m.stock_min_kg, 0)})`}
+                            contenu={`${m.annee_mois} · plan ${fmt.nombre(m.besoin_kg, 0)} kg · arrivages ${fmt.nombre(m.entrees_kg, 0)} kg · fin de mois ${fmt.nombre(m.stock_fin_kg, 0)} kg (sécurité ${fmt.nombre(m.stock_min_kg, 0)})`}
                           >
                             <div
                               className={cn(
                                 'mx-auto h-6 w-full rounded-[3px]',
-                                m.statut === 'RUPTURE'
+                                m.statut === 'PLAN_NON_COUVERT'
                                   ? 'bg-danger'
-                                  : m.statut === 'TENDU'
+                                  : m.statut === 'SOUS_SECURITE'
                                     ? 'bg-alerte'
                                     // Couvert reste en retrait : le regard doit
                                     // tomber sur les mois tendus et en rupture.
@@ -848,12 +849,15 @@ function phraseDuJour(
     )
   }
 
-  const alerte = n('nb_ruptures') + n('nb_critiques')
+  // LE MOTEUR DE COUVERTURE (27/10/2026) : une rupture prevue sur l'horizon du
+  // plan, et ce qu'il faut commander aujourd'hui pour la couvrir.
+  const alerte = n('nb_plan_non_couvert')
   if (alerte > 0) {
     bouts.push(
-      `${alerte} référence(s) sur ${n('nb_references')} ne tiendront pas le délai d'approvisionnement` +
+      `${alerte} référence(s) sur ${n('nb_references')} ont un plan non couvert sur l'horizon` +
+        (n('nb_a_commander_aujourdhui') > 0 ? `, ${n('nb_a_commander_aujourdhui')} à commander aujourd'hui` : '') +
         (n('budget_a_engager_mad') > 0
-          ? ` ; ${fmt.compact(n('budget_a_engager_mad'))} MAD à engager pour les couvrir.`
+          ? ` ; ${fmt.compact(n('budget_a_engager_mad'))} MAD de propositions à engager.`
           : '.'),
     )
   } else {
@@ -1117,6 +1121,7 @@ export function TableauDeBord() {
 /* Concentration de la valeur et dependance fournisseur                        */
 /* -------------------------------------------------------------------------- */
 
+/** Une ligne du stock projeté (moteur de couverture) : ici, pour la valeur du stock. */
 interface LigneProjetee {
   code_reference: string
   designation: string | null
@@ -1124,7 +1129,6 @@ interface LigneProjetee {
   classe_abc: string | null
   statut: string | null
   jours_couverture: number | null
-  stock_projete_kg: number | null
   fournisseur_nom: string | null
 }
 
@@ -1256,10 +1260,11 @@ function ChiffresCles() {
   if (!k) return null
 
   const n = (c: string) => Number(k[c] ?? 0)
-  const ok = n('nb_ok')
-  const attention = n('nb_attention')
-  const critiques = n('nb_critiques')
-  const ruptures = n('nb_ruptures')
+  // L'ETAT DES REFERENCES AU MOTEUR DE COUVERTURE (27/10/2026).
+  const couvert = n('nb_couvert')
+  const sousSecurite = n('nb_sous_securite')
+  const planNonCouvert = n('nb_plan_non_couvert')
+  const aujourdhui = n('nb_a_commander_aujourdhui')
   const bloquants = n('nb_controles_bloquants') + n('nb_controles_critiques')
 
   return (
@@ -1294,7 +1299,7 @@ function ChiffresCles() {
           libelle="Valeur du stock"
           valeur={fmt.compact(n('valeur_stock_mad'))}
           unite="MAD"
-          precision={`${fmt.nombre(n('nb_references'), 0)} références · ${ok} au vert`}
+          precision={`${fmt.nombre(n('nb_references'), 0)} références suivies · ${couvert} couvertes`}
           ton="primaire"
           surClic={() => naviguer('/valorisation')}
           aide="Au CMUP, tous magasins confondus."
@@ -1310,17 +1315,17 @@ function ChiffresCles() {
           ton="primaire"
           surClic={() => naviguer('/plan-achat')}
         />
-        {/* LES RUPTURES ET LES CRITIQUES DANS LE MEME CHIFFRE : ce sont les deux
-            crans de la meme echelle, et les separer en deux tuiles obligeait a
-            les additionner de tete pour savoir combien de references vont mal. */}
+        {/* LE PLAN NON COUVERT AU MOTEUR DE COUVERTURE (27/10/2026) : une rupture
+            prevue sur l'horizon du plan ; la precision dit ce qui est a commander
+            aujourd'hui et ce qui passe sous la securite sans rupture. */}
         <CarteStat
           Icone={TrendingDown}
-          libelle="En alerte"
-          valeur={fmt.nombre(ruptures + critiques, 0)}
-          precision={`${ruptures} rupture(s) · ${critiques} critique(s) · ${attention} en attention`}
-          ton={ruptures > 0 ? 'danger' : critiques > 0 ? 'alerte' : 'succes'}
+          libelle="Plan non couvert"
+          valeur={fmt.nombre(planNonCouvert, 0)}
+          precision={`${aujourdhui} à commander aujourd’hui · ${sousSecurite} sous la sécurité`}
+          ton={planNonCouvert > 0 ? 'danger' : sousSecurite > 0 ? 'alerte' : 'succes'}
           surClic={() => naviguer('/plan-achat')}
-          aide="Stock + commandes fiables - demande pendant le délai d'approvisionnement."
+          aide="Moteur de couverture : le plan projeté jour par jour, stock compté et arrivages à leur date ; une rupture prévue sur l’horizon du plan."
         />
         <CarteStat
           Icone={Sparkles}
@@ -1347,39 +1352,28 @@ function ChiffresCles() {
           {bloquants} contrôle(s) en anomalie
           {n('nb_controles_bloquants') > 0 && ` dont ${n('nb_controles_bloquants')} bloquant(s)`}
         </button>
-        <button
-          type="button"
-          onClick={() => naviguer('/stock')}
-          className="inline-flex items-center gap-1.5 hover:text-texte"
-        >
-          <Layers className="size-3.5" />
-          {n('nb_sur_stock')} référence(s) en sur-stock
-        </button>
-        {n('nb_ecart_majeur') > 0 && (
+        {n('nb_classe_a_en_rupture') > 0 && (
           <button
             type="button"
             onClick={() => naviguer('/stock')}
-            className="inline-flex items-center gap-1.5 font-medium text-alerte hover:text-texte"
+            className="inline-flex items-center gap-1.5 font-medium text-danger hover:text-texte"
           >
-            <TrendingDown className="size-3.5" />
-            {n('nb_ecart_majeur')} écart(s) à vérifier
+            <Layers className="size-3.5" />
+            {n('nb_classe_a_en_rupture')} référence(s) de classe A au plan non couvert
           </button>
         )}
       </div>
 
-      {ok + attention + critiques + ruptures > 0 && (
+      {couvert + sousSecurite + planNonCouvert > 0 && (
         <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3">
           <p className="mb-2 text-[11px] uppercase tracking-wide text-attenue-texte">
             État du catalogue suivi
           </p>
           <BarreRepartition
             parts={[
-              { libelle: 'Au vert', valeur: ok, ton: 'succes' },
-              { libelle: 'En attention', valeur: attention, ton: 'alerte' },
-              { libelle: 'Critique', valeur: critiques, ton: 'grave' },
-              // Les ruptures manquaient : les trois segments ne faisaient pas le
-              // total des references suivies.
-              { libelle: 'Rupture', valeur: ruptures, ton: 'danger' },
+              { libelle: 'Couvert', valeur: couvert, ton: 'succes' },
+              { libelle: 'Sous la sécurité', valeur: sousSecurite, ton: 'alerte' },
+              { libelle: 'Plan non couvert', valeur: planNonCouvert, ton: 'danger' },
             ]}
           />
         </div>

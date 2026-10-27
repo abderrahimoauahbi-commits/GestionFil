@@ -56,11 +56,18 @@ interface LigneStock extends Record<string, unknown> {
   bobines: number | null
   quarantaine_kg: number | null
   disponible_kg: number | null
-  encours_kg: number | null
-  besoin_12m_kg: number | null
-  stock_projete_kg: number | null
+  /* L'ETAT DE COUVERTURE VIENT DU MOTEUR (27/10/2026, une seule source) : plus
+     d'en-cours « fiable », de besoin 12 mois ni de stock projeté de l'ancien
+     calcul ; les arrivages comptés à leur date, le plan sur l'horizon, le plan non
+     couvert, l'état (PLAN_NON_COUVERT, SOUS_SECURITE, COUVERT) et les jours
+     couverts jusqu'à la première rupture (null : tout l'horizon). */
+  arrivages_comptes_kg: number | null
+  plan_horizon_kg: number | null
+  plan_non_couvert_kg: number | null
+  premiere_rupture: string | null
   stock_min_kg: number | null
-  conso_mensuelle_kg: number | null
+  /** Le plan ramené à un mois de 30 jours, tel que le moteur le consomme (27/10/2026). */
+  plan_mois_kg: number | null
   jours_couverture: number | null
   delai_livraison_jours: number | null
   statut: string | null
@@ -72,7 +79,9 @@ interface LigneStock extends Record<string, unknown> {
   prix_catalogue_kg: number | null
   devise: string | null
   valeur_mad: number | null
-  a_commander_kg: number | null
+  /** La première proposition du moteur (kg), et si sa date limite est atteinte. */
+  qte_a_commander_kg: number | null
+  a_commander_aujourdhui: boolean | null
   derniere_sortie: string | null
   jours_sans_mouvement: number | null
   nb_equivalents: number | null
@@ -176,8 +185,8 @@ export function EtatStock() {
       magasins: s((l) => l.magasins_kg),
       machines: s((l) => l.machines_kg),
       valeur: s((l) => l.valeur_mad),
-      commander: s((l) => l.a_commander_kg),
-      ruptures: filtrees.filter((l) => l.statut === 'RUPTURE').length,
+      commander: s((l) => l.qte_a_commander_kg),
+      ruptures: filtrees.filter((l) => l.statut === 'PLAN_NON_COUVERT').length,
       sousMin: filtrees.filter((l) => l.sous_minimum).length,
     }
   }, [filtrees])
@@ -361,7 +370,7 @@ export function EtatStock() {
           )}
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {['', 'RUPTURE', 'CRITIQUE', 'ATTENTION', 'OK'].map((s) => (
+          {['', 'PLAN_NON_COUVERT', 'SOUS_SECURITE', 'COUVERT'].map((s) => (
             <button
               key={s || 'tous'}
               type="button"
@@ -572,7 +581,7 @@ function TableauLarge({
                 {nb(l.stock_min_kg)}
               </td>
               <td className="px-2 py-1.5 text-right text-attenue-texte">
-                {nb(l.jours_couverture, 0)}
+                {l.jours_couverture == null ? (l.statut ? 'horizon' : '—') : nb(l.jours_couverture, 0)}
               </td>
               <td className="px-2 py-1.5 text-center">
                 <div className="flex flex-col items-center gap-0.5">
@@ -592,10 +601,10 @@ function TableauLarge({
               <td
                 className={cn(
                   'px-2 py-1.5 text-right',
-                  (l.a_commander_kg ?? 0) > 0 ? 'font-medium text-danger' : 'text-attenue-texte',
+                  l.a_commander_aujourdhui ? 'font-medium text-danger' : 'text-attenue-texte',
                 )}
               >
-                {(l.a_commander_kg ?? 0) > 0 ? nb(l.a_commander_kg) : ''}
+                {(l.qte_a_commander_kg ?? 0) > 0 ? nb(l.qte_a_commander_kg) : ''}
               </td>
             </tr>
             {lotsDe === l.code_reference && (
@@ -736,13 +745,19 @@ function ListeTelephone({
                 )}
                 <D t="Disponible" v={`${nb(l.disponible_kg)} kg`} />
                 <D t="Stock minimum" v={`${nb(l.stock_min_kg)} kg`} />
-                <D t="Couverture" v={`${nb(l.jours_couverture, 0)} j`} />
-                <D t="Conso mensuelle" v={`${nb(l.conso_mensuelle_kg)} kg`} />
-                <D t="En commande" v={`${nb(l.encours_kg)} kg`} />
+                <D
+                  t="Couverture"
+                  v={l.jours_couverture == null ? 'tout l’horizon' : `${nb(l.jours_couverture, 0)} j`}
+                />
+                <D t="Plan / mois" v={`${nb(l.plan_mois_kg)} kg`} />
+                <D t="Arrivages comptés" v={`${nb(l.arrivages_comptes_kg)} kg`} />
+                {(l.plan_non_couvert_kg ?? 0) > 0.05 && (
+                  <D t="Plan non couvert" v={`${nb(l.plan_non_couvert_kg)} kg`} alerte />
+                )}
                 <D t="CMUP" v={`${nb(l.cmup_mad, 2)} MAD`} />
                 <D t="Valeur" v={`${nb(l.valeur_mad)} MAD`} />
-                {(l.a_commander_kg ?? 0) > 0 && (
-                  <D t="A commander" v={`${nb(l.a_commander_kg)} kg`} alerte />
+                {(l.qte_a_commander_kg ?? 0) > 0 && (
+                  <D t="À commander" v={`${nb(l.qte_a_commander_kg)} kg`} alerte={!!l.a_commander_aujourdhui} />
                 )}
                 {l.jours_sans_mouvement != null && (
                   <D t="Sans mouvement" v={`${l.jours_sans_mouvement} j`} />
@@ -793,9 +808,9 @@ function exporter(lignes: LigneStock[], magasins: { code: string; nom: string }[
     'Code', 'Designation', 'Categorie', 'Fournisseur', 'Unite',
     'Stock global kg', ...magasins.map((m) => `${m.nom} kg`), 'Machines kg', 'Machines bobines',
     'Palettes', 'Bobines', 'Kg par palette',
-    'Disponible kg', 'Quarantaine kg', 'En commande kg', 'Besoin 12m kg', 'Stock projete kg',
-    'Stock min kg', 'Conso mens. kg', 'Couverture j', 'Délai j', 'Statut', 'Sous minimum', 'ABC', 'XYZ',
-    'CMUP MAD', 'Prix catalogue', 'Devise', 'Valeur MAD', 'A commander kg',
+    'Disponible kg', 'Quarantaine kg', 'Arrivages comptés kg', 'Plan horizon kg', 'Plan non couvert kg',
+    'Stock min kg', 'Plan / mois kg', 'Couverture j', 'Délai j', 'État', 'Sous minimum', 'ABC', 'XYZ',
+    'CMUP MAD', 'Prix catalogue', 'Devise', 'Valeur MAD', 'À commander kg',
     'Dernière sortie', 'Jours sans mvt', 'Equivalents',
   ]
   const cellule = (v: unknown) =>
@@ -807,10 +822,10 @@ function exporter(lignes: LigneStock[], magasins: { code: string; nom: string }[
       l.stock_global_kg, ...magasins.map((m) => l.par_magasin?.[m.code] ?? 0),
       l.machines_kg, l.machines_bobines,
       l.palettes, l.bobines, l.kg_par_palette,
-      l.disponible_kg, l.quarantaine_kg, l.encours_kg, l.besoin_12m_kg, l.stock_projete_kg,
-      l.stock_min_kg, l.conso_mensuelle_kg, l.jours_couverture, l.delai_livraison_jours,
+      l.disponible_kg, l.quarantaine_kg, l.arrivages_comptes_kg, l.plan_horizon_kg, l.plan_non_couvert_kg,
+      l.stock_min_kg, l.plan_mois_kg, l.jours_couverture, l.delai_livraison_jours,
       l.statut, l.sous_minimum ? 'OUI' : 'NON', l.classe_abc, l.classe_xyz,
-      l.cmup_mad, l.prix_catalogue_kg, l.devise, l.valeur_mad, l.a_commander_kg,
+      l.cmup_mad, l.prix_catalogue_kg, l.devise, l.valeur_mad, l.qte_a_commander_kg,
       l.derniere_sortie?.slice(0, 10), l.jours_sans_mouvement, l.nb_equivalents,
     ]
       .map(cellule)

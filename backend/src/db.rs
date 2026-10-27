@@ -110,6 +110,31 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // UNE SEULE SOURCE DE VERITE (27/10/2026) : l'ancien calcul du besoin et de
+        // la projection est retire (v_stock_projete, v_plan_achat, v_encours_fiable,
+        // v_besoin_horizon, v_risque_*, v_cockpit_stock…), les vues qui le lisaient
+        // sont redefinies sur v_stock_reference, C05 et C25 passent au moteur, C27
+        // et C49 sont retires, C66 nait ; P_MrpInclureStockMachine est supprime.
+        "2026-10-27e_source_unique_moteur.sql",
+        "SELECT to_regclass('public.v_stock_reference') IS NOT NULL
+            AND to_regclass('public.v_stock_projete') IS NULL
+            AND to_regclass('public.v_plan_achat') IS NULL
+            AND to_regclass('public.v_ctl_c66') IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_MrpInclureStockMachine')
+            AND EXISTS (SELECT 1 FROM champ_configurable WHERE module = 'COCKPIT' AND champ = 'nb_plan_non_couvert')
+            AND EXISTS (SELECT 1 FROM champ_configurable WHERE module = 'STOCK' AND champ = 'plan_mois_kg')",
+    ),
+    (
+        // Le fil en route est un arrivage (27/10/2026) : la date prevue de
+        // disponibilite du transfert, obligatoire a l'expedition (TRF-DATE),
+        // revisable tant qu'il roule, journalisee.
+        "2026-10-27d_transit_date_disponibilite.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'transfert' AND column_name = 'date_disponibilite_prevue')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_transfert_date_disponibilite')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_audit_transfert_date')",
+    ),
+    (
         // « Commander » branche sur le moteur de couverture (27/10/2026) : la date
         // limite de commande sur la proposition d'achat, les kilos hors
         // couverture des bons non valides et apres l'horizon declares.
@@ -217,12 +242,15 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
         // L'OF, lot B (22/10/2026) : les vues du besoin par OF, les colonnes du
         // besoin du plan / au-dela du plan, C64. L'ajustement des OF dans le besoin
         // est retire par 2026-10-27b (le plan seul) : le temoin ne l'exige plus.
+        // Ses vues du besoin par OF (vides) et v_stock_projete sont retirees par
+        // 2026-10-27e : passee celle-ci, seul C64 reste a temoigner.
         "2026-10-22c_besoin_of.sql",
-        "SELECT to_regclass('public.v_besoin_of_mois') IS NOT NULL
-            AND to_regclass('public.v_besoin_horizon_of') IS NOT NULL
-            AND to_regclass('public.v_ctl_c64') IS NOT NULL
-            AND EXISTS (SELECT 1 FROM information_schema.columns
-                         WHERE table_name = 'v_stock_projete' AND column_name = 'besoin_au_dela_12m_kg')",
+        "SELECT to_regclass('public.v_ctl_c64') IS NOT NULL
+            AND (to_regclass('public.v_stock_reference') IS NOT NULL
+                 OR (to_regclass('public.v_besoin_of_mois') IS NOT NULL
+                     AND to_regclass('public.v_besoin_horizon_of') IS NOT NULL
+                     AND EXISTS (SELECT 1 FROM information_schema.columns
+                                  WHERE table_name = 'v_stock_projete' AND column_name = 'besoin_au_dela_12m_kg')))",
     ),
     (
         // L'OF, lot A (22/10/2026) : cycle garde en base, consommation reelle
@@ -490,9 +518,14 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns
                          WHERE table_schema = 'public' AND table_name = 'machine_decision_ligne'
                            AND column_name = 'niveau_ecart')
-            AND EXISTS (SELECT 1 FROM information_schema.columns
-                         WHERE table_schema = 'public' AND table_name = 'v_stock_physique'
-                           AND column_name = 'stock_mrp_net_kg')
+            -- Le stock MRP net et v_besoin_horizon sont retires par 2026-10-27e
+            -- (le moteur de couverture) : passee celle-ci, ils ne temoignent plus.
+            AND (to_regclass('public.v_stock_reference') IS NOT NULL
+                 OR (EXISTS (SELECT 1 FROM information_schema.columns
+                              WHERE table_schema = 'public' AND table_name = 'v_stock_physique'
+                                AND column_name = 'stock_mrp_net_kg')
+                     AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_besoin_horizon'
+                                                          AND definition LIKE '%reste_mois%')))
             AND EXISTS (SELECT 1 FROM information_schema.columns
                          WHERE table_schema = 'public' AND table_name = 'import_reception_lignes'
                            AND column_name = 'derogation_ecart')
@@ -500,9 +533,7 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                          WHERE table_schema = 'public' AND table_name = 'reception_ajustements_cmup'
                            AND column_name = 'origine')
             AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c44')
-            AND EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_DechetSeuilValiderKg')
-            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_besoin_horizon'
-                                                 AND definition LIKE '%reste_mois%')",
+            AND EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_DechetSeuilValiderKg')",
     ),
     (
         // La derogation de lot bloque : le service lit date_consommation.
@@ -740,8 +771,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     ),
     (
         // Plan d'achat : C28 au libelle du reglage, brouillons d'import hors en-cours.
+        // v_encours_fiable est retiree par 2026-10-27e (le moteur de couverture).
         "2026-10-09o_plan_detail.sql",
-        "SELECT position('BROUILLON' IN pg_get_viewdef('v_encours_fiable'::regclass)) > 0",
+        "SELECT to_regclass('public.v_stock_reference') IS NOT NULL
+             OR COALESCE((SELECT position('BROUILLON' IN pg_get_viewdef(c.oid)) > 0
+                            FROM pg_class c WHERE c.relname = 'v_encours_fiable' AND c.relkind = 'v'), false)",
     ),
     (
         // L'avoir d'import : origine du journal du dossier, retours soldes.

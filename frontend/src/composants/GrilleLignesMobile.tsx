@@ -44,6 +44,11 @@ import {
 } from '../lib/conditionnement'
 import { Badge, Bouton, Champ, Etiq, Selecteur } from './ui/base'
 import { cn, fmt } from '../lib/utils'
+import { libelleStatut } from '../lib/statuts'
+
+/** Les états d'une référence au moteur de couverture (27/10/2026). */
+const ETATS_MOTEUR = ['PLAN_NON_COUVERT', 'SOUS_SECURITE', 'COUVERT']
+
 
 export function GrilleLignesMobile({
   codeFournisseur,
@@ -125,7 +130,8 @@ export function GrilleLignesMobile({
       detail:
         [
           r.designation,
-          r.stock_projete_kg != null ? `projeté ${fmt.nombre(r.stock_projete_kg, 0)} kg` : null,
+          // L'état au moteur de couverture (27/10/2026) : la 1re rupture du plan.
+          r.premiere_rupture ? `rupture le ${fmt.date(r.premiere_rupture)}` : null,
           etranger ? `habituellement chez ${r.fournisseur_nom ?? r.code_fournisseur}` : null,
         ]
           .filter(Boolean)
@@ -133,10 +139,19 @@ export function GrilleLignesMobile({
       mention:
         suggere > 0
           ? `plan : ${fmt.nombre(suggere, 0)} kg`
-          : r.statut_stock && r.statut_stock !== 'OK'
-            ? r.statut_stock
+          : r.statut_stock && r.statut_stock !== 'COUVERT'
+            ? // Un état du moteur se traduit ; une mention libre (le stock du magasin
+              // d'une sortie, « RUPTURE » quand il est vide) passe telle quelle.
+              ETATS_MOTEUR.includes(r.statut_stock)
+              ? libelleStatut('statut_stock', r.statut_stock)
+              : r.statut_stock
             : undefined,
-      ton: suggere > 0 ? 'primaire' : r.statut_stock === 'RUPTURE' ? 'alerte' : 'neutre',
+      ton:
+        suggere > 0
+          ? 'primaire'
+          : r.statut_stock === 'PLAN_NON_COUVERT' || r.statut_stock === 'RUPTURE'
+            ? 'alerte'
+            : 'neutre',
       desactivee: prises.has(r.code_reference),
       charge: r,
     }

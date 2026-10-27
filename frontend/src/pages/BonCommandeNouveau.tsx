@@ -96,8 +96,8 @@ interface RefCommandable extends Record<string, unknown> {
   classe_abc: string | null
   moq_kg: number | null
   multiple_achat_kg: number | null
-  stock_projete_kg: number | null
-  stock_min_kg: number | null
+  /** L'état au moteur de couverture (27/10/2026) : 1re rupture, jours couverts, état. */
+  premiere_rupture: string | null
   besoin_12m_kg: number | null
   deja_commande_kg: number | null
   jours_couverture: number | null

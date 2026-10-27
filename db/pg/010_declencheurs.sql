@@ -465,6 +465,46 @@ CREATE TRIGGER trg_transition_transfert
 BEFORE UPDATE OF statut ON transfert FOR EACH ROW
 EXECUTE FUNCTION fn_trg_transition_transfert();
 
+-- TRF-DATE (arbitrage du 27/10/2026, migration 2026-10-27d) : le fil en route
+-- est un arrivage, il porte sa date prevue de disponibilite au magasin
+-- destinataire. Obligatoire a l'expedition (passage en VALIDE), revisable tant
+-- que le transfert est en route, jamais apres sa reception ni sur un transfert
+-- abandonne ; en route, elle se revise, elle ne s'efface pas.
+-- (Sa revision est journalisee par `trg_audit_transfert_date`, qui reste dans la
+-- migration : `fn_trg_audit_modification` n'existe que par les migrations
+-- 2026-10-08d et suivantes.)
+CREATE OR REPLACE FUNCTION fn_trg_transfert_date_disponibilite() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    -- L'expédition (passage en VALIDE) exige la date.
+    IF NEW.statut = 'VALIDE'
+       AND (TG_OP = 'INSERT' OR OLD.statut IS DISTINCT FROM 'VALIDE')
+       AND NEW.date_disponibilite_prevue IS NULL THEN
+        RAISE EXCEPTION 'TRF-DATE : le transfert % ne part pas sans date prévue de disponibilité au magasin destinataire. Saisissez-la avant d''expédier.',
+            NEW.numero_transfert;
+    END IF;
+
+    IF TG_OP = 'UPDATE'
+       AND NEW.date_disponibilite_prevue IS DISTINCT FROM OLD.date_disponibilite_prevue THEN
+        -- Reçu ou abandonné : la date est figée.
+        IF OLD.statut NOT IN ('BROUILLON', 'VALIDE') THEN
+            RAISE EXCEPTION 'TRF-DATE : le transfert % est %, sa date prévue de disponibilité ne se révise plus (seulement tant qu''il est en route).',
+                NEW.numero_transfert, lower(OLD.statut);
+        END IF;
+        -- En route, on la révise, on ne l'efface pas.
+        IF OLD.statut = 'VALIDE' AND NEW.date_disponibilite_prevue IS NULL THEN
+            RAISE EXCEPTION 'TRF-DATE : le transfert % est en route : sa date prévue de disponibilité se révise, elle ne s''efface pas.',
+                NEW.numero_transfert;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_transfert_date_disponibilite
+    BEFORE INSERT OR UPDATE ON transfert
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_transfert_date_disponibilite();
+
 CREATE OR REPLACE FUNCTION fn_trg_transition_inventaire() RETURNS trigger AS $$
 BEGIN
     IF OLD.statut <> NEW.statut

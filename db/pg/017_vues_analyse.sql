@@ -22,14 +22,17 @@
 --
 -- Une reference AZ traitee comme une AX se met en rupture ; une CZ traitee
 -- comme une AX immobilise du capital pour rien. C'est tout l'enjeu.
+--
+-- 27/10/2026 : une seule source de verite, le moteur de couverture (migration
+-- 2026-10-27e). La vue lit v_stock_reference (lecture neutre) au lieu de
+-- v_stock_projete : le statut et les jours de couverture sont retires ; ceux du
+-- moteur s'ajoutent cote serveur.
 DROP VIEW IF EXISTS v_analyse_abc_xyz CASCADE;
 CREATE VIEW v_analyse_abc_xyz AS
 WITH valeur AS (
     SELECT sp.code_reference,
            sp.designation,
            sp.fournisseur_nom,
-           sp.statut,
-           sp.jours_couverture,
            sp.conso_mensuelle_kg,
            sp.cmup_mad,
            sp.valeur_totale_mad,
@@ -38,7 +41,7 @@ WITH valeur AS (
            r.date_dernier_abc,
            ROUND(COALESCE(sp.conso_mensuelle_kg, 0) * 12
                  * COALESCE(sp.cmup_mad, 0), 2)                AS valeur_conso_annuelle_mad
-      FROM v_stock_projete sp
+      FROM v_stock_reference sp
       JOIN reference r ON r.code_reference = sp.code_reference
      WHERE r.actif = 1
 ),

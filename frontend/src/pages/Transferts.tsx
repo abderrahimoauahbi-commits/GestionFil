@@ -7,7 +7,16 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, PackageCheck, Pencil, Plus, Printer, Truck } from 'lucide-react'
+import {
+  ArrowRight,
+  CalendarClock,
+  CornerDownRight,
+  PackageCheck,
+  Pencil,
+  Plus,
+  Printer,
+  Truck,
+} from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
@@ -21,7 +30,7 @@ import {
 } from '../composants/PanneauFiltres'
 
 import { DataTable, type ColonneDT } from '../composants/DataTable'
-import { Alerte, Badge, Bouton, Chargement } from '../composants/ui/base'
+import { Alerte, Badge, Bouton, Champ, Chargement } from '../composants/ui/base'
 import { useConfirmation } from '../composants/ui/surcouches'
 import { fmt } from '../lib/utils'
 import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
@@ -44,9 +53,25 @@ interface Transfert extends Record<string, unknown> {
   date_reception_dest: string | null
   quantite_totale_kg: number
   jours_en_transit: number | null
+  /** Date prevue de disponibilite au destinataire ('AAAA-MM-JJ'), exigee a l'expedition (27/10/2026). */
+  date_disponibilite_prevue?: string | null
+  /** Renseigne seulement en route (VALIDE) et date depassee. */
+  jours_de_retard_disponibilite?: number | null
+  /** Verrou optimiste : la revision de la date l'exige. */
+  version?: number
   /** Ses references : un inventaire tournant ou cible ne gele qu'elles (2026-10-24a). */
   references?: string[] | null
 }
+
+/** La saisie de la date prevue, ouverte SUR LA LIGNE (jamais en fenetre surgissante). */
+interface SaisieDate {
+  id: string
+  mode: 'expedier' | 'reviser'
+  valeur: string
+}
+
+/** Le jour de Casablanca (20/10/2026), au format du champ date. */
+const aujourdhui = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Africa/Casablanca' })
 
 /* Des axes que l'on choisit, pas de comparateur a saisir : les valeurs
    des listes sortent des lignes affichees. */
@@ -65,6 +90,7 @@ export function Transferts() {
   const confirmation = useConfirmation()
   const naviguer = useNavigate()
   const [statut, setStatut] = useState('')
+  const [saisieDate, setSaisieDate] = useState<SaisieDate | null>(null)
   const filtres = useFiltres(CHAMPS_TRANSFERT)
 
   const q = useQuery({
@@ -72,10 +98,22 @@ export function Transferts() {
     queryFn: ({ signal }) => api.get<Transfert[]>('/api/transferts', { signal }),
   })
 
+  /* LE FIL EN ROUTE COUVRE LE PLAN A SA DATE PREVUE (27/10/2026) : expedier,
+     recevoir ou reviser la date deplace la couverture du plan d'achat. */
+  const rafraichirCouverture = () => {
+    void qc.invalidateQueries({ queryKey: ['couverture'] })
+    void qc.invalidateQueries({ queryKey: ['plan-achat-propositions'] })
+    void qc.invalidateQueries({ queryKey: ['plan-achat-kpi'] })
+    void qc.invalidateQueries({ queryKey: ['plan-achat-detail'] })
+    // Le bon imprimable relit l'en-tete (date prevue, retard).
+    void qc.invalidateQueries({ queryKey: ['dossier-transfert'] })
+  }
+
   const rafraichir = () => {
     void qc.invalidateQueries({ queryKey: ['transferts'] })
     void qc.invalidateQueries({ queryKey: ['stock-projete'] })
     void qc.invalidateQueries({ queryKey: ['mouvements'] })
+    rafraichirCouverture()
   }
 
   const echec = (e: unknown) =>
@@ -92,14 +130,18 @@ export function Transferts() {
 
   /** Etape 1, au magasin SOURCE : la marchandise part. */
   const expedier = useMutation({
-    mutationFn: (id: string) =>
+    /* LA DATE PREVUE DE DISPONIBILITE part avec l'expedition (27/10/2026) :
+       celle saisie sur la ligne, ou celle du brouillon. Sans date, la base
+       refuse (TRF-DATE). */
+    mutationFn: ({ id, date }: { id: string; date: string | null }) =>
       api.post<{
         quantite_totale_kg: number
         valeur_totale_mad: number
         mouvement: string
         magasin_destinataire: string | null
-      }>(`/api/transferts/${id}/expedier`),
+      }>(`/api/transferts/${id}/expedier`, date ? { date_disponibilite_prevue: date } : undefined),
     onSuccess: (r) => {
+      setSaisieDate(null)
       toast.success(`Expedie : ${fmt.nombre(r.quantite_totale_kg, 2)} kg partis.`, {
         description:
           `La marchandise est EN TRANSIT et n'est comptee dans aucun magasin. ` +
@@ -109,8 +151,49 @@ export function Transferts() {
       })
       rafraichir()
     },
-    onError: echec,
+    onError: (e, { id }) => {
+      // Sans date, la base refuse : la saisie s'ouvre sur la ligne.
+      if (e instanceof ErreurApi && e.estRegle('TRF-DATE'))
+        setSaisieDate((s) => (s?.id === id ? s : { id, mode: 'expedier', valeur: '' }))
+      echec(e)
+    },
   })
+
+  /** En route, la date prevue se revise ; plus apres la reception (TRF-DATE). */
+  const reviserDate = useMutation({
+    mutationFn: ({ id, date, version }: { id: string; date: string; version: number | undefined }) =>
+      api.post<{ id_transfert: string; date_disponibilite_prevue: string; version: number }>(
+        `/api/transferts/${id}/date-disponibilite`,
+        { date_disponibilite_prevue: date, version },
+      ),
+    onSuccess: (r) => {
+      setSaisieDate(null)
+      toast.success(`Disponibilité prévue le ${fmt.date(r.date_disponibilite_prevue)}.`, {
+        description: "La couverture du plan d'achat compte ce fil à cette date.",
+      })
+      void qc.invalidateQueries({ queryKey: ['transferts'] })
+      rafraichirCouverture()
+    },
+    onError: (e) => {
+      // Un autre poste l'a change (409) : on relit la liste avant de reessayer.
+      if (e instanceof ErreurApi && e.statut === 409) void qc.invalidateQueries({ queryKey: ['transferts'] })
+      echec(e)
+    },
+  })
+
+  /** Expedier : avec la date du brouillon, ou en la demandant sur la ligne. */
+  const demanderExpedition = (t: Transfert, date: string | null) =>
+    confirmation.demander({
+      titre: `Expedier ${t.numero_transfert} ?`,
+      description:
+        `${t.nb_lignes} ligne(s) vont QUITTER ${t.code_magasin_source}. ` +
+        `Elles ne seront comptees dans aucun magasin tant que quelqu'un ne les ` +
+        `aura pas constatees a ${t.code_magasin_dest}` +
+        (date ? `, où elles sont attendues le ${fmt.date(date)}` : '') +
+        `. Le mouvement de sortie est immuable.`,
+      libelleConfirmer: 'Expédier',
+      action: () => expedier.mutate({ id: t.id_transfert, date }),
+    })
 
   /** Etape 2, au magasin DESTINATAIRE : quelqu'un constate l'arrivee. */
   const receptionner = useMutation({
@@ -179,6 +262,42 @@ export function Transferts() {
       ),
     },
     {
+      /* LA DATE PREVUE AU DESTINATAIRE (27/10/2026) : la couverture du plan
+         d'achat compte le fil en route a cette date. Depassee sans nouvelle
+         date, ou absente (expedie avant la regle, C66) : rien n'est compte. */
+      champ: 'date_disponibilite_prevue',
+      entete: 'Disponible le',
+      largeur: '120px',
+      valeurTri: (t) => t.date_disponibilite_prevue ?? null,
+      rendu: (t) => {
+        const retard = t.jours_de_retard_disponibilite ?? 0
+        if (t.date_disponibilite_prevue)
+          return (
+            <div className="text-[12.5px]">
+              <div className="tabular-nums">{fmt.date(t.date_disponibilite_prevue)}</div>
+              {retard > 0 && (
+                <div
+                  className="text-[11px] text-alerte"
+                  title="Date dépassée : ce fil ne couvre plus le plan tant qu'une nouvelle date n'est pas saisie."
+                >
+                  en retard de {retard} j
+                </div>
+              )}
+            </div>
+          )
+        return t.statut === 'VALIDE' ? (
+          <Badge
+            ton="alerte"
+            title="Expédié sans date prévue : ce fil ne couvre pas le plan d'achat (contrôle C66)."
+          >
+            sans date
+          </Badge>
+        ) : (
+          <span className="text-attenue-texte">—</span>
+        )
+      },
+    },
+    {
       champ: 'utilisateur',
       entete: 'Expédié / reçu par',
       secondaire: true,
@@ -205,6 +324,11 @@ export function Transferts() {
     m[t.statut] = (m[t.statut] ?? 0) + 1
     return m
   }, {})
+  const horsCouverture = tous.filter(
+    (t) =>
+      t.statut === 'VALIDE' &&
+      (!t.date_disponibilite_prevue || (t.jours_de_retard_disponibilite ?? 0) > 0),
+  ).length
   const filtrables = tous.filter((t) => !statut || t.statut === statut)
   const vus = filtrables.filter(filtres.retenir)
 
@@ -244,6 +368,68 @@ export function Transferts() {
     },
   ]
 
+  /*
+   * LA SAISIE DE LA DATE, SOUS LA LIGNE (27/10/2026) — pas de fenetre
+   * surgissante : a l'expedition d'un brouillon sans date, et pour la reviser
+   * tant que le fil est en route.
+   */
+  const saisieDeLigne = (t: Transfert) => {
+    const s = saisieDate
+    if (!s || s.id !== t.id_transfert) return null
+    // Le transfert a change d'etat sous la saisie (recu, annule) : elle n'a plus d'objet.
+    if ((s.mode === 'expedier' && t.statut !== 'BROUILLON') || (s.mode === 'reviser' && t.statut !== 'VALIDE'))
+      return null
+    const expedition = s.mode === 'expedier'
+    const idChamp = `dispo-${t.id_transfert}`
+    const inchangee = !expedition && s.valeur === (t.date_disponibilite_prevue ?? '').slice(0, 10)
+    const valider = () => {
+      if (!s.valeur) return
+      if (expedition) demanderExpedition(t, s.valeur)
+      else reviserDate.mutate({ id: t.id_transfert, date: s.valeur, version: t.version })
+    }
+    return (
+      <form
+        className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px]"
+        onSubmit={(e) => {
+          e.preventDefault()
+          valider()
+        }}
+      >
+        <CornerDownRight aria-hidden className="size-3.5 shrink-0 text-attenue-texte" />
+        <label htmlFor={idChamp} className="font-medium">
+          Disponible au magasin destinataire ({t.code_magasin_dest}) le
+        </label>
+        <Champ
+          id={idChamp}
+          type="date"
+          required
+          autoFocus
+          min={aujourdhui()}
+          value={s.valeur}
+          onChange={(e) => setSaisieDate({ ...s, valeur: e.target.value })}
+          className="h-7 w-40"
+        />
+        <Bouton
+          type="submit"
+          taille="sm"
+          disabled={!s.valeur || inchangee}
+          chargement={expedition ? expedier.isPending : reviserDate.isPending}
+        >
+          {expedition ? <Truck /> : <CalendarClock />}
+          {expedition ? 'Expédier avec cette date' : 'Enregistrer la date'}
+        </Bouton>
+        <Bouton type="button" variante="discret" taille="sm" onClick={() => setSaisieDate(null)}>
+          Annuler
+        </Bouton>
+        <span className="text-[11px] text-attenue-texte">
+          {expedition
+            ? "Obligatoire à l'expédition : le plan d'achat compte ce fil à cette date."
+            : 'Révisable tant que le transfert est en route.'}
+        </span>
+      </form>
+    )
+  }
+
   if (q.isLoading) return <Chargement />
 
   return (
@@ -262,9 +448,16 @@ export function Transferts() {
 
       {(comptes.VALIDE ?? 0) > 0 && (
         <Alerte ton="alerte" titre="Marchandise en transit" className="mb-3">
-          {comptes.VALIDE} transfert(s) ont quitte leur magasin source sans que l arrivee ait ete
-          constatee. Cette marchandise n est comptee <strong>dans aucun magasin</strong> : elle ne
-          couvre aucun besoin tant que la reception n est pas faite a destination.
+          {comptes.VALIDE} transfert(s) ont quitté leur magasin source sans que l’arrivée ait été
+          constatée. Cette marchandise n’est comptée <strong>dans aucun magasin</strong> ; le plan
+          d’achat la compte à sa date prévue de disponibilité au destinataire.
+          {horsCouverture > 0 && (
+            <>
+              {' '}
+              <strong>{horsCouverture}</strong> d’entre eux, sans date ou en retard, ne couvrent
+              aucun besoin tant qu’une nouvelle date n’est pas saisie (« Réviser la date »).
+            </>
+          )}
         </Alerte>
       )}
 
@@ -294,6 +487,7 @@ export function Transferts() {
         titreCarte={(t) => t.numero_transfert}
         placeholderRecherche="Filtrer les transferts..."
         videTitre="Aucun transfert"
+        detail={saisieDeLigne}
         actions={(t) =>
           // Deux etapes, deux boutons, jamais les deux en meme temps : ce qui
           // est propose depend de l'endroit ou se trouve la marchandise.
@@ -325,18 +519,19 @@ export function Transferts() {
                   taille="sm"
                   disabled={t.nb_lignes === 0 || !!gelDe(t.code_magasin_source, t.references)}
                   title={gelDe(t.code_magasin_source, t.references) ?? undefined}
-                  chargement={expedier.isPending}
+                  chargement={expedier.isPending && expedier.variables?.id === t.id_transfert}
+                  aria-expanded={saisieDate?.id === t.id_transfert}
                   onClick={() =>
-                    confirmation.demander({
-                      titre: `Expedier ${t.numero_transfert} ?`,
-                      description:
-                        `${t.nb_lignes} ligne(s) vont QUITTER ${t.code_magasin_source}. ` +
-                        `Elles ne seront comptees dans aucun magasin tant que quelqu'un ne les ` +
-                        `aura pas constatees a ${t.code_magasin_dest}. Le mouvement de sortie ` +
-                        `est immuable.`,
-                      libelleConfirmer: 'Expédier',
-                      action: () => expedier.mutate(t.id_transfert),
-                    })
+                    // LA DATE EST EXIGEE A L'EXPEDITION (27/10/2026) : deja
+                    // saisie sur le brouillon, elle part telle quelle ; sinon
+                    // elle se saisit sur la ligne, juste dessous.
+                    t.date_disponibilite_prevue
+                      ? demanderExpedition(t, t.date_disponibilite_prevue)
+                      : setSaisieDate((s) =>
+                          s?.id === t.id_transfert && s.mode === 'expedier'
+                            ? null
+                            : { id: t.id_transfert, mode: 'expedier', valeur: '' },
+                        )
                   }
                 >
                   <Truck />
@@ -344,8 +539,31 @@ export function Transferts() {
                 </Bouton>
               )}
             </div>
-          ) : t.statut === 'VALIDE' && droits.peutValider ? (
+          ) : t.statut === 'VALIDE' && (droits.peutValider || droits.peutEcrire) ? (
             <div className="flex gap-1">
+              {droits.peutEcrire && (
+                <Bouton
+                  variante="contour"
+                  taille="sm"
+                  aria-expanded={saisieDate?.id === t.id_transfert}
+                  title="Date prévue de disponibilité au magasin destinataire"
+                  onClick={() =>
+                    setSaisieDate((s) =>
+                      s?.id === t.id_transfert
+                        ? null
+                        : {
+                            id: t.id_transfert,
+                            mode: 'reviser',
+                            valeur: (t.date_disponibilite_prevue ?? '').slice(0, 10),
+                          },
+                    )
+                  }
+                >
+                  <CalendarClock />
+                  Réviser la date
+                </Bouton>
+              )}
+              {droits.peutValider && (
               <Bouton
                 variante="contour"
                 taille="sm"
@@ -355,6 +573,8 @@ export function Transferts() {
                 <Printer />
                 Bon de réception
               </Bouton>
+              )}
+              {droits.peutValider && (
               <Bouton
               variante="contour"
               taille="sm"
@@ -376,6 +596,7 @@ export function Transferts() {
               <PackageCheck />
               Réceptionner
             </Bouton>
+              )}
             </div>
           ) : t.statut === 'TERMINE' ? (
             <Bouton

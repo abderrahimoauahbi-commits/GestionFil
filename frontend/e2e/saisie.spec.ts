@@ -459,10 +459,17 @@ test('transfert : le magasin expédie 120,5 kg, le fil est en route, puis récep
   const ligne = page.getByRole('row', { name: new RegExp(numero) })
     .or(page.getByRole('article').filter({ hasText: numero }))
 
-  // L'expedition, depuis la liste, avec sa confirmation.
+  // L'expedition, depuis la liste, avec sa confirmation. LA DATE PREVUE DE DISPONIBILITE
+  // est exigee a l'expedition (27/10/2026) : le brouillon n'en porte pas, elle se saisit
+  // SUR LA LIGNE (jour de Casablanca + 5), puis la confirmation.
+  const dispo = new Date(Date.now() + 5 * 86_400_000).toLocaleDateString('sv-SE', { timeZone: 'Africa/Casablanca' })
   await ligne.getByRole('button', { name: /^Exp[ée]dier$/ }).click()
+  await page.getByLabel(/^Disponible au magasin destinataire/).fill(dispo)
+  await page.getByRole('button', { name: /^Exp[ée]dier avec cette date$/ }).click()
   await page.getByRole('alertdialog').or(page.getByRole('dialog')).getByRole('button', { name: /^Exp[ée]dier$/ }).click()
   await expect.poll(async () => (await stock('tous')).enRoute).toBeCloseTo(avant.enRoute + 120.5, 4)
+  const expedie = (await lireApi<Record<string, unknown>[]>(page, '/api/transferts')).find((t) => t.numero_transfert === numero)!
+  expect(String(expedie.date_disponibilite_prevue ?? '').slice(0, 10), 'date prévue de disponibilité').toBe(dispo)
   const enRoute = await stock('tous')
   expect(enRoute.total, 'le fil en route a quitté les magasins').toBeCloseTo(avant.total - 120.5, 4)
 

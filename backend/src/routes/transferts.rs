@@ -30,7 +30,13 @@ pub async fn lister_transferts(
                 -- oublie de constater l'arrivee.
                 CASE WHEN t.statut = 'VALIDE'
                      THEN CAST((current_date - (t.date_transfert)::date) AS bigint)
-                END AS jours_en_transit
+                END AS jours_en_transit,
+                -- La date prevue de disponibilite depassee (27/10/2026) : le
+                -- moteur de couverture ne compte plus le transfert tant qu'aucune
+                -- nouvelle date n'est saisie.
+                CASE WHEN t.statut = 'VALIDE' AND t.date_disponibilite_prevue < current_date
+                     THEN CAST((current_date - t.date_disponibilite_prevue) AS bigint)
+                END AS jours_de_retard_disponibilite
            FROM transfert t
            LEFT JOIN utilisateur u  ON u.id_utilisateur = t.id_utilisateur
            LEFT JOIN utilisateur ur ON ur.id_utilisateur = t.id_utilisateur_reception
@@ -55,6 +61,10 @@ pub struct NouveauTransfert {
     pub code_magasin_source: String,
     pub code_magasin_dest: String,
     pub date_transfert: Option<String>,
+    /// La date prevue de disponibilite au magasin destinataire (27/10/2026) :
+    /// saisissable des la preparation, obligatoire a l'expedition.
+    #[serde(default)]
+    pub date_disponibilite_prevue: Option<String>,
     pub responsable: Option<String>,
     pub transporteur: Option<String>,
     pub observations: Option<String>,
@@ -152,9 +162,11 @@ pub async fn creer_transfert(
     sqlx::query(
         "INSERT INTO transfert
              (id_transfert, numero_transfert, code_magasin_source, code_magasin_dest,
-              id_utilisateur, responsable, transporteur, observations, date_transfert)
+              id_utilisateur, responsable, transporteur, observations, date_transfert,
+              date_disponibilite_prevue)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
-                 COALESCE(fn_jour_casablanca($9), (now() AT TIME ZONE 'Africa/Casablanca')::date))",
+                 COALESCE(fn_jour_casablanca($9), (now() AT TIME ZONE 'Africa/Casablanca')::date),
+                 fn_jour_casablanca($10))",
     )
     .bind(&id)
     .bind(&numero)
@@ -165,6 +177,7 @@ pub async fn creer_transfert(
     .bind(&t.transporteur)
     .bind(&t.observations)
     .bind(&t.date_transfert)
+    .bind(&t.date_disponibilite_prevue)
     .execute(&mut *tx)
     .await?;
 
@@ -352,7 +365,8 @@ pub async fn modifier_transfert(
         "UPDATE transfert
             SET code_magasin_source = $2, code_magasin_dest = $3,
                 responsable = $4, transporteur = $5, observations = $6,
-                date_transfert = COALESCE(fn_jour_casablanca($7), date_transfert)
+                date_transfert = COALESCE(fn_jour_casablanca($7), date_transfert),
+                date_disponibilite_prevue = fn_jour_casablanca($8)
           WHERE id_transfert = $1",
     )
     .bind(&id)
@@ -362,6 +376,7 @@ pub async fn modifier_transfert(
     .bind(&t.transporteur)
     .bind(&t.observations)
     .bind(&t.date_transfert)
+    .bind(&t.date_disponibilite_prevue)
     .execute(&mut *tx)
     .await?;
 
@@ -406,6 +421,65 @@ pub async fn modifier_transfert(
         "lignes": converties.len(),
         "quantite_totale_kg": arrondi_kg(total_kg)
     })))
+}
+
+/// Le corps de la revision de la date prevue de disponibilite.
+#[derive(Debug, Deserialize)]
+pub struct RevisionDate {
+    pub date_disponibilite_prevue: String,
+    /// La version lue par l'ecran (verrou optimiste).
+    #[serde(default)]
+    pub version: Option<i64>,
+}
+
+/// `POST /api/transferts/{id}/date-disponibilite` — REVISER LA DATE PREVUE DE
+/// DISPONIBILITE d'un transfert en route (arbitrage du 27/10/2026). Le camion
+/// est retarde, ou arrive plus tot : la nouvelle date remplace l'ancienne, et le
+/// moteur de couverture compte le transfert a cette date. Droit d'ecriture du
+/// module des transferts. La base refuse apres la reception et sur un transfert
+/// abandonne (TRF-DATE) ; l'audit garde l'ancienne et la nouvelle date.
+pub async fn reviser_date_disponibilite(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(r): Json<RevisionDate>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
+    let version = crate::domain::concurrence::exigee(r.version)?;
+    if r.date_disponibilite_prevue.trim().is_empty() {
+        return Err(AppError::Invalide(
+            "La date prevue de disponibilite est obligatoire : elle se revise, elle ne s'efface pas.".into(),
+        ));
+    }
+
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "transfert", "id_transfert", &id, Some(version), "Ce transfert",
+    )
+    .await?;
+    let statut: String = sqlx::query_scalar("SELECT statut FROM transfert WHERE id_transfert = $1")
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::Introuvable(format!("transfert {id}")))?;
+    if statut != "VALIDE" && statut != "BROUILLON" {
+        return Err(AppError::RegleMetier(
+            "TRF-DATE : la date prevue de disponibilite ne se revise que tant que le transfert est en route."
+                .into(),
+        ));
+    }
+    let (date, version): (Option<chrono::NaiveDate>, i64) = sqlx::query_as(
+        "UPDATE transfert SET date_disponibilite_prevue = fn_jour_casablanca($2)
+          WHERE id_transfert = $1
+          RETURNING date_disponibilite_prevue, version::bigint",
+    )
+    .bind(&id)
+    .bind(r.date_disponibilite_prevue.trim())
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({ "id_transfert": id, "date_disponibilite_prevue": date, "version": version })))
 }
 
 /// Abandon d'un transfert avant expedition.

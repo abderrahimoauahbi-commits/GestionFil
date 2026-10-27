@@ -37,6 +37,11 @@ def controle(infra, code):
     return int(infra.valeur(f"SELECT anomalies FROM v_controles WHERE code = '{code}'"))
 
 
+def dans_jours(infra, n):
+    """Le jour de la base decale de n jours, au format ISO (date prevue d'un transfert)."""
+    return infra.valeur(f"SELECT (current_date + {int(n)})::text")
+
+
 def V(infra, table, cle, valeur, corps):
     """Le corps d'une modification, avec la version de la fiche telle qu'un ecran l'aurait lue.
 
@@ -1020,12 +1025,12 @@ def scenario_inventaire_gel(c, infra):
     verifier(code == 200, f"sortie avant l'inventaire refusee : {sortie}")
     # Un transfert P -> M expedie (en route), un transfert M -> P en brouillon.
     t_entrant = c.ok("Magasinie", "POST", "/api/transferts", {
-        "code_magasin_source": P, "code_magasin_dest": M,
+        "code_magasin_source": P, "code_magasin_dest": M, "date_disponibilite_prevue": dans_jours(infra, 5),
         "lignes": [{"code_reference": REF, "quantite_saisie": 30, "unite_saisie": "kg"}]})
     c.ok("Magasinie", "POST", f"/api/transferts/{t_entrant['id_transfert']}/expedier")
     num_entrant = infra.valeur(f"SELECT numero_transfert FROM transfert WHERE id_transfert = '{t_entrant['id_transfert']}'")
     t_sortant = c.ok("Magasinie", "POST", "/api/transferts", {
-        "code_magasin_source": M, "code_magasin_dest": P,
+        "code_magasin_source": M, "code_magasin_dest": P, "date_disponibilite_prevue": dans_jours(infra, 5),
         "lignes": [{"code_reference": REF, "quantite_saisie": 10, "unite_saisie": "kg"}]})
     # Une reception soumise au controle, vers M.
     id_bc2, lignes2 = bon_envoye(c, [(REF, 50, 20.0)])
@@ -2183,11 +2188,27 @@ def scenario_controles_finaux(c, infra):
     # (C55, cloture de periode, le 17/10/2026 ; C56, ligne d'import sans position tarifaire, le 19/10 ;
     # C59, prix confirme a la demande de prix, le 21/10 ; C60, meme reference sur deux lignes d'un bon,
     # le 21/10 ; C61, OF cloture hors seuil, C62-C63 hors machine et voies, C64 OF au-dela du plan, le 22/10 ;
-    # C65, mouvement date de la periode de comptage d'un inventaire cloture, le 23/10).
-    dernier = 65
+    # C65, mouvement date de la periode de comptage d'un inventaire cloture, le 23/10 ; C66, transfert en
+    # route sans date prevue de disponibilite, le 27/10).
+    # UNE SEULE SOURCE DE VERITE (27/10/2026) : C05 et C25 dependent du moteur de couverture (Rust) et
+    # quittent v_controles pour /api/controles ; C27 et C49 n'ont plus de sens (ni seuils de jours ni
+    # prolongation du plan) et sont retires.
+    dernier = 66
+    moteur, retires = ("C05", "C25"), ("C27", "C49")
+    hors_sql = "', '".join(moteur + retires)
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
-                             f"FROM generate_series(1, {dernier}) g EXCEPT SELECT code FROM v_controles) x")
+                             f"FROM generate_series(1, {dernier}) g EXCEPT SELECT code FROM v_controles "
+                             f"EXCEPT SELECT unnest(ARRAY['{hors_sql}'])) x")
     verifier(not manquants, f"controles absents de v_controles : {manquants}")
+    presents = infra.valeur(f"SELECT string_agg(code, ', ') FROM v_controles WHERE code IN ('{hors_sql}')")
+    verifier(not presents, f"v_controles porte encore des controles du moteur ou retires : {presents}")
+    servis = {x["code"]: x for x in c.ok("Choukri", "GET", "/api/controles")}
+    attendus = {f"C{g:02d}" for g in range(1, dernier + 1)} - set(retires)
+    verifier(set(servis) == attendus, f"/api/controles : {sorted(set(servis) ^ attendus)} en trop ou en moins")
+    for code in moteur:
+        detail = c.ok("Choukri", "GET", f"/api/controles/{code}")
+        verifier(int(servis[code]["anomalies"]) == len(detail),
+                 f"{code} compte {servis[code]['anomalies']} anomalies, son detail en liste {len(detail)}")
     # DEUX QUESTIONS DISTINCTES. L'ancienne verification comparait le total a 54 et
     # appelait tout ecart « doublons » : l'ajout de C55 l'a fait mentir. Un doublon,
     # c'est un code present deux fois ; un controle en trop, c'est un autre constat.
@@ -2195,7 +2216,7 @@ def scenario_controles_finaux(c, infra):
                             "(SELECT code, count(*) AS n FROM v_controles GROUP BY code HAVING count(*) > 1) d")
     verifier(not doublons, f"v_controles porte des doublons : {doublons}")
     total = int(infra.valeur("SELECT count(*) FROM v_controles"))
-    verifier(total == dernier, f"v_controles compte {total} controles, {dernier} attendus : relever `dernier` ?")
+    verifier(total == dernier - 4, f"v_controles compte {total} controles, {dernier - 4} attendus : relever `dernier` ?")
 
 
 def scenario_import(c, infra):
@@ -3817,15 +3838,21 @@ def scenario_taux_bon(c, infra):
 
 def scenario_plan_detail(c, infra):
     """F16 et U8 (09/10) : le calcul d'une proposition se lit pas a pas et tombe juste ; un dossier
-    d'import en brouillon n'est pas de l'en-cours ; C28 dit ce que fait le reglage."""
+    d'import en brouillon n'est pas un arrivage ; C28 dit ce qu'est un bon en retard.
+    CHANGEMENT DE REGLE (27/10/2026, une seule source de verite) : le calcul pas a pas est celui du
+    MOTEUR DE COUVERTURE (`/api/couverture/{ref}`), l'ancien detail (`/api/plan-achat/detail`,
+    v_plan_achat, v_encours_fiable) est retire ; un import engage sans bon se lit dans les arrivages du
+    moteur (sans date fiable, hors couverture) ; C28 suit la regle du moteur (date depassee = en retard,
+    hors couverture), quel que soit P_EncoursRetardInclus."""
     ref = "PP-1500 Dtex-Cream 2951-Hs"
     from urllib.parse import quote
     # LE PLAN D'ACHAT SUIT LE PLAN DE PRODUCTION, ET LUI SEUL (10/10/2026) : sans plan en
     # cours, rien n'est propose, pas meme pour une reference sous son minimum.
     infra.sql(f"UPDATE reference SET stock_min_kg = 50000 WHERE code_reference = '{ref}'")
-    verifier(infra.valeur(f"SELECT count(*) FROM v_plan_achat WHERE code_reference = '{ref}' "
-                          "AND NOT EXISTS (SELECT 1 FROM plan_production WHERE statut = 'EN_COURS')") == "0",
-             "le plan d'achat propose un achat sans plan de production (stock minimum)")
+    if not infra.valeur("SELECT 1 FROM plan_production WHERE statut = 'EN_COURS'"):
+        sans_plan = c.ok("Choukri", "GET", "/api/couverture")
+        verifier(not any(x.get("qte_a_commander_kg") for x in sans_plan["lignes"]),
+                 "le moteur propose un achat sans plan de production (stock minimum)")
     infra.sql(f"UPDATE reference SET stock_min_kg = NULL WHERE code_reference = '{ref}'")
     # Un plan de production saisi, valide, et son MRP : le detail se lit sur ce qu'il reclame.
     qualite = infra.valeur("SELECT q.code_qualite FROM qualite q WHERE q.statut = 'ACTIF' "
@@ -3843,21 +3870,23 @@ def scenario_plan_detail(c, infra):
     c.ok("Choukri", "POST", f"/api/plans/{id_plan}/figer-recettes", {})
     c.ok("Choukri", "PUT", f"/api/plans/{id_plan}/statut", {"statut": "EN_COURS"})
     c.ok("Choukri", "POST", f"/api/plans/{id_plan}/mrp", {})
-    ref_detail = infra.valeur("SELECT code_reference FROM v_plan_achat ORDER BY qte_a_commander_kg DESC LIMIT 1")
-    verifier(bool(ref_detail), "un plan de production en cours ne produit aucune proposition d'achat")
-    d = c.ok("Choukri", "GET", f"/api/plan-achat/detail?reference={quote(ref_detail)}")
-    k = d["calcul"]
-    projete = k["stock_magasin_net_kg"] + k["stock_machine_compte_kg"] + k["encours_kg"] - k["demande_delai_kg"]
-    verifier(abs(max(0.0, projete) - k["residuel_kg"]) < 0.01,
-             f"le detail ne retombe pas sur le residuel : {projete:.2f} contre {k['residuel_kg']}")
-    besoin = max(0.0, k["sorties_fenetre_kg"] + k["securite_kg"] - k["residuel_kg"])
-    verifier(abs(besoin - k["besoin_avant_arrondi_kg"]) < 0.01 or (k.get("moq_kg") or 0) >= k["besoin_avant_arrondi_kg"] - 0.01,
-             f"besoin du plan {besoin:.2f} contre {k['besoin_avant_arrondi_kg']}")
-    c.refus("Choukri", "GET", "/api/plan-achat/detail?reference=INCONNUE-XYZ", codes=(404,))
+    lignes_moteur = [x for x in c.ok("Choukri", "GET", "/api/couverture")["lignes"] if x.get("qte_a_commander_kg")]
+    verifier(bool(lignes_moteur), "un plan de production en cours ne produit aucune proposition d'achat")
+    ref_detail = max(lignes_moteur, key=lambda x: x["qte_a_commander_kg"])["code_reference"]
+    d = c.ok("Choukri", "GET", f"/api/couverture/{quote(ref_detail, safe='')}")
+    p0 = d["propositions"][0]
+    besoin = max(0.0, p0["securite_kg"] + p0["plan_fenetre_kg"] - p0["arrivages_fenetre_kg"] - p0["solde_debut_d_kg"])
+    # Le besoin est le PLUS FORT sur la fenetre : au moins sa valeur au dernier jour (F - 1).
+    verifier(p0["besoin_theorique_kg"] + 0.05 >= besoin and p0["quantite_proposee_kg"] + 1e-6 >= p0["besoin_theorique_kg"],
+             f"le calcul pas a pas ne tient pas : besoin {p0['besoin_theorique_kg']}, au dernier jour {besoin:.2f}, "
+             f"propose {p0['quantite_proposee_kg']}")
+    verifier(d["synthese"]["qte_a_commander_kg"] == p0["quantite_proposee_kg"], "la synthese ne rend pas la proposition")
+    # L'ancien detail est retire : plus de route.
+    c.refus("Choukri", "GET", f"/api/plan-achat/detail?reference={quote(ref_detail)}", codes=(404, 405))
 
     def au_port():
-        return float(infra.valeur(f"SELECT COALESCE((SELECT encours_import_kg FROM v_encours_fiable "
-                                  f"WHERE code_reference = '{ref}'), 0)"))
+        a = c.ok("Choukri", "GET", f"/api/couverture/{quote(ref, safe='')}")["arrivages"]
+        return sum(x["kg"] for x in a if x["origine"] == "IMPORT_SANS_BON")
 
     avant = au_port()
     aujourdhui = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
@@ -3871,16 +3900,21 @@ def scenario_plan_detail(c, infra):
     c.ok("Choukri", "POST", f"/api/import/factures/{id_fac_port}/lignes", VF(infra, id_fac_port, {
         "type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 300, "poids_net_kg": 300,
         "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-PORT-1"}))
-    verifier(abs(au_port() - avant) < 1e-6, "un dossier d'import en brouillon compte dans l'en-cours")
+    verifier(abs(au_port() - avant) < 1e-6, "un dossier d'import en brouillon est un arrivage")
     c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/valider", VD(infra, id_dossier))
-    verifier(abs(au_port() - avant - 300) < 1e-6, f"le dossier engage ne compte pas au port : {au_port() - avant}")
+    verifier(abs(au_port() - avant - 300) < 1e-6, f"le dossier engage ne se lit pas au port : {au_port() - avant}")
+    port = [x for x in c.ok("Choukri", "GET", f"/api/couverture/{quote(ref, safe='')}")["arrivages"]
+            if x["origine"] == "IMPORT_SANS_BON"]
+    verifier(port and all(not x["compte"] and x["categorie"] == "SANS_DATE" for x in port),
+             f"l'import sans bon est compte : {port}")
 
-    infra.sql("UPDATE parametre SET valeur_courante = '1' WHERE code_parametre = 'P_EncoursRetardInclus'")
-    verifier("toujours comptee" in infra.valeur("SELECT controle FROM v_controles WHERE code = 'C28'"),
-             "C28 dit « retiree » alors que le retard est compte")
-    infra.sql("UPDATE parametre SET valeur_courante = '0' WHERE code_parametre = 'P_EncoursRetardInclus'")
-    verifier("retiree" in infra.valeur("SELECT controle FROM v_controles WHERE code = 'C28'"), "C28 ne suit pas le reglage")
-    infra.sql("UPDATE parametre SET valeur_courante = '1' WHERE code_parametre = 'P_EncoursRetardInclus'")
+    # C28 : la regle du moteur (date depassee = hors couverture), le reglage n'y change rien.
+    libelles = set()
+    for v in ("1", "0", "1"):
+        infra.sql(f"UPDATE parametre SET valeur_courante = '{v}' WHERE code_parametre = 'P_EncoursRetardInclus'")
+        libelles.add(infra.valeur("SELECT controle FROM v_controles WHERE code = 'C28'"))
+    verifier(len(libelles) == 1 and "hors couverture" in next(iter(libelles)),
+             f"C28 ne dit pas la regle du moteur, ou suit encore le reglage : {libelles}")
 
     # T10 (09/10) : deux calculs du plan d'achat ; la purge du second se resume en une ligne
     # d'audit, au lieu d'une par proposition remplacee.
@@ -3922,8 +3956,9 @@ def scenario_plan_detail(c, infra):
     liste = c.ok("Choukri", "GET", "/api/plan-achat/propositions")
     verifier(liste and "classe_abc" in liste[0] and "risque_source" not in liste[0],
              "la liste du plan d'achat relit encore le risque (il est au detail)")
-    verifier("risque" in c.ok("Choukri", "GET", f"/api/plan-achat/detail?reference={quote(ref_detail)}"),
-             "le detail d'une ligne ne rend pas le risque d'approvisionnement")
+    sourcing = [x for x in c.ok("Choukri", "GET", "/api/risques-sourcing") if x["code_reference"] == ref_detail]
+    verifier(sourcing and sourcing[0].get("action_recommandee") and sourcing[0].get("statut"),
+             f"le risque d'approvisionnement ne rend pas l'etat du moteur et l'action : {sourcing}")
 
     # LA PROPOSITION DEVIENT UNE LIGNE DE BON AVEC SON PRIX ET SON UNITE (21/10/2026) : le
     # prix en devise du plan, tel quel, quand c'est la devise du bon — pas le prix MAD
@@ -4176,15 +4211,25 @@ def scenario_migrations_rejouables(c, infra):
     from pathlib import Path
     dossier = Path(__file__).resolve().parents[3] / "db" / "pg" / "migrations"
     avant = (infra.valeur("SELECT count(*) FROM v_controles"), infra.valeur("SELECT count(*) FROM ligne_mouvement"))
+    # QUATRE MIGRATIONS DU 09/10 REDEFINISSAIENT L'ANCIEN CALCUL (v_plan_achat, v_encours_fiable, le statut de
+    # v_etat_stock), que 2026-10-27e retire (une seule source de verite, le moteur de couverture). Rejouees
+    # seules sur une base passee par 27e, elles butent sur ce qui n'existe plus : elles ne se rejouent plus,
+    # par decision (27e les remplace). Les autres se rejouent comme avant.
+    caduques = {"2026-10-09b_supervision_rejouee.sql", "2026-10-09j_prix_plan_achat.sql",
+                "2026-10-09k_saisonnalite.sql", "2026-10-09o_plan_detail.sql"}
     for f in sorted(dossier.glob("2026-10-09*.sql")):
+        if f.name in caduques:
+            continue
         try:
             infra.psql(infra.base, "-q", "-f", str(f))
         except RuntimeError as e:
             raise Echec(f"{f.name} ne se rejoue pas : {str(e)[-300:]}")
-    # Rejouee seule, une migration ancienne remet ses vues d'alors (09k : v_besoin_horizon du plan seul ;
-    # 22c : le besoin ajuste par les OF) ; celles qui les ont redefinies depuis se rejouent apres elle,
-    # dans l'ordre, comme migrer.py les jouerait (27b remet le plan seul, 27/10/2026).
-    for nom in ("2026-10-22c_besoin_of.sql", "2026-10-27b_besoin_plan_seul.sql", "2026-10-27c_commande_couverture.sql"):
+    # Rejouee seule, une migration ancienne peut remettre ses vues d'alors ; celles qui les ont redefinies
+    # depuis se rejouent apres elle, dans l'ordre, comme migrer.py les jouerait. 22c et 27b (le besoin des
+    # OF, puis le plan seul) touchaient v_stock_projete, retiree par 27e : elles ne se rejouent plus ; 27e
+    # se rejoue et remet l'etat final (l'ancien calcul retire, les vues sans projection).
+    for nom in ("2026-10-27c_commande_couverture.sql", "2026-10-27d_transit_date_disponibilite.sql",
+                "2026-10-27e_source_unique_moteur.sql"):
         try:
             infra.psql(infra.base, "-q", "-f", str(dossier / nom))
         except RuntimeError as e:
@@ -4226,8 +4271,10 @@ def scenario_gardes_p1(c, infra):
     c.refus("Choukri", "PATCH", "/api/saisons/1", V(infra, "saison_mois", "mois", 1, {"coefficient": 0}))
     c.ok("Choukri", "PATCH", "/api/saisons/1", V(infra, "saison_mois", "mois", 1, {"coefficient": 1}))
     c.ok("Assistante", "GET", "/api/plan-achat/stocks-minimums")
-    verifier(int(infra.valeur("SELECT count(*) FROM v_controles WHERE code IN ('C49', 'C50')")) == 2,
-             "les controles C49 et C50 manquent")
+    # C49 (proposition estimee sur la prolongation du plan) est retire le 27/10/2026 : le moteur de
+    # couverture ne prolonge jamais le plan. C50 reste.
+    verifier(int(infra.valeur("SELECT count(*) FROM v_controles WHERE code IN ('C49', 'C50')")) == 1,
+             "le controle C50 manque, ou C49 est revenu")
     # La supervision complete (2026-09-20d, rejouee par 09b) : plus d'« erreur interne ».
     sup = c.ok("Choukri", "GET", "/api/supervision")
     verifier(sup, "la supervision ne rend rien")
@@ -4295,7 +4342,7 @@ def scenario_cmup_chiffre(c, infra):
     # 4. Transfert de 600 kg vers Polyfashions, une reception pendant le trajet.
     valeur_avant = valeur_magasins(infra, A)
     t = c.ok("Magasinie", "POST", "/api/transferts", {
-        "code_magasin_source": M, "code_magasin_dest": P,
+        "code_magasin_source": M, "code_magasin_dest": P, "date_disponibilite_prevue": dans_jours(infra, 5),
         "lignes": [{"code_reference": A, "quantite_saisie": 600, "unite_saisie": "kg"}]})
     tid = t["id_transfert"]
     c.ok("Magasinie", "POST", f"/api/transferts/{tid}/expedier")
@@ -4307,7 +4354,7 @@ def scenario_cmup_chiffre(c, infra):
     total = valeur_magasins(infra, A) + float(route[0][1])
     verifier(abs(total - valeur_avant) < 0.05, f"la valeur totale baisse pendant le trajet : {valeur_avant} -> {total}")
     besoin = float(infra.valeur(f"SELECT stock_transit_kg FROM v_stock_physique WHERE code_reference = '{A}'"))
-    verifier(abs(besoin - 600) < 1e-6, f"le calcul des besoins ne voit pas le fil en route : {besoin}")
+    verifier(abs(besoin - 600) < 1e-6, f"la valeur du stock ne voit pas le fil en route : {besoin}")
     cat = next(x for x in c.ok("Choukri", "GET", "/api/catalogue?actif=1&limite=2000") if x["code_reference"] == A)
     verifier(abs(float(cat["valeur_transit_mad"]) - 12600) < 0.01, f"le catalogue ignore la valeur en route : {cat.get('valeur_transit_mad')}")
     # Pendant le trajet : 400 kg a 26 au depart, 200 kg a 30 a l'arrivee.
@@ -4360,7 +4407,7 @@ def scenario_atomicite(c, infra):
     avant = (kg(infra, A, M), kg(infra, B, M), kg(infra, A, P), kg(infra, B, P))
     mvts = int(infra.valeur("SELECT count(*) FROM mouvement"))
     t = c.ok("Magasinie", "POST", "/api/transferts", {
-        "code_magasin_source": M, "code_magasin_dest": P,
+        "code_magasin_source": M, "code_magasin_dest": P, "date_disponibilite_prevue": dans_jours(infra, 5),
         "lignes": [{"code_reference": A, "quantite_saisie": 10, "unite_saisie": "kg"},
                    {"code_reference": B, "quantite_saisie": 5000, "unite_saisie": "kg"}]})
     tid = t["id_transfert"]
@@ -4747,9 +4794,10 @@ def scenario_besoin_of(c, infra):
     non couvert, et ce scenario verifiait qu'un OF au-dessus du plan augmentait le besoin. La direction
     a tranche le 26/10 : la demande d'achat est le PLAN SEUL ; l'OF est du court terme (au plus une
     semaine) et ne sert que l'axe production / statistiques. Desormais :
-      * le besoin (v_besoin_12m, v_besoin_mois, v_besoin_horizon, le stock projete, /api/stock/besoin)
-        est celui du plan, et un OF — au-dessus du plan, hors plan, lance avec une consommation — ne le
-        change pas d'un gramme ; v_besoin_of_mois et v_besoin_horizon_of sont vides ;
+      * le besoin (v_besoin_12m, v_besoin_mois, le moteur de couverture, /api/stock/besoin) est celui
+        du plan, et un OF — au-dessus du plan, hors plan, lance avec une consommation — ne le change pas
+        d'un gramme ; v_besoin_of_mois, v_besoin_horizon_of, v_besoin_horizon et v_stock_projete sont
+        retirees (une seule source de verite, 27/10/2026) ;
       * C64 SIGNALE TOUJOURS un OF au-dela du plan du mois (signal garde par decision) ;
       * l'axe production reste : v_besoin_of donne encore le prevu, le consomme et le reste d'un OF."""
     from urllib.parse import quote
@@ -4777,8 +4825,9 @@ def scenario_besoin_of(c, infra):
         return tuple(float(x) for x in v[0]) if v else (0.0, 0.0, 0.0)
 
     def horizon(ref):
-        v = infra.sql(f"SELECT dem_lead_kg, sorties_prevues_kg FROM v_besoin_horizon WHERE code_reference = '{ref}'")
-        return tuple(float(x) for x in v[0]) if v else (0.0, 0.0)
+        # Le moteur de couverture : le plan sur l'horizon et la premiere proposition.
+        s = c.ok("Choukri", "GET", f"/api/couverture/{quote(ref, safe='')}")["synthese"]
+        return (s["plan_horizon_kg"], s.get("qte_a_commander_kg"))
 
     def tout_le_plan_seul(quand):
         # Le besoin est le plan : partout, la part du plan vaut le tout, l'au-dela zero ; plus
@@ -4786,8 +4835,9 @@ def scenario_besoin_of(c, infra):
         verifier(infra.valeur("SELECT count(*) FROM v_besoin_12m WHERE besoin_au_dela_12m_kg <> 0 "
                               "OR besoin_plan_12m_kg <> besoin_12m_kg") == "0",
                  f"{quand} : un besoin differe du plan seul")
-        verifier(infra.valeur("SELECT count(*) FROM v_besoin_of_mois") == "0", f"{quand} : un ajustement des OF")
-        verifier(infra.valeur("SELECT count(*) FROM v_besoin_horizon_of") == "0", f"{quand} : une part d'OF au-dela du plan")
+        verifier(infra.valeur("SELECT to_regclass('public.v_besoin_of_mois') IS NULL "
+                              "AND to_regclass('public.v_besoin_horizon_of') IS NULL") == "t",
+                 f"{quand} : les vues du besoin par OF sont revenues")
         ecart = infra.valeur(
             "SELECT abs(COALESCE((SELECT sum(quantite_kg) FROM v_besoin_mois), 0) - COALESCE((SELECT sum(bm.quantite_kg) "
             "FROM besoin_mrp bm JOIN plan_production p USING (id_plan) WHERE p.statut = 'EN_COURS' "
@@ -4810,7 +4860,7 @@ def scenario_besoin_of(c, infra):
                        "AND kg_m2 > 0 GROUP BY 1 ORDER BY sum(kg_m2) DESC LIMIT 1")
     avant, avant_h = besoin(ref), horizon(ref)
     fiche_avant = c.ok("Choukri", "GET", f"/api/stock/besoin?reference={quote(ref)}")
-    sp_avant = infra.sql(f"SELECT besoin_12m_kg, stock_projete_kg FROM v_stock_projete WHERE code_reference = '{ref}'")
+    sp_avant = horizon(ref)
     c64 = controle(infra, "C64")
 
     # AU-DESSUS DU PLAN DU MOIS : le besoin ne bouge pas ; C64 le signale toujours.
@@ -4828,10 +4878,10 @@ def scenario_besoin_of(c, infra):
     # La fiche du besoin : le plan seul, inchange, sans OF.
     fiche = c.ok("Choukri", "GET", f"/api/stock/besoin?reference={quote(ref)}")
     verifier(fiche == fiche_avant, f"la fiche du besoin change avec un OF : {fiche_avant} -> {fiche}")
-    verifier("of" not in fiche and abs(fiche["synthese"]["besoin_12m_kg"] - avant[0]) < 0.01,
+    verifier("of" not in fiche and fiche["synthese"]["plan_horizon_kg"] > 0,
              f"la fiche du besoin n'est pas celle du plan seul : {fiche}")
-    sp = infra.sql(f"SELECT besoin_12m_kg, stock_projete_kg FROM v_stock_projete WHERE code_reference = '{ref}'")
-    verifier(sp == sp_avant, f"le stock projete change avec un OF : {sp_avant} -> {sp}")
+    sp = horizon(ref)
+    verifier(sp == sp_avant, f"la couverture change avec un OF : {sp_avant} -> {sp}")
 
     # SOUS LE PLAN : rien ne change, et C64 se tait.
     infra.sql(f"UPDATE ordre_fabrication SET metrage_m2 = {p_m2 - 100} WHERE id_of = '{id_of}'")
@@ -5084,8 +5134,8 @@ def scenario_couverture_moteur(c, infra):
                     "poids_retenu_kg": 5, "pourcentage": 100, "code_motif": "CH_PRODUCTION"}]})
     c.ok("Magasinie", "POST", f"/api/machines/fiches/{f['id_fiche']}/valider", {})
     infra.sql("UPDATE machine_etat SET date_constat = current_date - 90 WHERE code_emplacement = 'BANCCV-E1'")
-    # L'ANCIEN CALCUL AUSSI (2026-10-27b) : v_stock_physique compte le fil sur machine au dernier
-    # constat quel que soit son age (plus d'exclusion apres P_JoursInventMachine jours).
+    # v_stock_physique (le stock, pas un besoin : l'ancien calcul est retire le 27/10/2026) compte le fil
+    # sur machine au dernier constat quel que soit son age.
     sur_machine = infra.valeur(
         "SELECT COALESCE(sum(e.kg), 0) FROM machine_etat e LEFT JOIN lot l ON l.code_reference = e.code_reference "
         f"AND l.lot_fournisseur = e.lot_fournisseur WHERE e.code_reference = '{ref}' AND e.kg > 0 "
@@ -5306,6 +5356,204 @@ def scenario_couverture_moteur(c, infra):
     c.ok("Assistante", "PUT", f"/api/bons-commande/{bc_brouillon}/statut", {"statut": "ANNULE"})
 
 
+def scenario_transit_moteur(c, infra):
+    """LE FIL EN ROUTE EST UN ARRIVAGE (arbitrage du 27/10/2026). Un transfert expedie porte une date
+    prevue de disponibilite, OBLIGATOIRE a l'expedition (TRF-DATE, en base) et REVISABLE tant qu'il roule
+    (droit d'ecriture des mouvements, journalisee), jamais apres sa reception. Le moteur de couverture le
+    compte a cette date (TRANSIT) vers le magasin destinataire compte ; date depassee sans nouvelle date :
+    en retard, hors couverture ; expedie avant la regle sans date : « sans date », non compte, C66."""
+    from urllib.parse import quote
+    src, dst = "Polyfashions", MAG
+    verifier(infra.valeur(f"SELECT inclure_mrp = 1 AND est_quarantaine = 0 FROM magasin WHERE code_magasin = '{dst}'") == "t",
+             f"le magasin {dst} n'est pas compte au plan : le scenario suppose le contraire")
+    verifier(infra.valeur("SELECT 1 FROM plan_production WHERE statut = 'EN_COURS'") == "1",
+             "aucun plan en service : pas d'horizon ou compter le transit")
+    entree_stock(c, REF, 200, mag=src)
+    q_ref = quote(REF, safe="")
+
+    def transits():
+        d = c.ok("Choukri", "GET", f"/api/couverture/{q_ref}")
+        return d, {a["id_transfert"]: a for a in d["arrivages"] if a["origine"] == "TRANSFERT"}
+
+    # EXPEDIER SANS DATE : refuse, par la base, et rien ne part.
+    t = c.ok("Magasinie", "POST", "/api/transferts", {
+        "code_magasin_source": src, "code_magasin_dest": dst,
+        "lignes": [{"code_reference": REF, "quantite_saisie": 60, "unite_saisie": "kg"}]})
+    tid = t["id_transfert"]
+    stock_src = kg(infra, REF, src)
+    c.refus("Magasinie", "POST", f"/api/transferts/{tid}/expedier", codes=(422,), contient="TRF-DATE")
+    verifier(kg(infra, REF, src) == stock_src and
+             infra.valeur(f"SELECT statut FROM transfert WHERE id_transfert = '{tid}'") == "BROUILLON",
+             "une expedition sans date a fait partir la marchandise")
+    refus_sql(infra, f"UPDATE transfert SET statut = 'VALIDE' WHERE id_transfert = '{tid}'", "TRF-DATE")
+
+    # EXPEDIER AVEC LA DATE (dans le corps) : compte a cette date, vers le magasin destinataire.
+    j7, j3, j_2 = dans_jours(infra, 7), dans_jours(infra, 3), dans_jours(infra, -2)
+    c.ok("Magasinie", "POST", f"/api/transferts/{tid}/expedier", {"date_disponibilite_prevue": j7})
+    verifier(infra.valeur(f"SELECT date_disponibilite_prevue::text FROM transfert WHERE id_transfert = '{tid}'") == j7,
+             "la date prevue n'est pas enregistree a l'expedition")
+    d, tr = transits()
+    a = tr.get(tid)
+    verifier(a and (a["categorie"], a["compte"], a["date"], a["kg"]) == ("TRANSIT", True, j7, 60),
+             f"transit a sa date : {a}")
+    verifier(next(j for j in d["jours"] if j["date"] == j7)["arrivee_kg"] >= 60, "le transit ne tombe pas a sa date")
+    verifier(d["synthese"]["transit_kg"] >= 60, f"transit_kg {d['synthese']['transit_kg']}")
+
+    # REVISER LA DATE : le droit d'ecriture, la version, l'audit ; jamais l'effacer.
+    v = int(infra.valeur(f"SELECT version FROM transfert WHERE id_transfert = '{tid}'"))
+    c.refus("Magasinie", "POST", f"/api/transferts/{tid}/date-disponibilite",
+            {"date_disponibilite_prevue": j3, "version": v - 1}, codes=(409,))
+    r = c.ok("Magasinie", "POST", f"/api/transferts/{tid}/date-disponibilite",
+             {"date_disponibilite_prevue": j3, "version": v})
+    verifier(r["date_disponibilite_prevue"] == j3 and r["version"] > v, f"revision : {r}")
+    verifier(int(infra.valeur("SELECT count(*) FROM audit_log WHERE table_concernee = 'transfert' "
+                              f"AND id_enregistrement = '{tid}' AND anciennes_valeurs LIKE '%{j7}%' "
+                              f"AND nouvelles_valeurs LIKE '%{j3}%'")) == 1,
+             "la revision de la date n'est pas journalisee (ancienne et nouvelle)")
+    _, tr = transits()
+    verifier(tr[tid]["date"] == j3 and tr[tid]["compte"], f"apres revision : {tr[tid]}")
+    c.refus("Magasinie", "POST", f"/api/transferts/{tid}/date-disponibilite",
+            {"date_disponibilite_prevue": "", "version": r["version"]}, codes=(400,))
+    refus_sql(infra, f"UPDATE transfert SET date_disponibilite_prevue = NULL WHERE id_transfert = '{tid}'", "TRF-DATE")
+
+    # DATE DEPASSEE, SANS NOUVELLE DATE : en retard, hors couverture.
+    r = c.ok("Magasinie", "POST", f"/api/transferts/{tid}/date-disponibilite",
+             {"date_disponibilite_prevue": j_2, "version": r["version"]})
+    d, tr = transits()
+    verifier((tr[tid]["categorie"], tr[tid]["compte"]) == ("EN_RETARD", False), f"transit en retard : {tr[tid]}")
+    verifier(d["synthese"]["en_retard_kg"] >= 60, "le transit en retard n'est pas montre a part")
+    retard = next(x for x in c.ok("Magasinie", "GET", "/api/transferts") if x["id_transfert"] == tid)
+    verifier(retard.get("jours_de_retard_disponibilite") == 2, f"retard de la liste : {retard.get('jours_de_retard_disponibilite')}")
+
+    # EXPEDIE AVANT LA REGLE, SANS DATE : « sans date », non compte, C66 le signale.
+    c66 = controle(infra, "C66")
+    infra.sql("SET session_replication_role = replica; "
+              f"UPDATE transfert SET date_disponibilite_prevue = NULL WHERE id_transfert = '{tid}'; "
+              "SET session_replication_role = DEFAULT;")
+    _, tr = transits()
+    verifier((tr[tid]["categorie"], tr[tid]["compte"], tr[tid]["date"]) == ("SANS_DATE", False, None),
+             f"transit sans date : {tr[tid]}")
+    verifier(controle(infra, "C66") == c66 + 1, "C66 ne signale pas le transfert en route sans date")
+    v = int(infra.valeur(f"SELECT version FROM transfert WHERE id_transfert = '{tid}'"))
+    c.ok("Magasinie", "POST", f"/api/transferts/{tid}/date-disponibilite", {"date_disponibilite_prevue": j7, "version": v})
+    verifier(controle(infra, "C66") == c66, "C66 signale encore un transfert date")
+
+    # RECU : la date est figee ; le transfert n'est plus un arrivage.
+    c.ok("Magasinie", "POST", f"/api/transferts/{tid}/receptionner")
+    v = int(infra.valeur(f"SELECT version FROM transfert WHERE id_transfert = '{tid}'"))
+    c.refus("Magasinie", "POST", f"/api/transferts/{tid}/date-disponibilite",
+            {"date_disponibilite_prevue": j3, "version": v}, codes=(422,), contient="TRF-DATE")
+    refus_sql(infra, f"UPDATE transfert SET date_disponibilite_prevue = '{j3}' WHERE id_transfert = '{tid}'", "TRF-DATE")
+    _, tr = transits()
+    verifier(tid not in tr, "un transfert recu est encore un arrivage")
+
+
+def scenario_source_unique(c, infra):
+    """UNE SEULE SOURCE DE VERITE (arbitrage du 27/10/2026) : tout ce qui dit d'une reference qu'elle est
+    couverte, en rupture, sous la securite ou a commander vient du moteur de couverture. Les indicateurs
+    (plan d'achat, cockpit, stock projete) sont ceux du moteur ; l'ancien calcul n'existe plus, ni en base
+    ni en route ; la fenetre d'une commande est [D, F[ ; une reference sans classe ABC prend la plus longue
+    des trois securites et le defaut de donnees se signale ; P_MrpInclureStockMachine est supprime."""
+    from datetime import date
+    from urllib.parse import quote
+
+    # L'ANCIEN CALCUL N'EXISTE PLUS : ni vue, ni colonne, ni parametre, ni definition qui le lise.
+    restes = infra.valeur(
+        "SELECT string_agg(v, ', ') FROM unnest(ARRAY['v_stock_projete', 'v_plan_achat', 'v_encours_fiable', "
+        "'v_besoin_horizon', 'v_besoin_horizon_of', 'v_besoin_of_mois', 'v_risque_mensuel', 'v_risque_reference', "
+        "'v_cockpit_stock', 'v_cockpit_couverture', 'v_ctl_c05', 'v_ctl_c25', 'v_ctl_c27', 'v_ctl_c49']) v "
+        "WHERE to_regclass('public.' || v) IS NOT NULL")
+    verifier(not restes, f"l'ancien calcul est encore en base : {restes}")
+    lecteurs = infra.valeur(
+        "SELECT string_agg(n, ', ') FROM (SELECT viewname AS n FROM pg_views WHERE schemaname = 'public' "
+        "AND definition ~ 'v_stock_projete|v_plan_achat|v_encours_fiable|v_besoin_horizon|stock_mrp_net_kg|P_MrpInclureStockMachine' "
+        "UNION SELECT p.proname FROM pg_proc p JOIN pg_namespace s ON s.oid = p.pronamespace WHERE s.nspname = 'public' "
+        "AND p.prosrc ~ 'v_stock_projete|v_plan_achat|v_encours_fiable|v_besoin_horizon|stock_mrp_net_kg|P_MrpInclureStockMachine') x")
+    verifier(not lecteurs, f"des objets lisent encore l'ancien calcul : {lecteurs}")
+    verifier(infra.valeur("SELECT count(*) FROM parametre WHERE code_parametre = 'P_MrpInclureStockMachine'") == "0",
+             "le parametre mort P_MrpInclureStockMachine existe encore")
+    for chemin in ("/api/plan-achat/detail?reference=X",):
+        c.refus("Choukri", "GET", chemin, codes=(404, 405))
+
+    # LES INDICATEURS SONT CEUX DU MOTEUR : la liste « A commander » fait foi. Sans releve fige,
+    # /api/plan-achat/kpi les calcule a la lecture (comme a la generation) : on vide le cache du banc
+    # plutot que de regenerer tout le plan (voir le rapport : une regeneration complete apres
+    # l'annulation d'un bon issu d'une proposition bute sur ligne_bc.id_proposition, defaut anterieur).
+    infra.sql("DELETE FROM plan_achat_indicateurs")
+    lignes = [x for x in c.ok("Choukri", "GET", "/api/couverture")["lignes"] if x["actif"]]
+    attendu = {
+        "references": len(lignes),
+        "plan_non_couvert": sum(x["statut"] == "PLAN_NON_COUVERT" for x in lignes),
+        "sous_securite": sum(x["statut"] == "SOUS_SECURITE" for x in lignes),
+        "couvert": sum(x["statut"] == "COUVERT" for x in lignes),
+        "a_commander_aujourdhui": sum(bool(x["a_commander_aujourdhui"]) for x in lignes),
+        "classe_a_en_rupture": sum(x["statut"] == "PLAN_NON_COUVERT" and x["classe_abc"] == "A" for x in lignes),
+    }
+    verifier(attendu["references"] == attendu["plan_non_couvert"] + attendu["sous_securite"] + attendu["couvert"],
+             f"les trois etats ne font pas le total : {attendu}")
+    for x in lignes:
+        etat = ("PLAN_NON_COUVERT" if x["premiere_rupture"] else "SOUS_SECURITE" if x["premier_passage_securite"]
+                else "COUVERT")
+        verifier(x["statut"] == etat, f"{x['code_reference']} : etat {x['statut']}, {etat} selon ses dates")
+    kpi = c.ok("Choukri", "GET", "/api/plan-achat/kpi")["globaux"]
+    verifier({k: kpi.get(k) for k in attendu} == attendu, f"Situation du plan d'achat {kpi}, moteur {attendu}")
+    cockpit = c.ok("Choukri", "GET", "/api/cockpit")
+    verifier({k: cockpit.get("nb_" + k) for k in attendu} == {k: v for k, v in attendu.items()},
+             f"cockpit {[(k, cockpit.get('nb_' + k)) for k in attendu]}, moteur {attendu}")
+    projete = c.ok("Choukri", "GET", "/api/stock/projete?limite=5000")
+    verifier(len(projete) == attendu["references"]
+             and sum(x["statut"] == "PLAN_NON_COUVERT" for x in projete) == attendu["plan_non_couvert"],
+             f"le stock projete ({len(projete)} lignes) n'est pas la vue du moteur ({attendu})")
+    par_frs = c.ok("Choukri", "GET", "/api/plan-achat/kpi")["fournisseurs"]
+    etat = {x["code_reference"]: x["statut"] for x in lignes}
+    for f in par_frs:
+        refs = infra.sql("SELECT code_reference FROM plan_achat WHERE statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE') "
+                         f"AND code_fournisseur = '{f['code_fournisseur']}'")
+        n = sum(etat.get(r[0]) == "PLAN_NON_COUVERT" for r in refs)
+        verifier(f["nb_plan_non_couvert"] == n, f"{f['code_fournisseur']} : {f['nb_plan_non_couvert']} au plan non couvert, {n} au moteur")
+
+    # LA FENETRE [D, F[ : D inclus, F exclu, la couverture du fournisseur (30 jours par defaut).
+    avec = next((x for x in lignes if x.get("qte_a_commander_kg")), None)
+    if avec:
+        d = c.ok("Choukri", "GET", f"/api/couverture/{quote(avec['code_reference'], safe='')}")
+        for p in d["propositions"]:
+            debut, fin = date.fromisoformat(p["date_disponibilite"]), date.fromisoformat(p["date_fin_fenetre"])
+            verifier((fin - debut).days == p["jours_fenetre"]
+                     and (fin - date.fromisoformat(p["dernier_jour_couvert"])).days == 1,
+                     f"fenetre {p['date_disponibilite']} -> {p['date_fin_fenetre']} ({p['jours_fenetre']} j)")
+            verifier(p["fenetre_bornee_horizon"] or p["jours_fenetre"] == d["reglages"]["couverture_commande_j"],
+                     f"fenetre de {p['jours_fenetre']} j, couverture {d['reglages']['couverture_commande_j']} j")
+            plan = sum(j["conso_prevue_kg"] for j in d["jours"] if p["date_disponibilite"] <= j["date"] < p["date_fin_fenetre"])
+            verifier(abs(plan - p["plan_fenetre_kg"]) < 0.05, f"plan de la fenetre {p['plan_fenetre_kg']}, jours {plan:.4f}")
+
+    # « PLAN / MOIS » (27/10/2026) : les listes pilotees par le moteur montrent le plan qu'il consomme
+    # (plan de l'horizon ramene a 30 jours), plus l'ancienne consommation retenue.
+    if avec:
+        d = c.ok("Choukri", "GET", f"/api/couverture/{quote(avec['code_reference'], safe='')}")
+        attendu_mois = round(d["synthese"]["plan_horizon_kg"] * 30 / len(d["jours"]), 4)
+        verifier(abs(d["synthese"]["plan_mois_kg"] - attendu_mois) < 0.001,
+                 f"plan / mois {d['synthese']['plan_mois_kg']}, {attendu_mois} attendus")
+    alertes = c.ok("Choukri", "GET", "/api/cockpit/analyse")["alertes"]
+    verifier(all("plan_mois_kg" in x and "conso_mensuelle_kg" not in x for x in alertes),
+             "les references en alerte lisent encore l'ancienne consommation")
+
+    # SANS CLASSE ABC : la plus longue des trois securites, et le defaut de donnees signale.
+    cible = next((x for x in lignes if x["classe_abc"]), None)
+    if cible:
+        code = cible["code_reference"]
+        infra.sql(f"UPDATE reference SET classe_abc = NULL WHERE code_reference = '{code}'")
+        try:
+            plus_longue = max(float(infra.valeur(f"SELECT valeur_courante FROM parametre WHERE code_parametre = '{p}'"))
+                              for p in ("P_SecuriteA", "P_SecuriteB", "P_SecuriteC"))
+            ligne = next(x for x in c.ok("Choukri", "GET", "/api/couverture")["lignes"] if x["code_reference"] == code)
+            verifier(ligne["jours_securite"] == plus_longue and "sans classe ABC" in (ligne["defaut_donnees"] or ""),
+                     f"sans classe : securite {ligne['jours_securite']} j ({plus_longue} attendus), defaut {ligne['defaut_donnees']}")
+            verifier(ligne["qte_a_commander_kg"] is not None or ligne["motif_sans_proposition"],
+                     "un defaut de donnees bloque le calcul")
+        finally:
+            infra.sql(f"UPDATE reference SET classe_abc = '{cible['classe_abc']}' WHERE code_reference = '{code}'")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_bon_demande_prix,
@@ -5384,6 +5632,8 @@ SCENARIOS = [
     scenario_codes_erreur,
     scenario_recherche_referentiels,
     scenario_couverture_moteur,
+    scenario_transit_moteur,
+    scenario_source_unique,
     scenario_sauvegarde_restaurable,
     scenario_controles_finaux,
 ]

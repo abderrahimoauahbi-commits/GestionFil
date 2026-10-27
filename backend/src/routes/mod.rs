@@ -381,6 +381,12 @@ pub fn router(state: AppState) -> Router {
                 .delete(transferts::annuler_transfert),
         )
         .route("/api/transferts/{id}/expedier", post(operations::expedier_transfert))
+        // La date prevue de disponibilite, revisable tant que le transfert roule
+        // (27/10/2026) : le moteur de couverture le compte a cette date.
+        .route(
+            "/api/transferts/{id}/date-disponibilite",
+            post(transferts::reviser_date_disponibilite),
+        )
         .route(
             "/api/transferts/{id}/receptionner",
             post(operations::receptionner_transfert),
@@ -448,16 +454,16 @@ pub fn router(state: AppState) -> Router {
         .route("/api/factures-fournisseur/{id}",
                get(factures::lire).patch(factures::modifier).delete(factures::supprimer))
         .route("/api/factures-fournisseur/{id}/valider", post(factures::valider))
-        // LA COUVERTURE DU PLAN (moteur du 26/10/2026, en parallele du plan d'achat) :
-        // le plan seul, le stock du jour, les arrivages dates, la proposition.
+        // LA COUVERTURE DU PLAN (moteur du 26/10/2026) : le plan seul, le stock du
+        // jour, les arrivages dates, la proposition. Depuis le 27/10/2026, la seule
+        // source de verite du besoin : l'ancien calcul (`GET /api/plan-achat`,
+        // `/api/plan-achat/detail`, v_plan_achat) est retire.
         .route("/api/couverture", get(couverture::liste))
         .route("/api/couverture/{reference}", get(couverture::detail))
-        .route("/api/plan-achat", get(consultation::plan_achat))
         .route("/api/plan-achat/generer", post(operations::generer_plan_achat))
         .route("/api/plan-achat/commander", post(operations::convertir_plan_achat))
         .route("/api/plan-achat/kpi", get(consultation::kpi_plan_achat))
         .route("/api/plan-achat/stocks-minimums", get(consultation::stocks_minimums))
-        .route("/api/plan-achat/detail", get(consultation::detail_proposition))
         .route("/api/historique-prix", get(consultation::historique_prix))
         .route("/api/matrice-prix", get(consultation::matrice_prix))
         .route("/api/plan-achat/propositions", get(consultation::propositions_achat))

@@ -114,6 +114,8 @@ interface DossierEntete extends Record<string, unknown> {
   responsable: string | null
   transporteur: string | null
   observations: string | null
+  /** Date prevue de disponibilite au destinataire ('AAAA-MM-JJ'), exigee a l'expedition (27/10/2026). */
+  date_disponibilite_prevue?: string | null
 }
 
 /**
@@ -230,6 +232,7 @@ export function TransfertNouveau() {
     code_magasin_source: '',
     code_magasin_dest: '',
     date_transfert: new Date().toISOString().slice(0, 10),
+    date_disponibilite_prevue: '',
     responsable: '',
     transporteur: '',
     observations: '',
@@ -301,6 +304,7 @@ export function TransfertNouveau() {
       code_magasin_source: d.entete.code_magasin_source ?? '',
       code_magasin_dest: d.entete.code_magasin_dest ?? '',
       date_transfert: (d.entete.date_transfert ?? '').slice(0, 10),
+      date_disponibilite_prevue: (d.entete.date_disponibilite_prevue ?? '').slice(0, 10),
       responsable: d.entete.responsable ?? '',
       transporteur: d.entete.transporteur ?? '',
       observations: d.entete.observations ?? '',
@@ -508,6 +512,7 @@ export function TransfertNouveau() {
           code_magasin_source: dossier.code_magasin_source ?? '',
           code_magasin_dest: dossier.code_magasin_dest ?? '',
           date_transfert: (dossier.date_transfert ?? '').slice(0, 10),
+          date_disponibilite_prevue: (dossier.date_disponibilite_prevue ?? '').slice(0, 10),
           responsable: dossier.responsable ?? '',
           transporteur: dossier.transporteur ?? '',
           observations: dossier.observations ?? '',
@@ -531,6 +536,8 @@ export function TransfertNouveau() {
     code_magasin_source: entete.code_magasin_source,
     code_magasin_dest: entete.code_magasin_dest,
     date_transfert: entete.date_transfert || undefined,
+    // LE PUT FAIT AUTORITE : la valeur courante part toujours, vide = effacee.
+    date_disponibilite_prevue: entete.date_disponibilite_prevue || null,
     responsable: entete.responsable || undefined,
     transporteur: entete.transporteur || undefined,
     observations: entete.observations || undefined,
@@ -743,6 +750,28 @@ export function TransfertNouveau() {
                 <p className="mt-1 text-[11px] text-attenue-texte">
                   La date de sortie sera celle de l'expedition, la date d'arrivee celle de la
                   reception.
+                </p>
+              </div>
+              <div>
+                {/* LA DATE PREVUE DE DISPONIBILITE (27/10/2026) : le plan d'achat
+                    compte le fil en route a cette date. Facultative en
+                    preparation, exigee a l'expedition. */}
+                <Etiq htmlFor="dispo">Disponible au magasin destinataire le</Etiq>
+                <Champ
+                  id="dispo"
+                  type="date"
+                  min={entete.date_transfert || undefined}
+                  value={entete.date_disponibilite_prevue}
+                  onChange={(e) =>
+                    setEntete({ ...entete, date_disponibilite_prevue: e.target.value })
+                  }
+                />
+                <p className="mt-1 text-[11px] text-attenue-texte">
+                  {parti
+                    ? statut === 'VALIDE'
+                      ? 'En route : elle se révise depuis la liste des transferts (« Réviser la date »).'
+                      : 'Le transfert n’est plus en route : la date ne se révise plus.'
+                    : 'Peut rester vide en préparation ; elle sera exigée à l’expédition.'}
                 </p>
               </div>
               <div>

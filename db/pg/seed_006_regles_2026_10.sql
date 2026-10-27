@@ -15,9 +15,10 @@
 -- -----------------------------------------------------------------------------
 -- 1. PARAMETRES
 -- -----------------------------------------------------------------------------
+-- P_MrpInclureStockMachine n'est plus pose (27/10/2026, migration
+-- 2026-10-27e_source_unique_moteur.sql) : parametre sans lecteur, le fil sur
+-- machine compte toujours au dernier constat (moteur de couverture).
 INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, unite, description, categorie, modifiable_par) VALUES
-  ('P_MrpInclureStockMachine', 'Compter le fil sur machine dans les besoins d''achat', '1', 'ENTIER', NULL,
-   '1 : le fil charge sur machine compte comme stock disponible pour le calcul des besoins ; 0 : il est ignore.', 'STOCK', 'DIRECTION'),
   ('P_AncienneteTauxJours', 'Anciennete maximale du taux de reference', '7', 'ENTIER', 'jours',
    'Au-dela, un bon de commande en devise ne se valide pas tant que le taux du jour n''est pas saisi. Le taux de chaque facture d''import reste celui de sa facture.', 'ACHAT', 'DIRECTION'),
   ('P_MachineEcartVertKg',   'Ecart machine : vert jusqu''a (kg)',   '10', 'DECIMAL', 'kg', 'Le seuil vert est le plus grand de ce poids et du pourcentage vert de la ligne.', 'MACHINE', 'DIRECTION'),

@@ -7,17 +7,29 @@
 //! « Commander » part de la première proposition du moteur) : la liste, le détail
 //! et la proposition enregistrée ne peuvent pas diverger.
 //!
-//! Ce qui est COMPTÉ aujourd'hui (décisions du 26/10/2026) :
+//! UNE SEULE SOURCE DE VÉRITÉ (arbitrage du 27/10/2026) : tout ce qui dit d'une
+//! référence qu'elle est couverte, en rupture, sous la sécurité ou « à commander »
+//! vient d'ici — `etats()` pour les écrans et les compteurs (cockpit, briefing,
+//! stock projeté, mur de risques, indicateurs du plan d'achat, assistant, saisie
+//! d'un bon) et `controles_moteur()` pour les contrôles qui en dépendent (C05,
+//! C25). L'ancien calcul (`v_stock_projete`, `v_plan_achat`, `v_encours_fiable`,
+//! `v_besoin_horizon`…) est retiré par 2026-10-27e.
+//!
+//! Ce qui est COMPTÉ aujourd'hui (décisions du 26/10/2026 et du 27/10/2026) :
 //!   * le stock des magasins comptés au plan (`inclure_mrp = 1`, hors
 //!     quarantaine), lots libres — restes et dormants compris —, lots BLOQUÉS exclus ;
 //!   * le fil sur les machines au dernier constat (`machine_etat.kg`), QUEL QUE
 //!     SOIT son âge, restes chargés compris, lots bloqués exclus ;
 //!   * les lignes de bon VALIDÉ / ENVOYÉ / LIVRÉ PARTIEL, à la date de livraison
-//!     prévue de la ligne, sinon de l'en-tête (règle PROVISOIRE).
+//!     prévue de la ligne, sinon de l'en-tête (règle PROVISOIRE) ;
+//!   * le fil EN ROUTE (transfert expédié vers un magasin compté), à sa DATE
+//!     PRÉVUE DE DISPONIBILITÉ (`transfert.date_disponibilite_prevue`, obligatoire
+//!     à l'expédition, révisable tant qu'il roule) : catégorie TRANSIT. Jamais une
+//!     date déduite d'un constat machine ni d'autre chose.
 //!
 //! Ce qui est AFFICHÉ À PART, jamais compté : quarantaine, bloqué, magasins hors
-//! plan, bons en retard ou sans date, bons non validés, import en route sans bon,
-//! transferts en route. Ni les prêts ni les réceptions non validées n'entrent.
+//! plan, bons et transferts en retard ou sans date, bons non validés, import en
+//! route sans bon. Ni les prêts ni les réceptions non validées n'entrent.
 //!
 //! Aucun montant ne sort d'ici (des kilos et des dates) ; le masquage par champ
 //! s'applique quand même à la sortie, comme sur les routes voisines.
@@ -44,8 +56,23 @@ const REGLES_PROVISOIRES: &[&str] = &[
     "Un bon sans date de livraison prévue est hors couverture, listé à part.",
     "Un bon non validé (brouillon, contrôle, demande de prix, attente de validation) ne compte pas.",
     "L'import en route sans bon n'a pas de date fiable : hors couverture, listé à part.",
-    "Un transfert en route est hors couverture jusqu'à sa réception.",
+    "Un transfert en route arrive au magasin destinataire à sa date prévue de disponibilité, saisie à l'expédition et révisable tant qu'il roule : il est compté à cette date.",
+    "Une date prévue de disponibilité dépassée met le transfert EN RETARD : hors couverture tant qu'aucune nouvelle date n'est saisie. Un transfert en route sans date (expédié avant la règle) est hors couverture, listé « sans date ».",
+    "La fenêtre d'une commande est [D, F[ : D inclus, F exclu, F = D + couverture du fournisseur, sinon P_MargeJours (30 jours pleins par défaut).",
+    "Une référence sans classe ABC prend la plus longue des trois sécurités ; le défaut de données est signalé sur la ligne.",
 ];
+
+/// Les trois états d'une référence au sens du moteur (arbitrage du 27/10/2026) :
+/// ils remplacent RUPTURE / CRITIQUE / ATTENTION / OK de l'ancien calcul partout
+/// où une référence est dite couverte ou non.
+pub mod statut {
+    /// Une rupture est prévue sur l'horizon : une part du plan ne sera pas couverte.
+    pub const PLAN_NON_COUVERT: &str = "PLAN_NON_COUVERT";
+    /// Le solde projeté passe sous la sécurité, sans rupture sur l'horizon.
+    pub const SOUS_SECURITE: &str = "SOUS_SECURITE";
+    /// Ni rupture ni passage sous la sécurité sur l'horizon.
+    pub const COUVERT: &str = "COUVERT";
+}
 
 // ============================================================================
 // Ce qui se lit
@@ -132,6 +159,8 @@ struct LigneTransit {
     lot_fournisseur: Option<String>,
     kg: f64,
     date_expedition: Option<NaiveDate>,
+    /// La date prévue de disponibilité au magasin destinataire (27/10/2026).
+    date_prevue: Option<NaiveDate>,
 }
 
 struct Donnees {
@@ -399,12 +428,14 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
         });
     }
 
-    // Les transferts en route vers un magasin compté (la CTE `en_route` de v_stock_physique).
+    // Les transferts en route vers un magasin compté (la CTE `en_route` de
+    // v_stock_physique), avec leur date prévue de disponibilité (27/10/2026).
     let mut transits: HashMap<String, Vec<LigneTransit>> = HashMap::new();
     for l in sqlx::query(
         "SELECT lt.code_reference, t.id_transfert, t.numero_transfert, t.code_magasin_source, t.code_magasin_dest,
                 lt.lot_fournisseur, lt.quantite_kg::float8 AS kg,
-                COALESCE(t.date_sortie::date, t.date_transfert) AS date_expedition
+                COALESCE(t.date_sortie::date, t.date_transfert) AS date_expedition,
+                t.date_disponibilite_prevue AS date_prevue
            FROM transfert t
            JOIN ligne_transfert lt ON lt.id_transfert = t.id_transfert
            JOIN magasin md ON md.code_magasin = t.code_magasin_dest
@@ -424,6 +455,7 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
             lot_fournisseur: l.try_get("lot_fournisseur")?,
             kg: l.try_get("kg")?,
             date_expedition: l.try_get("date_expedition")?,
+            date_prevue: l.try_get("date_prevue")?,
         });
     }
 
@@ -457,6 +489,9 @@ struct Analyse<'a> {
     source_couverture: Source,
     source_securite: String,
     source_multiple: &'static str,
+    /// Un DÉFAUT DE DONNÉES de la fiche qui a imposé un réglage par défaut
+    /// (aujourd'hui : pas de classe ABC). Signalé sur la ligne, jamais bloquant.
+    defaut_donnees: Option<String>,
     magasin_compte_kg: f64,
     machine_compte_kg: f64,
     restes_kg: f64,
@@ -487,6 +522,50 @@ impl Analyse<'_> {
     fn a_lister(&self) -> bool {
         self.resultat.plan_horizon_kg > 0.0 || self.a_du_stock() || self.a_un_arrivage()
     }
+    /// L'état de la référence au sens du moteur (voir `statut`).
+    fn statut(&self) -> &'static str {
+        statut_de(&self.resultat)
+    }
+    /// Les jours couverts à partir d'aujourd'hui : jusqu'à la veille de la
+    /// première rupture (0 = rupture aujourd'hui) ; `None` sans rupture sur l'horizon.
+    fn jours_couverture(&self) -> Option<i64> {
+        self.resultat.premiere_rupture.map(|r| (r - self.reglages.aujourdhui).num_days())
+    }
+    /// « À commander aujourd'hui » : la date limite de commande de la première
+    /// proposition est atteinte ou dépassée.
+    fn a_commander_aujourdhui(&self) -> bool {
+        self.resultat
+            .propositions
+            .first()
+            .is_some_and(|p| p.date_limite_commande <= self.reglages.aujourdhui)
+    }
+    /// LE PLAN PAR MOIS que le moteur consomme (27/10/2026) : le plan de l'horizon
+    /// ramené à un mois de 30 jours (plan de l'horizon × 30 ÷ jours de l'horizon,
+    /// aujourd'hui compris). Il remplace la « conso / mois » de l'ancienne
+    /// consommation retenue dans les listes pilotées par le moteur.
+    fn plan_mois_kg(&self) -> f64 {
+        let n = self.resultat.jours.len();
+        if n == 0 {
+            return 0.0;
+        }
+        arrondi_kg(self.resultat.plan_horizon_kg * 30.0 / n as f64) + 0.0
+    }
+    /// Les kilos des arrivages comptés (bons datés, transferts en route datés).
+    fn arrivages_comptes_kg(&self) -> f64 {
+        arrondi_kg(self.arrivages.iter().filter(|a| a.compte).map(|a| a.kg).sum::<f64>()) + 0.0
+    }
+}
+
+/// L'état d'une référence au sens du moteur : une rupture prévue sur l'horizon
+/// l'emporte sur un passage sous la sécurité.
+fn statut_de(c: &Couverture) -> &'static str {
+    if c.premiere_rupture.is_some() {
+        statut::PLAN_NON_COUVERT
+    } else if c.premier_passage_securite.is_some() {
+        statut::SOUS_SECURITE
+    } else {
+        statut::COUVERT
+    }
 }
 
 fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
@@ -505,15 +584,25 @@ fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
         Some(x) => (x, Source::Fournisseur),
         None => (p.marge_jours, Source::ParametreGlobal),
     };
-    // Les jours de sécurité de la classe ABC ; sans classe, la plus prudente des trois.
-    let (jours_securite, source_securite) = match fiche.classe_abc.as_deref().map(str::trim) {
-        Some("A") => (p.securite[0], "classe A (P_SecuriteA)".to_string()),
-        Some("B") => (p.securite[1], "classe B (P_SecuriteB)".to_string()),
-        Some("C") => (p.securite[2], "classe C (P_SecuriteC)".to_string()),
-        autre => (
-            p.securite.iter().cloned().fold(0.0, f64::max),
-            format!("classe {} inconnue : la plus longue des trois", autre.unwrap_or("vide")),
-        ),
+    // Les jours de sécurité de la classe ABC ; sans classe, la plus prudente des
+    // trois (décision du 27/10/2026 : on la garde), et le défaut de données est
+    // signalé sur la ligne, jamais bloquant.
+    let (jours_securite, source_securite, defaut_donnees) = match fiche.classe_abc.as_deref().map(str::trim) {
+        Some("A") => (p.securite[0], "classe A (P_SecuriteA)".to_string(), None),
+        Some("B") => (p.securite[1], "classe B (P_SecuriteB)".to_string(), None),
+        Some("C") => (p.securite[2], "classe C (P_SecuriteC)".to_string(), None),
+        autre => {
+            let jours = p.securite.iter().cloned().fold(0.0, f64::max);
+            let classe = autre.filter(|c| !c.is_empty());
+            (
+                jours,
+                format!("classe {} : la plus longue des trois", classe.unwrap_or("absente")),
+                Some(match classe {
+                    Some(c) => format!("classe ABC « {c} » inconnue : sécurité par défaut de {jours} j (la plus longue des trois)"),
+                    None => format!("sans classe ABC : sécurité par défaut de {jours} j (la plus longue des trois)"),
+                }),
+            )
+        }
     };
     let kg_palette = match (fiche.poids_bobine_kg, fiche.bobines_par_palette) {
         (Some(pb), Some(bp)) if pb > 0.0 && bp > 0 => Some(arrondi_kg(pb * bp as f64)),
@@ -623,7 +712,26 @@ fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
             compte: false,
         });
     }
+    // LE FIL EN ROUTE EST UN ARRIVAGE (27/10/2026) : compté à sa date prévue de
+    // disponibilité, comme un bon à sa date ; en retard ou sans date, à part.
     for t in d.transits.get(code).into_iter().flatten() {
+        let (categorie, raison): (&'static str, String) = match t.date_prevue {
+            None => (
+                "SANS_DATE",
+                "transfert en route sans date prévue de disponibilité (expédié avant la règle) : hors couverture, à dater".into(),
+            ),
+            Some(x) if x < auj => (
+                "EN_RETARD",
+                format!(
+                    "date prévue de disponibilité dépassée de {} j : hors couverture tant qu'aucune nouvelle date n'est saisie",
+                    (auj - x).num_days()
+                ),
+            ),
+            Some(_) if d.plan.is_none() => ("APRES_HORIZON", "aucun plan en service : pas d'horizon".into()),
+            Some(x) if x > fin => ("APRES_HORIZON", "disponible après la fin de l'horizon du plan".into()),
+            Some(_) => ("TRANSIT", "transfert en route : compté à sa date prévue de disponibilité".into()),
+        };
+        let compte = categorie == "TRANSIT";
         arrivages.push(ArrivageClasse {
             detail: json!({
                 "origine": "TRANSFERT",
@@ -631,15 +739,16 @@ fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
                 "code_magasin_source": t.code_magasin_source, "code_magasin_dest": t.code_magasin_dest,
                 "lot_fournisseur": t.lot_fournisseur,
                 "date_expedition": t.date_expedition,
-                "date": Value::Null, "source_date": Value::Null,
+                "date_disponibilite_prevue": t.date_prevue,
+                "date": t.date_prevue,
+                "source_date": t.date_prevue.map(|_| "date prévue de disponibilité"),
                 "kg": arrondi_kg(t.kg),
-                "compte": false, "categorie": "TRANSIT",
-                "raison": "transfert en route : hors couverture jusqu'à sa réception",
+                "compte": compte, "categorie": categorie, "raison": raison,
             }),
-            date: None,
+            date: t.date_prevue,
             kg: t.kg,
-            categorie: "TRANSIT",
-            compte: false,
+            categorie,
+            compte,
         });
     }
 
@@ -658,6 +767,7 @@ fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
         source_couverture,
         source_securite,
         source_multiple,
+        defaut_donnees,
         magasin_compte_kg,
         machine_compte_kg,
         restes_kg,
@@ -674,7 +784,7 @@ fn ligne(a: &Analyse) -> Value {
     let r = &a.resultat;
     let prochain = r.jours.iter().find(|j| j.arrivee_kg > 0.0);
     let premiere = r.propositions.first();
-    json!({
+    let mut v = json!({
         "code_reference": a.fiche.code_reference,
         "designation": a.fiche.designation,
         "classe_abc": a.fiche.classe_abc,
@@ -714,7 +824,17 @@ fn ligne(a: &Analyse) -> Value {
         "transit_kg": a.somme("TRANSIT"),
         "non_valide_kg": a.somme("NON_VALIDE"),
         "apres_horizon_kg": a.somme("APRES_HORIZON"),
-    })
+    });
+    // L'état au sens du moteur (27/10/2026), le même pour tout l'ERP.
+    if let Some(o) = v.as_object_mut() {
+        o.insert("statut".into(), json!(a.statut()));
+        o.insert("jours_couverture".into(), json!(a.jours_couverture()));
+        o.insert("a_commander_aujourdhui".into(), json!(a.a_commander_aujourdhui()));
+        o.insert("arrivages_comptes_kg".into(), json!(a.arrivages_comptes_kg()));
+        o.insert("plan_mois_kg".into(), json!(a.plan_mois_kg()));
+        o.insert("defaut_donnees".into(), json!(a.defaut_donnees));
+    }
+    v
 }
 
 fn entete(d: &Donnees) -> Value {
@@ -777,6 +897,469 @@ pub async fn premieres_propositions(
         }
     }
     Ok((d.aujourdhui, sortie))
+}
+
+// ============================================================================
+// L'état de chaque référence, pour tout l'ERP (une seule source, 27/10/2026)
+// ============================================================================
+
+/// Un mois de la frise d'une référence (mur de risques, photo du plan) : ce que
+/// le moteur projette, regroupé par mois de calendrier dans l'horizon.
+#[derive(Debug, Clone)]
+pub struct MoisFrise {
+    pub annee_mois: String,
+    pub rang_mois: usize,
+    /// Le plan du mois compris dans l'horizon (depuis aujourd'hui pour le mois en cours).
+    pub besoin_kg: f64,
+    /// Les arrivages comptés du mois.
+    pub entrees_kg: f64,
+    /// Le solde projeté en fin de mois (ou au dernier jour de l'horizon), jamais négatif.
+    pub stock_fin_kg: f64,
+    /// La ligne de sécurité au même jour.
+    pub securite_kg: f64,
+    pub plan_non_couvert_kg: f64,
+    /// PLAN_NON_COUVERT si une part du plan du mois n'est pas couverte, SOUS_SECURITE
+    /// si le solde passe sous la sécurité un jour du mois, COUVERT sinon.
+    pub statut: &'static str,
+}
+
+/// L'état d'une référence au sens du moteur, détaché de la lecture.
+#[derive(Debug, Clone)]
+pub struct Etat {
+    pub code_reference: String,
+    pub designation: Option<String>,
+    pub classe_abc: Option<String>,
+    /// Suivie = active ET listée par le moteur (une demande au plan, du stock ou
+    /// un arrivage) : c'est l'ensemble que comptent les indicateurs.
+    pub suivie: bool,
+    pub code_fournisseur: Option<String>,
+    pub fournisseur_nom: Option<String>,
+    pub statut: &'static str,
+    pub jours_couverture: Option<i64>,
+    pub premiere_rupture: Option<NaiveDate>,
+    pub couvert_jusqu_au: Option<NaiveDate>,
+    pub premier_passage_securite: Option<NaiveDate>,
+    pub plan_horizon_kg: f64,
+    /// Le plan ramené à un mois de 30 jours (voir `Analyse::plan_mois_kg`).
+    pub plan_mois_kg: f64,
+    pub plan_non_couvert_kg: f64,
+    pub disponible_kg: f64,
+    pub arrivages_comptes_kg: f64,
+    pub qte_a_commander_kg: Option<f64>,
+    pub date_limite_commande: Option<NaiveDate>,
+    pub a_commander_aujourdhui: bool,
+    pub delai_j: i64,
+    pub defaut_donnees: Option<String>,
+    /// La ligne complète de la liste « À commander » (mêmes champs).
+    pub ligne: Value,
+    pub mois: Vec<MoisFrise>,
+}
+
+impl Etat {
+    /// Les COLONNES DU MOTEUR qu'un écran ajoute à ses propres lignes : mêmes
+    /// noms partout (stock projeté, état des stocks, cockpit, analyses…).
+    pub fn colonnes(&self) -> serde_json::Map<String, Value> {
+        let v = json!({
+            "statut": self.statut,
+            "jours_couverture": self.jours_couverture,
+            "premiere_rupture": self.premiere_rupture,
+            "couvert_jusqu_au": self.couvert_jusqu_au,
+            "premier_passage_securite": self.premier_passage_securite,
+            "plan_horizon_kg": self.plan_horizon_kg,
+            "plan_mois_kg": self.plan_mois_kg,
+            "plan_non_couvert_kg": self.plan_non_couvert_kg,
+            "arrivages_comptes_kg": self.arrivages_comptes_kg,
+            "qte_a_commander_kg": self.qte_a_commander_kg,
+            "date_limite_commande": self.date_limite_commande,
+            "a_commander_aujourdhui": self.a_commander_aujourdhui,
+            "defaut_donnees": self.defaut_donnees,
+        });
+        match v {
+            Value::Object(m) => m,
+            _ => serde_json::Map::new(),
+        }
+    }
+
+    /// En tension = tout sauf COUVERT.
+    pub fn en_tension(&self) -> bool {
+        self.statut != statut::COUVERT
+    }
+
+    /// Classe A ET plan non couvert.
+    pub fn classe_a_en_rupture(&self) -> bool {
+        self.statut == statut::PLAN_NON_COUVERT && self.classe_abc.as_deref().map(str::trim) == Some("A")
+    }
+}
+
+/// L'état de toutes les références, calculé en une lecture.
+pub struct Etats {
+    pub aujourdhui: NaiveDate,
+    pub fin_horizon: Option<NaiveDate>,
+    /// Le plan en service, dont le moteur projette la demande.
+    pub id_plan: Option<String>,
+    references: BTreeMap<String, Etat>,
+}
+
+/// Rang d'un statut pour les tris : le plus grave d'abord.
+pub fn rang_statut(s: &str) -> u8 {
+    match s {
+        statut::PLAN_NON_COUVERT => 0,
+        statut::SOUS_SECURITE => 1,
+        _ => 2,
+    }
+}
+
+impl Etats {
+    pub fn get(&self, code: &str) -> Option<&Etat> {
+        self.references.get(code.trim())
+    }
+
+    /// Les références que comptent les indicateurs (actives, listées par le moteur).
+    pub fn suivies(&self) -> impl Iterator<Item = &Etat> {
+        self.references.values().filter(|e| e.suivie)
+    }
+
+    /// Les références suivies en tension, les plus graves d'abord : plan non
+    /// couvert puis sous la sécurité, la rupture (ou le passage sous la sécurité)
+    /// la plus proche en tête.
+    pub fn en_tension(&self) -> Vec<&Etat> {
+        let mut v: Vec<&Etat> = self.suivies().filter(|e| e.en_tension()).collect();
+        v.sort_by(|a, b| {
+            rang_statut(a.statut)
+                .cmp(&rang_statut(b.statut))
+                .then_with(|| {
+                    a.premiere_rupture
+                        .or(a.premier_passage_securite)
+                        .unwrap_or(NaiveDate::MAX)
+                        .cmp(&b.premiere_rupture.or(b.premier_passage_securite).unwrap_or(NaiveDate::MAX))
+                })
+                .then_with(|| a.code_reference.cmp(&b.code_reference))
+        });
+        v
+    }
+
+    /// Les compteurs du moteur (cockpit, briefing, Situation du plan d'achat).
+    pub fn compteurs(&self) -> Value {
+        let (mut total, mut pnc, mut sous, mut couvert, mut aujourdhui, mut classe_a) = (0, 0, 0, 0, 0, 0);
+        for e in self.suivies() {
+            total += 1;
+            match e.statut {
+                statut::PLAN_NON_COUVERT => pnc += 1,
+                statut::SOUS_SECURITE => sous += 1,
+                _ => couvert += 1,
+            }
+            if e.a_commander_aujourdhui {
+                aujourdhui += 1;
+            }
+            if e.classe_a_en_rupture() {
+                classe_a += 1;
+            }
+        }
+        json!({
+            "nb_references": total,
+            "nb_plan_non_couvert": pnc,
+            "nb_sous_securite": sous,
+            "nb_couvert": couvert,
+            "nb_a_commander_aujourdhui": aujourdhui,
+            "nb_classe_a_en_rupture": classe_a,
+        })
+    }
+
+    /// Ajoute les colonnes du moteur à chaque objet portant `code_reference` (un
+    /// tableau d'objets ou un objet seul). L'état se range sous `cle_statut`
+    /// (`statut` d'ordinaire ; `statut_stock` là où `statut` dit autre chose).
+    /// Une référence que le moteur ne connaît pas reçoit des colonnes vides.
+    pub fn enrichir(&self, v: &mut Value, cle_statut: &str) {
+        let un = |o: &mut serde_json::Map<String, Value>| {
+            let code = o.get("code_reference").and_then(Value::as_str).map(str::to_string);
+            let Some(code) = code else { return };
+            match self.get(&code) {
+                Some(e) => {
+                    for (k, val) in e.colonnes() {
+                        let cle = if k == "statut" { cle_statut.to_string() } else { k };
+                        o.insert(cle, val);
+                    }
+                }
+                None => {
+                    for k in Etat::noms_colonnes() {
+                        let cle = if *k == "statut" { cle_statut.to_string() } else { k.to_string() };
+                        o.insert(cle, Value::Null);
+                    }
+                }
+            }
+        };
+        match v {
+            Value::Array(items) => {
+                for i in items.iter_mut() {
+                    if let Some(o) = i.as_object_mut() {
+                        un(o);
+                    }
+                }
+            }
+            Value::Object(o) => un(o),
+            _ => {}
+        }
+    }
+}
+
+impl Etat {
+    fn noms_colonnes() -> &'static [&'static str] {
+        &[
+            "statut", "jours_couverture", "premiere_rupture", "couvert_jusqu_au", "premier_passage_securite",
+            "plan_horizon_kg", "plan_mois_kg", "plan_non_couvert_kg", "arrivages_comptes_kg", "qte_a_commander_kg",
+            "date_limite_commande", "a_commander_aujourdhui", "defaut_donnees",
+        ]
+    }
+}
+
+/// La frise mensuelle d'une analyse : les jours du moteur regroupés par mois.
+fn frise(c: &Couverture) -> Vec<MoisFrise> {
+    let mut mois: Vec<MoisFrise> = Vec::new();
+    let mut sous_jour: Vec<bool> = Vec::new();
+    for j in &c.jours {
+        let am = format!("{:04}-{:02}", j.date.year(), j.date.month());
+        if mois.last().map(|m| m.annee_mois != am).unwrap_or(true) {
+            mois.push(MoisFrise {
+                annee_mois: am,
+                rang_mois: mois.len() + 1,
+                besoin_kg: 0.0,
+                entrees_kg: 0.0,
+                stock_fin_kg: 0.0,
+                securite_kg: 0.0,
+                plan_non_couvert_kg: 0.0,
+                statut: statut::COUVERT,
+            });
+            sous_jour.push(false);
+        }
+        let (m, sous) = (mois.last_mut().expect("mois"), sous_jour.last_mut().expect("mois"));
+        m.besoin_kg += j.conso_prevue_kg;
+        m.entrees_kg += j.arrivee_kg;
+        m.plan_non_couvert_kg += j.plan_non_couvert_kg;
+        m.stock_fin_kg = j.solde_kg;
+        m.securite_kg = j.securite_kg;
+        if j.solde_kg < j.securite_kg - 1e-6 {
+            *sous = true;
+        }
+    }
+    for (m, sous) in mois.iter_mut().zip(sous_jour) {
+        m.besoin_kg = arrondi_kg(m.besoin_kg) + 0.0;
+        m.entrees_kg = arrondi_kg(m.entrees_kg) + 0.0;
+        m.plan_non_couvert_kg = arrondi_kg(m.plan_non_couvert_kg) + 0.0;
+        m.statut = if m.plan_non_couvert_kg > 1e-6 {
+            statut::PLAN_NON_COUVERT
+        } else if sous {
+            statut::SOUS_SECURITE
+        } else {
+            statut::COUVERT
+        };
+    }
+    mois
+}
+
+fn etat_de(a: &Analyse) -> Etat {
+    let r = &a.resultat;
+    let premiere = r.propositions.first();
+    Etat {
+        code_reference: a.fiche.code_reference.clone(),
+        designation: a.fiche.designation.clone(),
+        classe_abc: a.fiche.classe_abc.clone(),
+        suivie: a.fiche.actif && a.a_lister(),
+        code_fournisseur: a.fiche.code_fournisseur.clone(),
+        fournisseur_nom: a.fiche.fournisseur_nom.clone(),
+        statut: a.statut(),
+        jours_couverture: a.jours_couverture(),
+        premiere_rupture: r.premiere_rupture,
+        couvert_jusqu_au: r.couvert_jusqu_au,
+        premier_passage_securite: r.premier_passage_securite,
+        plan_horizon_kg: r.plan_horizon_kg,
+        plan_mois_kg: a.plan_mois_kg(),
+        plan_non_couvert_kg: r.plan_non_couvert_kg,
+        disponible_kg: arrondi_kg(a.magasin_compte_kg + a.machine_compte_kg),
+        arrivages_comptes_kg: a.arrivages_comptes_kg(),
+        qte_a_commander_kg: premiere.map(|p| p.quantite_proposee_kg),
+        date_limite_commande: premiere.map(|p| p.date_limite_commande),
+        a_commander_aujourdhui: a.a_commander_aujourdhui(),
+        delai_j: a.reglages.delai_j,
+        defaut_donnees: a.defaut_donnees.clone(),
+        ligne: ligne(a),
+        mois: frise(r),
+    }
+}
+
+/// L'état de toutes les références (actives ou non), au sens du moteur.
+pub async fn etats(db: &Db) -> AppResult<Etats> {
+    let d = charger(db, None).await?;
+    let references = d
+        .fiches
+        .values()
+        .map(|f| {
+            let e = etat_de(&analyser(&d, f));
+            (e.code_reference.clone(), e)
+        })
+        .collect();
+    Ok(Etats {
+        aujourdhui: d.aujourdhui,
+        fin_horizon: d.plan.as_ref().map(|p| p.fin_horizon.max(d.aujourdhui)),
+        id_plan: d.plan.as_ref().map(|p| p.id_plan.clone()),
+        references,
+    })
+}
+
+/// LES CONTRÔLES QUI DÉPENDENT DU MOTEUR (27/10/2026) : ils ne peuvent plus vivre
+/// en SQL (le moteur est en Rust) et se servent à côté de `v_controles`, sous les
+/// mêmes codes et la même forme. C05 « plan non couvert sur l'horizon » remplace
+/// « stock projeté négatif sur 12 mois » ; C25 garde son sens (du stock qui dort
+/// face à un équivalent interchangeable en tension), la tension étant celle du
+/// moteur.
+pub const CONTROLES_MOTEUR: &[(&str, &str, &str)] = &[
+    ("C05", "Plan non couvert sur l'horizon (moteur de couverture)", "CRITIQUE"),
+    ("C25", "Stock mobilisable face a un equivalent en tension (moteur de couverture)", "ATTENTION"),
+];
+
+/// Les lignes d'un contrôle du moteur (`None` : ce code n'en est pas un).
+pub async fn controle_moteur_detail(db: &Db, e: &Etats, code: &str) -> AppResult<Option<Value>> {
+    match code.to_ascii_uppercase().as_str() {
+        "C05" => Ok(Some(Value::Array(
+            e.suivies()
+                .filter(|x| x.statut == statut::PLAN_NON_COUVERT)
+                .map(|x| {
+                    json!({
+                        "code_reference": x.code_reference, "designation": x.designation,
+                        "statut": x.statut, "premiere_rupture": x.premiere_rupture,
+                        "plan_non_couvert_kg": x.plan_non_couvert_kg, "disponible_kg": x.disponible_kg,
+                        "plan_horizon_kg": x.plan_horizon_kg, "arrivages_comptes_kg": x.arrivages_comptes_kg,
+                    })
+                })
+                .collect(),
+        ))),
+        "C25" => {
+            let lignes = sqlx::query(
+                "SELECT e.code_reference, e.designation, e.stock_kg::float8 AS stock_kg,
+                        e.equivalent_reference, e.equivalent_besoin_12m_kg::float8 AS equivalent_besoin_12m_kg
+                   FROM v_equivalence e
+                  WHERE e.stock_kg > 0 AND e.besoin_12m_kg = 0 AND e.interchangeable = 1
+                  ORDER BY e.code_reference, e.equivalent_reference",
+            )
+            .fetch_all(db)
+            .await?;
+            let mut sortie = Vec::new();
+            for l in lignes {
+                let equivalent: String = l.try_get("equivalent_reference")?;
+                let Some(eq) = e.get(&equivalent).filter(|x| x.en_tension()) else { continue };
+                sortie.push(json!({
+                    "code_reference": l.try_get::<String, _>("code_reference")?,
+                    "designation": l.try_get::<Option<String>, _>("designation")?,
+                    "stock_kg": l.try_get::<Option<f64>, _>("stock_kg")?,
+                    "equivalent_reference": equivalent,
+                    "equivalent_statut": eq.statut,
+                    "equivalent_premiere_rupture": eq.premiere_rupture,
+                    "equivalent_besoin_12m_kg": l.try_get::<Option<f64>, _>("equivalent_besoin_12m_kg")?,
+                }));
+            }
+            Ok(Some(Value::Array(sortie)))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Les contrôles du moteur, sous la forme de `v_controles` (code, controle,
+/// criticite, anomalies).
+pub async fn controles_moteur(db: &Db, e: &Etats) -> AppResult<Vec<Value>> {
+    let mut sortie = Vec::new();
+    for (code, controle, criticite) in CONTROLES_MOTEUR {
+        let n = controle_moteur_detail(db, e, code)
+            .await?
+            .and_then(|v| v.as_array().map(Vec::len))
+            .unwrap_or(0);
+        sortie.push(json!({ "code": code, "controle": controle, "criticite": criticite, "anomalies": n }));
+    }
+    Ok(sortie)
+}
+
+/// `v_controles` et les contrôles du moteur, triés par code : la liste que
+/// lisent l'écran des contrôles, le briefing et l'assistant.
+pub async fn tous_les_controles(db: &Db, e: &Etats) -> AppResult<Vec<Value>> {
+    let lignes = sqlx::query("SELECT code, controle, criticite, anomalies::bigint AS anomalies FROM v_controles")
+        .fetch_all(db)
+        .await?;
+    let mut sortie = Vec::with_capacity(lignes.len() + CONTROLES_MOTEUR.len());
+    for l in lignes {
+        sortie.push(json!({
+            "code": l.try_get::<String, _>("code")?,
+            "controle": l.try_get::<String, _>("controle")?,
+            "criticite": l.try_get::<String, _>("criticite")?,
+            "anomalies": l.try_get::<i64, _>("anomalies")?,
+        }));
+    }
+    sortie.extend(controles_moteur(db, e).await?);
+    sortie.sort_by(|a, b| a["code"].as_str().cmp(&b["code"].as_str()));
+    Ok(sortie)
+}
+
+/// Le besoin d'une référence au sens du moteur (`GET /api/stock/besoin`) : le plan
+/// seul sur l'horizon, mois par mois (la part dans l'horizon : le mois en cours
+/// depuis aujourd'hui), ce qui n'en est pas couvert, la première rupture, le délai
+/// et la couverture d'une commande. Non masqué : l'appelant masque.
+pub async fn besoin_reference(db: &Db, reference: &str) -> AppResult<Value> {
+    let d = charger(db, Some(reference)).await?;
+    let fiche = d
+        .fiches
+        .get(reference)
+        .ok_or_else(|| AppError::Introuvable(format!("référence {reference}")))?;
+    let a = analyser(&d, fiche);
+    let r = &a.resultat;
+    let mois: Vec<Value> = d
+        .besoin
+        .get(reference)
+        .into_iter()
+        .flatten()
+        .map(|(am, m)| {
+            let jours = jours_du_mois(m.annee, m.mois);
+            let comptes = r.jours.iter().filter(|j| j.date.year() == m.annee && j.date.month() == m.mois).count();
+            json!({
+                "annee_mois": am,
+                "besoin_plan_kg": arrondi_kg(m.kg),
+                "jours_dans_horizon": comptes,
+                "kg_dans_horizon": arrondi_kg(m.kg * comptes as f64 / jours as f64),
+            })
+        })
+        .collect();
+    Ok(json!({
+        "synthese": {
+            "code_reference": fiche.code_reference,
+            "designation": fiche.designation,
+            "statut": a.statut(),
+            "plan_horizon_kg": r.plan_horizon_kg,
+            "plan_non_couvert_kg": r.plan_non_couvert_kg,
+            "premiere_rupture": r.premiere_rupture,
+            "couvert_jusqu_au": r.couvert_jusqu_au,
+            "disponible_kg": arrondi_kg(a.magasin_compte_kg + a.machine_compte_kg),
+            "arrivages_comptes_kg": a.arrivages_comptes_kg(),
+            "delai_j": a.reglages.delai_j,
+            "couverture_commande_j": a.reglages.couverture_j,
+            "fin_horizon": d.plan.as_ref().map(|p| p.fin_horizon.max(d.aujourdhui)),
+        },
+        "mois": mois,
+    }))
+}
+
+/// Les colonnes de la frise d'une référence, telles que les lit le mur de risques.
+pub fn frise_json(e: &Etat) -> Value {
+    Value::Array(
+        e.mois
+            .iter()
+            .map(|m| {
+                json!({
+                    "code_reference": e.code_reference,
+                    "annee_mois": m.annee_mois, "rang_mois": m.rang_mois,
+                    "besoin_kg": m.besoin_kg, "entrees_kg": m.entrees_kg,
+                    "stock_fin_kg": m.stock_fin_kg, "stock_min_kg": m.securite_kg,
+                    "securite_kg": m.securite_kg,
+                    "plan_non_couvert_kg": m.plan_non_couvert_kg, "statut": m.statut,
+                })
+            })
+            .collect(),
+    )
 }
 
 // ============================================================================
@@ -957,6 +1540,7 @@ pub async fn detail(
         "moq_kg": a.reglages.moq_kg,
         "multiple_kg": a.reglages.multiple_kg, "source_multiple": a.source_multiple,
         "kg_palette": a.reglages.kg_palette,
+        "defaut_donnees": a.defaut_donnees,
     });
     v["synthese"] = ligne(&a);
     v["ressources"] = json!({

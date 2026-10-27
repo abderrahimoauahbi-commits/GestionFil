@@ -59,11 +59,13 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
     // historique » — ce qu'elle a fait pendant des mois sans que personne
     // s'en apercoive, les colonnes restant a NULL.
     //
-    // Le reste de l'ERP applique deja la bonne regle : `v_stock_projete` retient
+    // Le reste de l'ERP applique deja la bonne regle : `v_conso_retenue` retient
     // le MAXIMUM entre consommation constatee et besoin planifie. Une reference
     // qu'on n'a pas encore consommee mais que le plan reclame n'est pas une
     // reference sans demande. On reprend donc `conso_mensuelle_kg` de cette vue
-    // plutot que de refaire un calcul qui divergerait du sien.
+    // (lue par la lecture neutre `v_stock_reference`, 27/10/2026 : l'ancienne
+    // projection `v_stock_projete` est retiree) plutot que de refaire un calcul
+    // qui divergerait du sien.
     //
     // LA CONVERSION DE DEVISE. `prix_catalogue_kg` ne convertit que l'UNITE, pas
     // la monnaie : pour 107 references sur 119 il porte des dollars. Le
@@ -78,7 +80,7 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
                 (sp.conso_mensuelle_kg * 12
                   * COALESCE(r.cmup_mad, fn_prix_catalogue_mad(r.code_reference), 0))::float8
                   AS valeur_mad
-           FROM v_stock_projete sp
+           FROM v_stock_reference sp
            JOIN reference r ON r.code_reference = sp.code_reference
           WHERE sp.conso_mensuelle_kg IS NOT NULL
           ORDER BY valeur_mad DESC",

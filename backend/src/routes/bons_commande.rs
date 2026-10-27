@@ -1565,6 +1565,14 @@ pub async fn references_commandables(
     .fetch_one(&state.db)
     .await?;
 
+    // LA TENSION VIENT DU MOTEUR DE COUVERTURE (27/10/2026) : les references au
+    // plan non couvert puis sous la securite, les plus proches de la rupture
+    // d'abord. Elles ordonnent la liste (apres ce que le plan d'achat propose) et
+    // designent les references « en tension » dont celle-ci est l'equivalent.
+    let etats = super::couverture::etats(&state.db).await?;
+    let en_tension: Vec<String> = etats.en_tension().iter().map(|e| e.code_reference.clone()).collect();
+    let n_tension = mots.len() + 5;
+
     let sql_commandables = format!(
         "SELECT r.code_reference, r.designation, r.unite_catalogue, r.prix_catalogue,
                 r.version AS version_reference,
@@ -1587,13 +1595,16 @@ pub async fn references_commandables(
                 -- bon doit donc pouvoir porter une reference d'un autre, en le
                 -- DISANT — d'ou cette colonne, que l'ecran affiche en clair.
                 r.code_fournisseur,
-                sp.stock_mrp_kg, sp.stock_projete_kg, sp.encours_kg, sp.besoin_12m_kg,
-                sp.jours_couverture, sp.statut AS statut_stock,
-                sp.besoin_12m_kg, sp.encours_kg AS deja_commande_kg,
+                -- Le stock et la lecture du plan restant ; l'etat de couverture
+                -- (statut_stock, jours couverts, 1re rupture, a commander) est
+                -- ajoute par le moteur apres la requete (27/10/2026).
+                sp.stock_mrp_kg, b12.besoin_12m_kg,
+                (SELECT round(COALESCE(sum(lb.quantite_restante_kg), 0), 4) FROM ligne_bc lb
+                   JOIN bon_commande bc2 ON bc2.id_bc = lb.id_bc
+                  WHERE lb.code_reference = r.code_reference AND bc2.statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')
+                    AND lb.statut NOT IN ('ANNULE','SOLDE') AND lb.type_ligne = 'MARCHANDISE'
+                    AND lb.quantite_restante_kg > 0) AS deja_commande_kg,
                 pa.risque_sourcing, f.delai_livraison_jours, f.nom AS fournisseur_nom,
-                -- Le minimum vient du plan d'achat : c'est lui qui applique la
-                -- formule F3 (couverture, marge, classe ABC), pas la vue stock.
-                pa.stock_min_kg,
                 -- La proposition que la ligne servira : meme regle que le serveur au
                 -- rattachement. L'ecran la renvoie ; la base refuse si un autre bon
                 -- l'a deja prise entre-temps (R-PROP, 19/10/2026).
@@ -1682,24 +1693,36 @@ pub async fn references_commandables(
                   WHERE q1.code_reference = r.code_reference AND q1.actif = 1 AND r.actif = 1) AS nb_equivalents
            FROM reference r
            JOIN fournisseur f ON f.code_fournisseur = r.code_fournisseur
-           LEFT JOIN v_stock_projete sp ON sp.code_reference = r.code_reference
-           LEFT JOIN v_plan_achat    pa ON pa.code_reference = r.code_reference
+           LEFT JOIN v_stock_disponible sp ON sp.code_reference = r.code_reference
+           LEFT JOIN v_besoin_12m      b12 ON b12.code_reference = r.code_reference
+           -- CE QUE LE PLAN D'ACHAT PROPOSE : la proposition ouverte, faite par le
+           -- moteur de couverture (quantite, prix, palier), et non plus l'ancien
+           -- calcul v_plan_achat (27/10/2026).
+           LEFT JOIN LATERAL (
+                SELECT p.risque_identifie AS risque_sourcing,
+                       p.quantite_suggeree_kg AS qte_a_commander_kg,
+                       p.quantite_suggeree_unite AS qte_a_commander_unite,
+                       p.urgence AS tier, p.prix_estime_mad, p.source_prix,
+                       p.prix_devise, p.code_devise AS devise
+                  FROM plan_achat p
+                 WHERE p.code_reference = r.code_reference
+                   AND p.statut IN ('PROPOSE','EN_REVISION','VALIDE')
+                 ORDER BY p.id_proposition LIMIT 1) pa ON true
            LEFT JOIN LATERAL (
                 SELECT e.code_reference AS equivalent_de,
                        ROUND(COALESCE(e.besoin_12m_kg, 0), 3) AS besoin_equivalent_kg
                   FROM v_equivalence e
                  WHERE e.equivalent_reference = r.code_reference
                    AND e.interchangeable = 1
-                   AND COALESCE(e.stock_projete_kg, 0) < COALESCE(e.besoin_12m_kg, 0)
-                 ORDER BY COALESCE(e.stock_projete_kg, 0) - COALESCE(e.besoin_12m_kg, 0)
+                   AND e.code_reference = ANY(${n_tension}::text[])
+                 ORDER BY array_position(${n_tension}::text[], e.code_reference)
                  LIMIT 1) eq ON true
           WHERE r.actif = 1 AND ($4 = 1 OR r.code_fournisseur = $2){filtre_recherche}
           -- CE QUE LE PLAN RECLAME D'ABORD, puis ce qui est en tension. Quand on
           -- cherche a la frappe, les premieres lignes doivent etre celles qu'on
           -- avait des raisons de commander.
           ORDER BY CASE WHEN COALESCE(pa.qte_a_commander_kg, 0) > 0 THEN 0 ELSE 1 END,
-                   CASE sp.statut WHEN 'RUPTURE' THEN 1 WHEN 'CRITIQUE' THEN 2
-                                  WHEN 'ATTENTION' THEN 3 ELSE 4 END,
+                   COALESCE(array_position(${n_tension}::text[], r.code_reference), 2147483647),
                    r.code_reference
           LIMIT {plafond}"
     );
@@ -1711,9 +1734,24 @@ pub async fn references_commandables(
     for mot in &mots {
         requete = requete.bind(mot);
     }
+    requete = requete.bind(&en_tension);
     let rows = requete.fetch_all(&state.db).await?;
 
     let mut valeur = lignes_en_json(&rows);
+    // L'etat du moteur s'ajoute ; la quantite « a commander » reste celle de la
+    // proposition ouverte (figee ou arbitree par l'acheteur), pas le calcul brut.
+    let proposees: Vec<Value> = valeur
+        .as_array()
+        .map(|a| a.iter().map(|l| l["qte_a_commander_kg"].clone()).collect())
+        .unwrap_or_default();
+    etats.enrichir(&mut valeur, "statut_stock");
+    if let Some(a) = valeur.as_array_mut() {
+        for (l, q) in a.iter_mut().zip(proposees) {
+            if let Some(o) = l.as_object_mut() {
+                o.insert("qte_a_commander_kg".into(), q);
+            }
+        }
+    }
     // LE PRIX AU CMUP D'ABORD (audit du 13/10/2026) : `masquer` retire la
     // source du prix, et le masquage du CMUP, passe apres, ne la trouvait plus.
     user.masquer_prix_au_cmup(&state.db, &mut valeur).await?;

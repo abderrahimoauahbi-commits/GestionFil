@@ -89,9 +89,35 @@ async fn lister(
 pub async fn cockpit(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::COCKPIT, Action::Lire).await?;
 
-    let etat = sqlx::query("SELECT * FROM v_cockpit_stock")
-        .fetch_all(&state.db)
-        .await?;
+    // L'ETAT DES REFERENCES VIENT DU MOTEUR DE COUVERTURE (27/10/2026) : plan non
+    // couvert, sous la securite, couvert, a commander aujourd'hui, classe A au plan
+    // non couvert. Le reste (valeur, bons, alertes, fraicheur du plan) se lit en
+    // SQL ; « a commander » = les propositions ouvertes, que le moteur a faites.
+    let etats = super::couverture::etats(&state.db).await?;
+    let etat = sqlx::query(
+        "SELECT
+            (SELECT max(fn_iso(date_calcul)) FROM besoin_mrp)                       AS besoins_calcules_le,
+            (SELECT count(*) FROM plan_production pp
+              WHERE pp.statut = 'EN_COURS' AND fn_besoins_perimes(pp.id_plan))     AS besoins_perimes,
+            (SELECT round(COALESCE(sum(valeur_mad), 0), 2) FROM stock_magasin)
+              + (SELECT COALESCE(sum(valeur_mad), 0) FROM v_stock_transit)          AS valeur_stock_mad,
+            (SELECT count(*) FROM plan_achat
+              WHERE statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE'))                 AS nb_refs_a_commander,
+            (SELECT round(COALESCE(sum(COALESCE(montant_total_mad,
+                                                quantite_suggeree_kg * prix_estime_mad)), 0), 2)
+               FROM plan_achat WHERE statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE')) AS budget_a_engager_mad,
+            (SELECT count(*) FROM plan_achat
+              WHERE statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE') AND urgence = 'TIER 1') AS nb_tier1,
+            (SELECT count(*) FROM fournisseur WHERE actif = 1)                      AS nb_fournisseurs_actifs,
+            (SELECT count(*) FROM bon_commande
+              WHERE statut IN ('VALIDE', 'ENVOYE', 'LIVRE_PARTIEL'))                AS nb_bc_ouverts,
+            (SELECT round(COALESCE(sum(montant_total_mad), 0), 2) FROM bon_commande
+              WHERE statut IN ('VALIDE', 'ENVOYE', 'LIVRE_PARTIEL'))                AS montant_bc_ouverts_mad,
+            (SELECT count(*) FROM alerte
+              WHERE statut = 'OUVERTE' AND gravite IN ('CRITIQUE', 'BLOQUANT'))      AS nb_alertes_critiques",
+    )
+    .fetch_all(&state.db)
+    .await?;
     let files = sqlx::query("SELECT * FROM v_cockpit_files")
         .fetch_all(&state.db)
         .await?;
@@ -100,6 +126,19 @@ pub async fn cockpit(State(state): State<AppState>, user: Utilisateur) -> AppRes
         .as_array()
         .and_then(|a| a.first().cloned())
         .unwrap_or(Value::Null);
+    if let (Some(objet), Some(compteurs)) = (valeur.as_object_mut(), etats.compteurs().as_object()) {
+        for (cle, v) in compteurs {
+            objet.insert(cle.clone(), v.clone());
+        }
+    }
+    // Les controles du moteur (C05, C25) comptent avec ceux de v_controles.
+    let moteur = super::couverture::controles_moteur(&state.db, &etats).await?;
+    let compter_moteur = |criticite: &str| {
+        moteur
+            .iter()
+            .filter(|c| c["criticite"] == criticite && c["anomalies"].as_i64().unwrap_or(0) > 0)
+            .count() as i64
+    };
 
     if let (Some(objet), Some(f)) = (
         valeur.as_object_mut(),
@@ -109,6 +148,10 @@ pub async fn cockpit(State(state): State<AppState>, user: Utilisateur) -> AppRes
             for (cle, v) in champs {
                 objet.insert(cle.clone(), v.clone());
             }
+        }
+        for (cle, criticite) in [("nb_controles_critiques", "CRITIQUE"), ("nb_controles_bloquants", "BLOQUANT")] {
+            let n = objet.get(cle).and_then(Value::as_i64).unwrap_or(0) + compter_moteur(criticite);
+            objet.insert(cle.into(), json!(n));
         }
         // La part de l'import dans « a controler » : la tuile mene aux deux
         // listes, chacune avec son compte (audit v5, F20).
@@ -137,60 +180,102 @@ pub async fn risques_rupture(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::COCKPIT, Action::Lire).await?;
 
-    let refs = sqlx::query(
-        "SELECT * FROM v_risque_reference
-          ORDER BY marge_decision_jours,
-                   CASE classe_abc WHEN 'A' THEN 0 WHEN 'B' THEN 1 ELSE 2 END,
-                   nb_mois_rupture DESC
-          LIMIT 60",
-    )
-    .fetch_all(&state.db)
-    .await?;
+    // LA FRISE EST CELLE DU MOTEUR DE COUVERTURE (27/10/2026) : ses jours,
+    // regroupes par mois — plan du mois, arrivages comptes, solde en fin de mois,
+    // securite ; un mois est PLAN_NON_COUVERT si une part de son plan n'est pas
+    // couverte, SOUS_SECURITE si le solde passe sous la securite. La MARGE DE
+    // DECISION est le temps qui reste avant la date limite de commande de la
+    // premiere proposition (negative : deja depassee) ; sans proposition, avant le
+    // premier passage sous la securite, delai deduit.
+    let etats = super::couverture::etats(&state.db).await?;
+    let auj = etats.aujourdhui;
+    let mut risques: Vec<(i64, u8, i64, Value)> = Vec::new();
+    for e in etats.suivies().filter(|e| e.en_tension()) {
+        let nb_rupture = e.mois.iter().filter(|m| m.statut == super::couverture::statut::PLAN_NON_COUVERT).count();
+        let nb_tendu = e.mois.iter().filter(|m| m.statut == super::couverture::statut::SOUS_SECURITE).count();
+        let premier_rupture = e
+            .mois
+            .iter()
+            .find(|m| m.statut == super::couverture::statut::PLAN_NON_COUVERT)
+            .map(|m| m.annee_mois.clone());
+        let premier_risque = e.mois.iter().find(|m| m.statut != super::couverture::statut::COUVERT);
+        let marge = match (e.date_limite_commande, e.premier_passage_securite) {
+            (Some(limite), _) => Some((limite - auj).num_days()),
+            (None, Some(sous)) => Some((sous - auj).num_days() - e.delai_j),
+            (None, None) => None,
+        };
+        let rang_classe = match e.classe_abc.as_deref().map(str::trim) {
+            Some("A") => 0,
+            Some("B") => 1,
+            _ => 2,
+        };
+        let mut o = json!({
+            "code_reference": e.code_reference,
+            "designation": e.designation,
+            "classe_abc": e.classe_abc,
+            "code_fournisseur": e.code_fournisseur,
+            "fournisseur_nom": e.fournisseur_nom,
+            "delai_livraison_jours": e.delai_j,
+            "stock_initial_kg": e.disponible_kg,
+            "stock_min_kg": e.mois.first().map(|m| m.securite_kg),
+            "nb_mois_rupture": nb_rupture,
+            "nb_mois_tendu": nb_tendu,
+            "premier_mois_rupture": premier_rupture,
+            "premier_mois_risque": premier_risque.map(|m| m.annee_mois.clone()),
+            "rang_premier_risque": premier_risque.map(|m| m.rang_mois),
+            "marge_decision_jours": marge,
+            "mois": super::couverture::frise_json(e),
+        });
+        if let Some(m) = o.as_object_mut() {
+            m.extend(e.colonnes());
+        }
+        risques.push((marge.unwrap_or(i64::MAX), rang_classe, -(nb_rupture as i64), o));
+    }
+    risques.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
+    risques.truncate(60);
+    let mut liste = Value::Array(risques.into_iter().map(|(_, _, _, v)| v).collect());
 
-    let mut liste = lignes_en_json(&refs);
-
-    // Les frises ne sont lues que pour les references retenues : la vue couvre
-    // tout le catalogue, et en ramener l'integralite pour n'en afficher que
-    // soixante serait paye a chaque ouverture de l'accueil.
+    // Le sourcing et l'equivalent disponible, pour les seules references retenues.
     let codes: Vec<String> = liste
         .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|r| r.get("code_reference").and_then(|c| c.as_str()))
-                .map(str::to_string)
-                .collect()
-        })
+        .map(|a| a.iter().filter_map(|r| r["code_reference"].as_str().map(str::to_string)).collect())
         .unwrap_or_default();
-
     if !codes.is_empty() {
-        // `= ANY($1)` et un tableau lie : la version precedente fabriquait des
-        // `?` a la maniere de SQLite, que PostgreSQL refuse. L'ecran recevait une
-        // erreur 500 et affichait « aucune reference ne descend sous son stock de
-        // securite » — en vert, au-dessus de 73 ruptures.
-        let q = sqlx::query(
-            "SELECT code_reference, annee_mois, rang_mois, besoin_kg, entrees_kg,
-                    stock_fin_kg, stock_min_kg, statut
-               FROM v_risque_mensuel
-              WHERE code_reference = ANY($1)
-              ORDER BY code_reference, rang_mois",
-        )
-        .bind(&codes);
-        let mois = lignes_en_json(&q.fetch_all(&state.db).await?);
-
-        if let (Some(tableau), Some(mois)) = (liste.as_array_mut(), mois.as_array()) {
+        let complements = lignes_en_json(
+            &sqlx::query(
+                "SELECT c.code_reference,
+                        CASE WHEN EXISTS (
+                               SELECT 1 FROM reference_groupe_equiv rge1
+                                 JOIN reference_groupe_equiv rge2 ON rge2.code_groupe_equiv = rge1.code_groupe_equiv
+                                                                 AND rge2.code_reference <> rge1.code_reference
+                                                                 AND rge2.actif = 1
+                                 JOIN reference r2 ON r2.code_reference = rge2.code_reference AND r2.actif = 1
+                                 JOIN reference r1 ON r1.code_reference = rge1.code_reference
+                                WHERE rge1.code_reference = c.code_reference AND rge1.actif = 1
+                                  AND r2.code_fournisseur IS DISTINCT FROM r1.code_fournisseur)
+                             THEN 'MULTI-SOURCE' ELSE 'MONO-SOURCE' END AS risque_sourcing,
+                        (SELECT round(COALESCE(max(e.equivalent_stock_kg), 0), 3) FROM v_equivalence e
+                          WHERE e.code_reference = c.code_reference AND e.interchangeable = 1)::float8
+                          AS equivalent_dispo_kg,
+                        (SELECT e.equivalent_reference FROM v_equivalence e
+                          WHERE e.code_reference = c.code_reference AND e.interchangeable = 1
+                          ORDER BY e.equivalent_stock_kg DESC LIMIT 1) AS equivalent_reference
+                   FROM unnest($1::text[]) AS c(code_reference)",
+            )
+            .bind(&codes)
+            .fetch_all(&state.db)
+            .await?,
+        );
+        if let (Some(tableau), Some(complements)) = (liste.as_array_mut(), complements.as_array()) {
             for r in tableau.iter_mut() {
-                let code = r
-                    .get("code_reference")
-                    .and_then(|c| c.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                let frise: Vec<Value> = mois
-                    .iter()
-                    .filter(|m| m.get("code_reference").and_then(|c| c.as_str()) == Some(&code))
-                    .cloned()
-                    .collect();
-                if let Some(o) = r.as_object_mut() {
-                    o.insert("mois".into(), Value::Array(frise));
+                let code = r["code_reference"].as_str().unwrap_or_default().to_string();
+                if let (Some(o), Some(c)) = (
+                    r.as_object_mut(),
+                    complements.iter().find(|c| c["code_reference"].as_str() == Some(&code)),
+                ) {
+                    for cle in ["risque_sourcing", "equivalent_dispo_kg", "equivalent_reference"] {
+                        o.insert(cle.into(), c[cle].clone());
+                    }
                 }
             }
         }
@@ -389,6 +474,19 @@ pub async fn equivalences(
     .await?;
 
     let mut valeur = lignes_en_json(&rows);
+    // L'ETAT DE CHAQUE COTE VIENT DU MOTEUR (27/10/2026) : `statut` pour la
+    // reference, `equivalent_statut` pour son equivalent.
+    let etats = super::couverture::etats(&state.db).await?;
+    if let Some(a) = valeur.as_array_mut() {
+        for l in a.iter_mut() {
+            let s1 = l["code_reference"].as_str().and_then(|c| etats.get(c)).map(|e| e.statut);
+            let s2 = l["equivalent_reference"].as_str().and_then(|c| etats.get(c)).map(|e| e.statut);
+            if let Some(o) = l.as_object_mut() {
+                o.insert("statut".into(), json!(s1));
+                o.insert("equivalent_statut".into(), json!(s2));
+            }
+        }
+    }
     user.masquer(&state.db, module::CATALOGUE, &mut valeur).await?;
     Ok(Json(valeur))
 }
@@ -698,8 +796,14 @@ pub async fn substituer_proposition(
     Ok(Json(resultat))
 }
 
+/// `GET /api/controles` — `v_controles` ET les controles du moteur de couverture
+/// (C05, C25 : 27/10/2026), sous la meme forme, tries par code.
 pub async fn controles(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
-    lister(&state, &user, module::COCKPIT, "SELECT * FROM v_controles").await
+    user.exiger(&state.db, module::COCKPIT, Action::Lire).await?;
+    let etats = super::couverture::etats(&state.db).await?;
+    let mut valeur = Value::Array(super::couverture::tous_les_controles(&state.db, &etats).await?);
+    user.masquer(&state.db, module::COCKPIT, &mut valeur).await?;
+    Ok(Json(valeur))
 }
 
 /// `GET /api/supervision` — les indicateurs de pilotage de la chaine logistique.
@@ -732,6 +836,44 @@ pub async fn supervision(
           ORDER BY s.disponible DESC, s.domaine, s.libelle",
     )
     .await?;
+    // LES TROIS INDICATEURS DE COUVERTURE VIENNENT DU MOTEUR (27/10/2026) : taux de
+    // rupture (plan non couvert sur l'horizon), taux de disponibilite (couvert sur
+    // tout l'horizon) sur les references suivies, couverture mediane (jours
+    // couverts jusqu'a la premiere rupture, sinon tout l'horizon) sur celles qui
+    // ont un plan. La vue ne les porte plus.
+    let etats = super::couverture::etats(&state.db).await?;
+    let suivies: Vec<&super::couverture::Etat> = etats.suivies().collect();
+    let n = suivies.len();
+    let part = |f: &dyn Fn(&super::couverture::Etat) -> bool| -> Option<f64> {
+        (n > 0).then(|| (1000.0 * suivies.iter().filter(|e| f(e)).count() as f64 / n as f64).round() / 10.0)
+    };
+    let horizon_j = etats.fin_horizon.map(|f| (f - etats.aujourdhui).num_days() + 1).unwrap_or(0);
+    let mut jours: Vec<i64> = suivies
+        .iter()
+        .filter(|e| e.plan_horizon_kg > 0.0)
+        .map(|e| e.jours_couverture.unwrap_or(horizon_j))
+        .collect();
+    jours.sort_unstable();
+    let mediane = match jours.len() {
+        0 => None,
+        l if l % 2 == 1 => Some(jours[l / 2] as f64),
+        l => Some(((jours[l / 2 - 1] + jours[l / 2]) as f64 / 2.0).round()),
+    };
+    let du_moteur = [
+        ("taux_rupture", part(&|e| e.statut == super::couverture::statut::PLAN_NON_COUVERT)),
+        ("taux_disponibilite", part(&|e| e.statut == super::couverture::statut::COUVERT)),
+        ("couverture_mediane", mediane),
+    ];
+    if let Some(lignes) = v.as_array_mut() {
+        for l in lignes.iter_mut() {
+            let cle = l.get("cle").and_then(Value::as_str).unwrap_or_default().to_string();
+            if let (Some((_, Some(valeur))), Some(o)) = (du_moteur.iter().find(|(c, _)| *c == cle), l.as_object_mut()) {
+                o.insert("valeur".into(), json!(valeur));
+                o.insert("disponible".into(), json!(1));
+                o.insert("condition".into(), Value::Null);
+            }
+        }
+    }
     // LES INDICATEURS EN DIRHAMS SUIVENT LA VALEUR DU STOCK (regle 16). La
     // colonne generique `valeur` portait la valeur du stock, le budget
     // mono-source et les economies a qui ne voit aucun montant.
@@ -768,6 +910,16 @@ pub async fn controle_detail(
         && code[1..].chars().all(|c| c.is_ascii_digit());
     if !valide {
         return Err(AppError::Invalide(format!("code de controle invalide : {code}")));
+    }
+
+    // Les controles du moteur de couverture (C05, C25) n'ont pas de vue.
+    if super::couverture::CONTROLES_MOTEUR.iter().any(|(c, _, _)| c.eq_ignore_ascii_case(&code)) {
+        let etats = super::couverture::etats(&state.db).await?;
+        let mut sortie = super::couverture::controle_moteur_detail(&state.db, &etats, &code)
+            .await?
+            .unwrap_or(Value::Array(Vec::new()));
+        user.masquer(&state.db, module::COCKPIT, &mut sortie).await?;
+        return Ok(Json(sortie));
     }
 
     let vue = format!("v_ctl_{code}");
@@ -858,54 +1010,103 @@ pub async fn etat_stock(
     Query(f): Query<Filtres>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    // Le stock vient de la vue ; l'etat de couverture (statut, jours couverts, 1re
+    // rupture, plan, arrivages comptes, a commander) vient du moteur (27/10/2026).
     let rows = sqlx::query(
         "SELECT * FROM v_etat_stock
           WHERE ($1 IS NULL OR code_reference = $1)
-          ORDER BY CASE statut
-                     WHEN 'RUPTURE'   THEN 1
-                     WHEN 'CRITIQUE'  THEN 2
-                     WHEN 'ATTENTION' THEN 3
-                     ELSE 4 END,
-                   designation
-          LIMIT $2",
+          ORDER BY designation",
     )
     .bind(&f.code_reference)
-    .bind(f.limite())
     .fetch_all(&state.db)
     .await?;
 
     let mut valeur = lignes_en_json(&rows);
+    let etats = super::couverture::etats(&state.db).await?;
+    etats.enrichir(&mut valeur, "statut");
+    trier_par_etat(&mut valeur, "designation");
+    tronquer(&mut valeur, f.limite());
     user.masquer(&state.db, module::STOCK, &mut valeur).await?;
     Ok(Json(valeur))
 }
 
+/// Trie un tableau de lignes enrichies par le moteur : le plus grave d'abord
+/// (plan non couvert, sous la securite, couvert), puis la rupture la plus proche,
+/// puis la cle secondaire (texte).
+fn trier_par_etat(v: &mut Value, secondaire: &str) {
+    if let Some(a) = v.as_array_mut() {
+        a.sort_by(|x, y| {
+            let rang = |l: &Value| super::couverture::rang_statut(l["statut"].as_str().unwrap_or(""));
+            let jours = |l: &Value| l["jours_couverture"].as_i64().unwrap_or(i64::MAX);
+            let texte = |l: &Value| l[secondaire].as_str().unwrap_or("").to_string();
+            (rang(x), jours(x), texte(x)).cmp(&(rang(y), jours(y), texte(y)))
+        });
+    }
+}
+
+fn tronquer(v: &mut Value, limite: i64) {
+    if let Some(a) = v.as_array_mut() {
+        a.truncate(limite.max(0) as usize);
+    }
+}
+
+/// `GET /api/stock/projete` — LE STOCK PROJETE EST UNE VUE DU MOTEUR DE COUVERTURE
+/// (27/10/2026) : une ligne par reference suivie (active, avec une demande au plan,
+/// du stock ou un arrivage), ses ressources comptees, sa couverture (1re rupture,
+/// couvert jusqu'au, plan non couvert), sa premiere proposition, et ce qui est
+/// compte a part — les memes champs que l'onglet « A commander ». `?statut=`
+/// filtre sur l'etat du moteur (PLAN_NON_COUVERT, SOUS_SECURITE, COUVERT).
 pub async fn stock_projete(
     State(state): State<AppState>,
     user: Utilisateur,
     Query(f): Query<Filtres>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
-    let rows = sqlx::query(
-        // LE FIL SUR MACHINE, A COTE : sorti du magasin et pas encore consomme.
-        // Hors du stock physique, mais compte dans le stock projete (regle 9).
-        "SELECT sp.*, COALESCE(sm.kg_sur_machine, 0) AS kg_sur_machine
-           FROM v_stock_projete sp
-           LEFT JOIN v_stock_machine sm ON sm.code_reference = sp.code_reference
-          WHERE ($1 IS NULL OR sp.statut = $1)
-          ORDER BY CASE statut
-                     WHEN 'RUPTURE'   THEN 1
-                     WHEN 'CRITIQUE'  THEN 2
-                     WHEN 'ATTENTION' THEN 3
-                     ELSE 4 END,
-                   jours_couverture
-          LIMIT $2",
-    )
-    .bind(&f.statut)
-    .bind(f.limite())
-    .fetch_all(&state.db)
-    .await?;
-
-    let mut valeur = lignes_en_json(&rows);
+    let etats = super::couverture::etats(&state.db).await?;
+    // Ce que le stock dit en plus : le physique, la valeur, l'unite, la regularite,
+    // et le fil sur machine total (compte ou non).
+    let complements = lignes_en_json(
+        &sqlx::query(
+            "SELECT s.code_reference, s.classe_xyz, s.unite_catalogue, s.cmup_mad, s.valeur_totale_mad,
+                    s.stock_physique_net_kg, s.stock_total_kg,
+                    COALESCE(m.kg_sur_machine, 0) AS kg_sur_machine
+               FROM v_stock_reference s
+               LEFT JOIN v_stock_machine m ON m.code_reference = s.code_reference",
+        )
+        .fetch_all(&state.db)
+        .await?,
+    );
+    let par_code: HashMap<String, &Value> = complements
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|l| l["code_reference"].as_str().map(|c| (c.to_string(), l)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let filtre = f.statut.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let mut lignes: Vec<Value> = etats
+        .suivies()
+        .filter(|e| filtre.is_none_or(|s| s == e.statut))
+        .map(|e| {
+            let mut l = e.ligne.clone();
+            if let (Some(o), Some(c)) = (l.as_object_mut(), par_code.get(&e.code_reference).and_then(|c| c.as_object())) {
+                for (k, v) in c {
+                    o.entry(k.clone()).or_insert_with(|| v.clone());
+                }
+            }
+            l
+        })
+        .collect();
+    lignes.sort_by(|x, y| {
+        let rang = |l: &Value| super::couverture::rang_statut(l["statut"].as_str().unwrap_or(""));
+        let jours = |l: &Value| l["jours_couverture"].as_i64().unwrap_or(i64::MAX);
+        let securite = |l: &Value| l["premier_passage_securite"].as_str().unwrap_or("9999").to_string();
+        let code = |l: &Value| l["code_reference"].as_str().unwrap_or("").to_string();
+        (rang(x), jours(x), securite(x), code(x)).cmp(&(rang(y), jours(y), securite(y), code(y)))
+    });
+    let mut valeur = Value::Array(lignes);
+    tronquer(&mut valeur, f.limite());
     user.masquer(&state.db, module::STOCK, &mut valeur).await?;
     Ok(Json(valeur))
 }
@@ -962,25 +1163,29 @@ pub async fn substitutions(
     State(state): State<AppState>,
     user: Utilisateur,
 ) -> AppResult<Json<Value>> {
-    lister(
-        &state,
-        &user,
-        module::STOCK,
-        "SELECT * FROM v_substitution_dispo",
-    )
-    .await
-}
-
-pub async fn plan_achat(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
-    let Json(mut v) = lister(
-        &state,
-        &user,
-        module::PLAN_ACHAT,
-        "SELECT * FROM v_plan_achat",
-    )
-    .await?;
-    user.masquer_prix_au_cmup(&state.db, &mut v).await?;
-    Ok(Json(v))
+    // LA TENSION VIENT DU MOTEUR (27/10/2026) : une reference principale au plan
+    // non couvert (l'ancien RUPTURE / CRITIQUE), avec ses substituts en stock.
+    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    let etats = super::couverture::etats(&state.db).await?;
+    let rows = sqlx::query("SELECT * FROM v_substitution_dispo").fetch_all(&state.db).await?;
+    let mut lignes: Vec<Value> = Vec::new();
+    for mut l in lignes_en_json(&rows).as_array().cloned().unwrap_or_default() {
+        let principale = l["ref_principale"].as_str().and_then(|c| etats.get(c));
+        let Some(p) = principale.filter(|p| p.statut == super::couverture::statut::PLAN_NON_COUVERT) else {
+            continue;
+        };
+        let substitut = l["ref_substitut"].as_str().and_then(|c| etats.get(c));
+        if let Some(o) = l.as_object_mut() {
+            o.insert("statut_principale".into(), json!(p.statut));
+            o.insert("premiere_rupture_principale".into(), json!(p.premiere_rupture));
+            o.insert("plan_non_couvert_principale_kg".into(), json!(p.plan_non_couvert_kg));
+            o.insert("statut_substitut".into(), json!(substitut.map(|s| s.statut)));
+        }
+        lignes.push(l);
+    }
+    let mut valeur = Value::Array(lignes);
+    user.masquer(&state.db, module::STOCK, &mut valeur).await?;
+    Ok(Json(valeur))
 }
 
 /// `GET /api/plan-achat/stocks-minimums` — LES STOCKS MINIMUMS A REVOIR (regle 9,
@@ -1005,126 +1210,12 @@ pub struct DetailProposition {
     reference: String,
 }
 
-/// `GET /api/plan-achat/detail?reference=…` — LE CALCUL D'UNE PROPOSITION, pas
-/// a pas (audit v5, F16) : l'acheteur voit d'ou viennent les kilos avant de
-/// commander. Stock du magasin, fil sur machine compte, en-cours (bons a
-/// l'heure, en retard, marchandise au port), demande pendant le delai (dont la
-/// part prolongee au-dela du plan), securite, minimum, MOQ, palette. Le calcul
-/// est celui d'aujourd'hui (v_plan_achat), avec les pieces qui le composent.
-pub async fn detail_proposition(
-    State(state): State<AppState>,
-    user: Utilisateur,
-    Query(q): Query<DetailProposition>,
-) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
-    let reference = q.reference.trim();
-    let calcul = sqlx::query(
-        "SELECT pa.code_reference, pa.delai_livraison_jours, pa.classe_abc,
-                pa.stock_mrp_kg::float8 AS stock_mrp_kg, pa.encours_kg::float8 AS encours_kg,
-                pa.residuel_kg::float8 AS residuel_kg, pa.securite_kg::float8 AS securite_kg,
-                pa.sorties_fenetre_kg::float8 AS sorties_fenetre_kg,
-                pa.stock_min_catalogue_kg::float8 AS stock_min_catalogue_kg,
-                pa.besoin_avant_arrondi_kg::float8 AS besoin_avant_arrondi_kg,
-                pa.complement_palette_kg::float8 AS complement_palette_kg,
-                pa.qte_a_commander_kg::float8 AS qte_a_commander_kg, pa.palettes_a_commander,
-                sp.stock_physique_net_kg::float8 AS stock_magasin_net_kg,
-                sp.stock_machine_kg::float8 AS stock_machine_compte_kg,
-                COALESCE(sm.kg_sur_machine, 0)::float8 AS stock_machine_total_kg,
-                sp.stock_reserve_kg::float8 AS stock_reserve_kg,
-                sp.stock_quarantaine_kg::float8 AS stock_quarantaine_kg,
-                sp.demande_delai_kg::float8 AS demande_delai_kg,
-                COALESCE(ef.encours_retarde_kg, 0)::float8 AS encours_retarde_kg,
-                COALESCE(ef.encours_import_kg, 0)::float8 AS encours_port_kg,
-                COALESCE(ef.nb_lignes_retardees, 0) AS nb_lignes_retardees,
-                COALESCE(bh.lead_j, 0)::float8 AS delai_j, COALESCE(bh.couv_j, 0)::float8 AS couverture_j,
-                COALESCE(bh.dem_lead_prolonge_kg, 0)::float8 AS demande_delai_prolongee_kg,
-                COALESCE(bh.sorties_prolongees_kg, 0)::float8 AS sorties_prolongees_kg,
-                r.moq_kg::float8 AS moq_kg,
-                COALESCE((SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_EncoursRetardInclus'), '1') = '1'
-                    AS retard_compte,
-                COALESCE((SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_MrpInclureStockMachine'), '1') = '1'
-                    AS machine_comptee
-           FROM v_plan_achat pa
-           JOIN v_stock_projete sp ON sp.code_reference = pa.code_reference
-           JOIN reference r ON r.code_reference = pa.code_reference
-           LEFT JOIN v_stock_machine sm ON sm.code_reference = pa.code_reference
-           LEFT JOIN v_encours_fiable ef ON ef.code_reference = pa.code_reference
-           LEFT JOIN v_besoin_horizon bh ON bh.code_reference = pa.code_reference
-          WHERE pa.code_reference = $1",
-    )
-    .bind(reference)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::Introuvable(format!("reference {reference} dans le calcul du plan")))?;
-
-    // Les bons ouverts, et s'ils sont en retard au sens du reglage.
-    let bons = sqlx::query(
-        "SELECT bc.numero_bc, bc.id_bc, lb.date_livraison_prevue, lb.quantite_restante_kg::float8 AS reste_kg,
-                substr(lb.date_livraison_prevue, 1, 10) < to_char(current_date - COALESCE(
-                    (SELECT valeur_courante::int FROM parametre WHERE code_parametre = 'P_RetardBCJours'), 5), 'YYYY-MM-DD')
-                    AS en_retard
-           FROM ligne_bc lb JOIN bon_commande bc ON bc.id_bc = lb.id_bc
-          WHERE lb.code_reference = $1 AND bc.statut IN ('VALIDE', 'ENVOYE', 'LIVRE_PARTIEL')
-            AND lb.statut NOT IN ('ANNULE', 'SOLDE') AND lb.type_ligne = 'MARCHANDISE' AND lb.quantite_restante_kg > 0
-          ORDER BY lb.date_livraison_prevue NULLS LAST, bc.numero_bc",
-    )
-    .bind(reference)
-    .fetch_all(&state.db)
-    .await?;
-    // La marchandise au port : lignes d'import sans bon, dossier engage et non clos.
-    let port = sqlx::query(
-        "SELECT d.numero AS numero_dossier, d.id_dossier, f.numero_facture, fl.reste_kg::float8 AS reste_kg
-           FROM import_facture_lignes fl
-           JOIN import_factures f ON f.id_facture = fl.id_facture
-           JOIN import_dossiers d ON d.id_dossier = f.id_dossier
-          WHERE fl.code_reference = $1 AND d.statut NOT IN ('CLOTURE', 'BROUILLON') AND fl.type_ligne = 'ERP'
-            AND fl.soldee = 0 AND fl.id_ligne_bc IS NULL AND fl.reste_kg > 0
-          ORDER BY d.numero, f.numero_facture",
-    )
-    .bind(reference)
-    .fetch_all(&state.db)
-    .await?;
-    // Le fil sur machine, etage par etage : compte, sauf lot bloque. Il compte au
-    // dernier constat QUEL QUE SOIT SON AGE (27/10/2026) : plus de « trop ancien ».
-    let machine = sqlx::query(
-        "SELECT e.code_emplacement, e.lot_fournisseur, e.kg::float8 AS kg, substr(e.date_constat, 1, 10) AS date_constat,
-                COALESCE(l.statut, 'LIBRE') = 'BLOQUE' AS lot_bloque
-           FROM machine_etat e
-           LEFT JOIN lot l ON l.code_reference = e.code_reference AND l.lot_fournisseur = e.lot_fournisseur
-          WHERE e.code_reference = $1 AND e.kg > 0
-          ORDER BY e.code_emplacement",
-    )
-    .bind(reference)
-    .fetch_all(&state.db)
-    .await?;
-    // LE RISQUE D'APPROVISIONNEMENT, ici et non dans la liste (21/10/2026) :
-    // une seule reference, la vue ne coute plus a l'ouverture du plan.
-    let risque = sqlx::query(
-        "SELECT risque_source, nb_sources, action_recommandee, tier,
-                budget_annuel_mad::float8 AS budget_annuel_mad
-           FROM v_risque_sourcing WHERE code_reference = $1",
-    )
-    .bind(reference)
-    .fetch_optional(&state.db)
-    .await?;
-    let mut v = json!({
-        "calcul": lignes_en_json(&[calcul]).get(0).cloned().unwrap_or(Value::Null),
-        "risque": risque.map(|r| lignes_en_json(&[r]).get(0).cloned().unwrap_or(Value::Null)).unwrap_or(Value::Null),
-        "bons": lignes_en_json(&bons),
-        "port": lignes_en_json(&port),
-        "machine": lignes_en_json(&machine),
-    });
-    user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;
-    Ok(Json(v))
-}
-
-/// `GET /api/stock/besoin?reference=…` — LE BESOIN D'UNE REFERENCE : le PLAN
-/// SEUL (decision du 26/10/2026, migration 2026-10-27b), sur l'horizon et mois
-/// par mois, avec la demande pendant le delai et les sorties de la couverture.
-/// Les OF n'y entrent plus : ils servent la production et les statistiques
-/// (ecran des OF, C64). Le calcul est celui des vues du besoin (`v_besoin_12m`,
-/// `v_besoin_mois`, `v_besoin_horizon`) que lisent le stock projete et le plan
-/// d'achat. Lisible depuis le stock comme depuis le plan d'achat.
+/// `GET /api/stock/besoin?reference=…` — LE BESOIN D'UNE REFERENCE, au moteur de
+/// couverture (27/10/2026) : le PLAN SEUL sur l'horizon et mois par mois (le mois
+/// en cours depuis aujourd'hui), ce qu'il en reste non couvert, la premiere
+/// rupture, le delai et la couverture d'une commande. L'ancien calcul (demande
+/// pendant le delai, sorties de la couverture de `v_besoin_horizon`) est retire.
+/// Lisible depuis le stock comme depuis le plan d'achat.
 pub async fn besoin_reference(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -1136,38 +1227,7 @@ pub async fn besoin_reference(
         user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
         module::PLAN_ACHAT
     };
-    let reference = q.reference.trim();
-    let synthese = sqlx::query(
-        "SELECT r.code_reference, r.designation,
-                COALESCE(b.besoin_12m_kg, 0)::float8          AS besoin_12m_kg,
-                COALESCE(bh.dem_lead_kg, 0)::float8           AS demande_delai_kg,
-                COALESCE(bh.sorties_prevues_kg, 0)::float8    AS sorties_prevues_kg
-           FROM reference r
-           LEFT JOIN v_besoin_12m b ON b.code_reference = r.code_reference
-           LEFT JOIN v_besoin_horizon bh ON bh.code_reference = r.code_reference
-          WHERE r.code_reference = $1",
-    )
-    .bind(reference)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::Introuvable(format!("reference {reference}")))?;
-
-    // Mois par mois : le plan.
-    let mois = sqlx::query(
-        "SELECT annee_mois, COALESCE(sum(quantite_kg), 0)::float8 AS besoin_plan_kg
-           FROM v_besoin_mois
-          WHERE code_reference = $1
-          GROUP BY annee_mois
-          ORDER BY annee_mois",
-    )
-    .bind(reference)
-    .fetch_all(&state.db)
-    .await?;
-
-    let mut v = json!({
-        "synthese": lignes_en_json(&[synthese]).get(0).cloned().unwrap_or(Value::Null),
-        "mois": lignes_en_json(&mois),
-    });
+    let mut v = super::couverture::besoin_reference(&state.db, q.reference.trim()).await?;
     user.masquer(&state.db, module, &mut v).await?;
     Ok(Json(v))
 }
@@ -1224,10 +1284,11 @@ pub async fn propositions_achat(
 
 /// Tableau de bord du plan d'achat, reproduisant les blocs de la feuille.
 ///
-/// Tout se lit dans `v_stock_projete` — c'est le point que la feuille rend
-/// evident et que l'ecran avait perdu : le plan d'achat n'est pas une table
-/// autonome, c'est une LECTURE DU STOCK. Une reference apparait parce que son
-/// stock projete est passe sous son minimum, pas parce que quelqu'un l'a saisie.
+/// UNE SEULE SOURCE (27/10/2026) : la situation du stock est celle du MOTEUR DE
+/// COUVERTURE (plan non couvert, sous la securite, couvert, a commander
+/// aujourd'hui, classe A au plan non couvert) et « a commander » est la somme des
+/// propositions ouvertes, que le moteur a faites. Plus rien ne lit l'ancienne
+/// projection.
 pub async fn kpi_plan_achat(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -1244,8 +1305,10 @@ pub async fn kpi_plan_achat(
     .fetch_optional(&state.db)
     .await?;
     let (mut sortie, date_calcul) = match fige {
-        Some(x) => x,
-        None => figer_kpi_plan_achat(&state.db, &user).await?,
+        // Un releve fige avant le 27/10/2026 parle l'ancien calcul (ruptures,
+        // critiques…) : il se recalcule une fois au moteur.
+        Some(x) if x.0["globaux"].get("plan_non_couvert").is_some() => x,
+        _ => figer_kpi_plan_achat(&state.db, &user).await?,
     };
     if let Some(o) = sortie.as_object_mut() {
         o.insert("calcule_le".into(), Value::from(date_calcul));
@@ -1257,23 +1320,27 @@ pub async fn kpi_plan_achat(
 /// Calcule les indicateurs du plan d'achat et les enregistre ; rend les valeurs
 /// (non masquees) et la date. Appele a la generation du plan.
 pub async fn figer_kpi_plan_achat(db: &crate::db::Db, user: &Utilisateur) -> AppResult<(Value, String)> {
-    // LE CALCUL, UNE FOIS (audit v5, T15) : les quatre blocs lisaient
-    // v_plan_achat sept fois. Une table temporaire, le temps de la lecture.
+    // LE MOTEUR DE COUVERTURE, une fois, avant la transaction (il ne fait que lire).
+    let etats = super::couverture::etats(db).await?;
+    let suivies: Vec<&super::couverture::Etat> = etats.suivies().collect();
+    let codes: Vec<String> = suivies.iter().map(|e| e.code_reference.clone()).collect();
+    let statuts: Vec<String> = suivies.iter().map(|e| e.statut.to_string()).collect();
+
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    // La projection de stock, UNE fois aussi : chaque compte la replanifiait.
+    // L'etat de chaque reference suivie, tel que le moteur le dit.
     sqlx::query(
         "CREATE TEMP TABLE sp_kpi ON COMMIT DROP AS
-         SELECT code_reference, statut, sur_stock, classe_abc FROM v_stock_projete",
+         SELECT * FROM unnest($1::text[], $2::text[]) AS s(code_reference, statut)",
     )
+    .bind(&codes)
+    .bind(&statuts)
     .execute(&mut *tx)
     .await?;
 
-    // CE QUI EST « À COMMANDER » = LES PROPOSITIONS OUVERTES (27/10/2026) : elles
-    // viennent du moteur de couverture depuis 2026-10-27c. Lire v_plan_achat, son
-    // ancien calcul, donnait un autre budget et d'autres kilos sur le même écran
-    // (audit du 27/10). Le statut de stock reste celui de la projection.
+    // CE QUI EST « À COMMANDER » = LES PROPOSITIONS OUVERTES : elles viennent du
+    // moteur de couverture depuis 2026-10-27c ; leur etat aussi (27/10/2026).
     sqlx::query(
         "CREATE TEMP TABLE pa_kpi ON COMMIT DROP AS
          SELECT pa.code_reference, pa.code_fournisseur,
@@ -1281,7 +1348,7 @@ pub async fn figer_kpi_plan_achat(db: &crate::db::Db, user: &Utilisateur) -> App
                 pa.montant_total_mad    AS montant_estime_mad,
                 pa.urgence              AS tier,
                 pa.risque_identifie     AS risque_sourcing,
-                COALESCE(sp.statut, 'OK') AS statut
+                COALESCE(sp.statut, 'COUVERT') AS statut
            FROM plan_achat pa
            LEFT JOIN sp_kpi sp ON sp.code_reference = pa.code_reference
           WHERE pa.statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE')",
@@ -1289,26 +1356,32 @@ pub async fn figer_kpi_plan_achat(db: &crate::db::Db, user: &Utilisateur) -> App
     .execute(&mut *tx)
     .await?;
 
-    // Bloc « KPI globaux » et bloc « repartition par statut » de la feuille.
-    let globaux = sqlx::query(
+    // Bloc « Situation du stock » : les notions du moteur (decide le 27/10/2026).
+    let compteurs = etats.compteurs();
+    let propositions = sqlx::query(
         "SELECT
-            (SELECT COUNT(*) FROM sp_kpi WHERE statut <> 'OK')        AS refs_en_alerte,
-            (SELECT COUNT(*) FROM sp_kpi WHERE statut = 'RUPTURE')    AS ruptures,
-            (SELECT COUNT(*) FROM sp_kpi WHERE statut = 'CRITIQUE')   AS critiques,
-            -- Le sur-stock n'est PAS un statut : c'est un second axe, compte a
-            -- part. Le placer dans l'echelle interceptait 72 references sur 124
-            -- et eteignait la couche logique.
-            (SELECT COUNT(*) FROM sp_kpi WHERE sur_stock = 1)         AS sur_stock,
-            (SELECT COUNT(*) FROM sp_kpi WHERE statut = 'ATTENTION')  AS attention,
-            (SELECT COUNT(*) FROM sp_kpi WHERE statut = 'OK')         AS ok,
-            (SELECT COUNT(*) FROM sp_kpi
-              WHERE statut <> 'OK' AND classe_abc = 'A')              AS classe_a_en_alerte,
             (SELECT COALESCE(ROUND(SUM(montant_estime_mad), 2), 0) FROM pa_kpi) AS budget_mad,
             (SELECT COALESCE(ROUND(SUM(qte_a_commander_kg), 2), 0) FROM pa_kpi) AS quantite_kg,
             (SELECT COUNT(*) FROM pa_kpi)                                AS refs_a_commander",
     )
     .fetch_one(&mut *tx)
     .await?;
+    let mut globaux = lignes_en_json(std::slice::from_ref(&propositions))
+        .as_array()
+        .and_then(|a| a.first().cloned())
+        .unwrap_or(Value::Null);
+    if let Some(o) = globaux.as_object_mut() {
+        for (cle, champ) in [
+            ("references", "nb_references"),
+            ("plan_non_couvert", "nb_plan_non_couvert"),
+            ("sous_securite", "nb_sous_securite"),
+            ("couvert", "nb_couvert"),
+            ("a_commander_aujourdhui", "nb_a_commander_aujourdhui"),
+            ("classe_a_en_rupture", "nb_classe_a_en_rupture"),
+        ] {
+            o.insert(cle.into(), compteurs[champ].clone());
+        }
+    }
 
     // Bloc « tiering urgence » : combien de references dans chaque palier.
     let tiering = sqlx::query(
@@ -1340,8 +1413,9 @@ pub async fn figer_kpi_plan_achat(db: &crate::db::Db, user: &Utilisateur) -> App
                 COUNT(*)                                       AS nb_references,
                 ROUND(SUM(pa.qte_a_commander_kg), 2)           AS quantite_kg,
                 ROUND(SUM(pa.montant_estime_mad), 2)           AS montant_mad,
-                SUM(CASE WHEN pa.tier = 'TIER 1' THEN 1 ELSE 0 END) AS nb_tier1,
-                SUM(CASE WHEN pa.statut = 'RUPTURE' THEN 1 ELSE 0 END) AS nb_ruptures
+                COUNT(*) FILTER (WHERE pa.tier = 'TIER 1')              AS nb_tier1,
+                -- Les references au plan non couvert, au sens du moteur.
+                COUNT(*) FILTER (WHERE pa.statut = 'PLAN_NON_COUVERT')  AS nb_plan_non_couvert
            FROM pa_kpi pa
            JOIN fournisseur f ON f.code_fournisseur = pa.code_fournisseur
           -- REGROUPER SUR LA CLE DU FOURNISSEUR, pas seulement sur le code
@@ -1359,8 +1433,7 @@ pub async fn figer_kpi_plan_achat(db: &crate::db::Db, user: &Utilisateur) -> App
     let sortie = json!({
         // Une seule ligne : on la sort du tableau pour que l'ecran lise
         // `globaux.budget_mad` et non `globaux[0].budget_mad`.
-        "globaux": lignes_en_json(std::slice::from_ref(&globaux))
-            .as_array().and_then(|a| a.first().cloned()).unwrap_or(Value::Null),
+        "globaux": globaux,
         "tiering": lignes_en_json(&tiering),
         "risques": lignes_en_json(&risques),
         "fournisseurs": lignes_en_json(&fournisseurs),
@@ -1393,6 +1466,8 @@ pub async fn analyse_abc_xyz(
         .fetch_all(&state.db)
         .await?;
     let mut valeur = lignes_en_json(&lignes);
+    // Le statut et les jours couverts sont ceux du moteur (27/10/2026).
+    super::couverture::etats(&state.db).await?.enrichir(&mut valeur, "statut");
     user.masquer(&state.db, module::STOCK, &mut valeur).await?;
     Ok(Json(valeur))
 }
@@ -1545,6 +1620,26 @@ pub async fn risques_sourcing(
     .fetch_all(&state.db)
     .await?;
     let mut valeur = lignes_en_json(&lignes);
+    // L'ETAT VIENT DU MOTEUR (27/10/2026), et l'action recommandee le suit : la
+    // meme grille qu'avant, ou « rupture ou critique » se lit desormais « plan
+    // non couvert » et « attention » « sous la securite ».
+    super::couverture::etats(&state.db).await?.enrichir(&mut valeur, "statut");
+    if let Some(a) = valeur.as_array_mut() {
+        for l in a.iter_mut() {
+            let mono = l["nb_sources"].as_i64().unwrap_or(1) <= 1;
+            let classe_a = l["classe_abc"].as_str() == Some("A");
+            let action = match l["statut"].as_str() {
+                Some(super::couverture::statut::PLAN_NON_COUVERT) if mono => "Commander et qualifier une seconde source",
+                Some(super::couverture::statut::PLAN_NON_COUVERT) => "Commander cette semaine",
+                _ if mono && classe_a => "Qualifier une seconde source sous 30 jours",
+                Some(super::couverture::statut::SOUS_SECURITE) => "Surveiller, commander au prochain point",
+                _ => "Aucune action",
+            };
+            if let Some(o) = l.as_object_mut() {
+                o.insert("action_recommandee".into(), json!(action));
+            }
+        }
+    }
     user.masquer(&state.db, module::PLAN_ACHAT, &mut valeur).await?;
     Ok(Json(valeur))
 }
@@ -1557,7 +1652,9 @@ pub async fn risques_sourcing(
 /// lignes chacun — et le cout d'une jointure de plus est nul a cote.
 ///
 /// Chaque bloc est une VUE : la regle de calcul se relit en SQL, pas dans du
-/// Rust qui l'aurait reecrite.
+/// Rust qui l'aurait reecrite — sauf L'ETAT DE COUVERTURE (tranches de
+/// couverture, statuts, alertes, references en alerte), qui vient du MOTEUR DE
+/// COUVERTURE depuis le 27/10/2026 : une seule source de verite.
 pub async fn cockpit_analyse(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -1568,26 +1665,118 @@ pub async fn cockpit_analyse(
         let lignes = sqlx::query(sql).fetch_all(db).await?;
         Ok(lignes_en_json(&lignes))
     }
+    use super::couverture::statut as etat;
+    let etats = super::couverture::etats(&state.db).await?;
+
+    // LES TRANCHES DE COUVERTURE : les jours couverts par le moteur, de
+    // aujourd'hui a la veille de la premiere rupture ; sans rupture, couvert sur
+    // tout l'horizon du plan.
+    let tranches: [(i64, &str, i64, i64); 6] = [
+        (1, "Rupture aujourd'hui", 0, 1),
+        (2, "1-30 j", 1, 30),
+        (3, "30-60 j", 30, 60),
+        (4, "60-90 j", 60, 90),
+        (5, "90-180 j", 90, 180),
+        (6, ">180 j", 180, i64::MAX),
+    ];
+    let mut couverture: Vec<Value> = tranches
+        .iter()
+        .map(|(rang, libelle, min, max)| {
+            let n = etats
+                .suivies()
+                .filter(|e| e.jours_couverture.is_some_and(|j| j >= *min && j < *max))
+                .count();
+            json!({ "rang": rang, "libelle": libelle, "nb_references": n })
+        })
+        .collect();
+    couverture.push(json!({
+        "rang": 7, "libelle": "Couvert sur tout l'horizon",
+        "nb_references": etats.suivies().filter(|e| e.jours_couverture.is_none()).count(),
+    }));
+
+    let mut mono_source = bloc(&state.db, "SELECT * FROM v_cockpit_mono_source ORDER BY budget_annuel_mad DESC").await?;
+    etats.enrichir(&mut mono_source, "statut");
+    if let Some(a) = mono_source.as_array_mut() {
+        a.retain(|l| l["statut"].as_str().is_some_and(|s| s != etat::COUVERT));
+        a.truncate(20);
+    }
+    let mut pareto = bloc(&state.db, "SELECT * FROM v_cockpit_pareto ORDER BY rang LIMIT 30").await?;
+    etats.enrichir(&mut pareto, "statut");
+
+    // L'etat par classe ABC, au sens du moteur.
+    let abc_statut: Vec<Value> = ["A", "B", "C"]
+        .iter()
+        .filter_map(|classe| {
+            let de_la_classe: Vec<&super::couverture::Etat> =
+                etats.suivies().filter(|e| e.classe_abc.as_deref().map(str::trim) == Some(*classe)).collect();
+            (!de_la_classe.is_empty()).then(|| {
+                let n = |s: &str| de_la_classe.iter().filter(|e| e.statut == s).count();
+                json!({ "classe_abc": classe, "en_alerte": n(etat::PLAN_NON_COUVERT),
+                        "attention": n(etat::SOUS_SECURITE), "ok": n(etat::COUVERT) })
+            })
+        })
+        .collect();
+
+    // ZONE 2 DU COCKPIT DU CLASSEUR : les references en tension au moteur, les
+    // plus graves et les plus proches de la rupture d'abord, avec ce que le moteur
+    // propose de commander.
+    let tension: Vec<&super::couverture::Etat> = etats.en_tension().into_iter().take(24).collect();
+    let codes_tension: Vec<String> = tension.iter().map(|e| e.code_reference.clone()).collect();
+    let complements = bloc_lie(
+        &state.db,
+        "SELECT sp.code_reference, cat.libelle AS categorie_libelle, r.couleur, sp.unite_catalogue,
+                sp.stock_physique_net_kg
+           FROM v_stock_reference sp
+           JOIN reference r ON r.code_reference = sp.code_reference
+           LEFT JOIN categorie_matiere cat ON cat.code_categorie = r.code_categorie
+          WHERE sp.code_reference = ANY($1)",
+        &codes_tension,
+    )
+    .await?;
+    let alertes: Vec<Value> = tension
+        .iter()
+        .map(|e| {
+            let mut o = json!({
+                "code_reference": e.code_reference, "designation": e.designation,
+                "fournisseur_nom": e.fournisseur_nom, "delai_livraison_jours": e.delai_j,
+            });
+            if let (Some(m), Some(c)) = (
+                o.as_object_mut(),
+                complements
+                    .as_array()
+                    .and_then(|a| a.iter().find(|c| c["code_reference"].as_str() == Some(e.code_reference.as_str())))
+                    .and_then(Value::as_object),
+            ) {
+                for (k, v) in c {
+                    m.entry(k.clone()).or_insert_with(|| v.clone());
+                }
+                m.extend(e.colonnes());
+            }
+            o
+        })
+        .collect();
+    let plan_non_couvert: Vec<String> = etats
+        .suivies()
+        .filter(|e| e.statut == etat::PLAN_NON_COUVERT)
+        .map(|e| e.code_reference.clone())
+        .collect();
 
     let mut sortie = serde_json::json!({
-        "couverture":   bloc(&state.db, "SELECT * FROM v_cockpit_couverture ORDER BY rang").await?,
+        "couverture":   couverture,
         "cout_mensuel": bloc(&state.db, "SELECT * FROM v_cockpit_cout_mensuel ORDER BY annee_mois").await?,
         "economies":    bloc(&state.db,
             "SELECT * FROM v_cockpit_economies ORDER BY economie_annuelle_mad DESC LIMIT 20").await?,
         "devises":      bloc(&state.db, "SELECT * FROM v_cockpit_devise ORDER BY montant_mad DESC").await?,
-        "mono_source":  bloc(&state.db,
-            "SELECT * FROM v_cockpit_mono_source
-              WHERE statut <> 'OK'
-              ORDER BY budget_annuel_mad DESC LIMIT 20").await?,
+        "mono_source":  mono_source,
         // Le Pareto ne montre que le haut de la courbe : au-dela de trente
         // references les barres deviennent illisibles et le cumul plat.
-        "pareto":       bloc(&state.db, "SELECT * FROM v_cockpit_pareto ORDER BY rang LIMIT 30").await?,
+        "pareto":       pareto,
         "fournisseurs": bloc(&state.db,
             "SELECT f.nom AS fournisseur_nom,
                     COUNT(*) AS nb_references,
                     ROUND(SUM(COALESCE(sp.conso_mensuelle_kg, 0) * 12
                               * COALESCE(sp.cmup_mad, 0)), 2) AS budget_annuel_mad
-               FROM v_stock_projete sp
+               FROM v_stock_reference sp
                JOIN fournisseur f ON f.code_fournisseur = sp.code_fournisseur
               GROUP BY f.nom
               -- L'expression est repetee plutot que citee par son alias :
@@ -1598,30 +1787,8 @@ pub async fn cockpit_analyse(
                          * COALESCE(sp.cmup_mad, 0)) > 0
               ORDER BY budget_annuel_mad DESC
               LIMIT 10").await?,
-        "abc_statut":   bloc(&state.db,
-            "SELECT r.classe_abc,
-                    SUM(CASE WHEN sp.statut IN ('RUPTURE','CRITIQUE') THEN 1 ELSE 0 END) AS en_alerte,
-                    SUM(CASE WHEN sp.statut = 'ATTENTION' THEN 1 ELSE 0 END)             AS attention,
-                    SUM(CASE WHEN sp.statut = 'OK' THEN 1 ELSE 0 END)                    AS ok
-               FROM reference r
-               JOIN v_stock_projete sp ON sp.code_reference = r.code_reference
-              WHERE r.actif = 1 AND r.classe_abc IS NOT NULL
-              GROUP BY r.classe_abc
-              ORDER BY r.classe_abc").await?,
-        // ZONE 2 DU COCKPIT DU CLASSEUR : les references en alerte, les plus
-        // urgentes d'abord (couverture croissante), avec ce qu'il faut commander.
-        "alertes":      bloc(&state.db,
-            "SELECT sp.code_reference, sp.designation, cat.libelle AS categorie_libelle,
-                    r.couleur, sp.fournisseur_nom, sp.unite_catalogue,
-                    sp.stock_physique_net_kg, sp.conso_mensuelle_kg, sp.jours_couverture,
-                    sp.delai_livraison_jours, pa.qte_a_commander_kg, sp.statut
-               FROM v_stock_projete sp
-               JOIN reference r ON r.code_reference = sp.code_reference
-               LEFT JOIN categorie_matiere cat ON cat.code_categorie = r.code_categorie
-               LEFT JOIN v_plan_achat pa ON pa.code_reference = sp.code_reference
-              WHERE sp.statut <> 'OK'
-              ORDER BY sp.jours_couverture ASC NULLS LAST, sp.code_reference
-              LIMIT 24").await?,
+        "abc_statut":   abc_statut,
+        "alertes":      alertes,
     });
 
     // LES INDICATEURS DE LA ZONE 5 DU CLASSEUR qui manquaient. Une seule ligne.
@@ -1633,30 +1800,37 @@ pub async fn cockpit_analyse(
     // deux groupes d'equivalence ne compte qu'une fois, a sa meilleure economie.
     let ind = sqlx::query(
         "SELECT
-           (SELECT COUNT(*) FROM v_stock_projete WHERE statut <> 'OK')                AS nb_refs_en_alerte,
            (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc = 'A')      AS nb_classe_a,
            (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc = 'B')      AS nb_classe_b,
            (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc = 'C')      AS nb_classe_c,
            (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc IS NULL)    AS nb_non_classees,
            (SELECT ROUND(SUM(GREATEST(sp.stock_physique_net_kg, 0) * sp.cmup_mad)
                          / NULLIF(SUM(COALESCE(sp.conso_mensuelle_kg, 0) * sp.cmup_mad) / 30.0, 0), 1)
-              FROM v_stock_projete sp)                                                AS couverture_ponderee_jours,
+              FROM v_stock_reference sp)                                              AS couverture_ponderee_jours,
            (SELECT ROUND(AVG(ABS(ecart_pct)), 2) FROM v_archive_reception_courante
              WHERE ecart_pct IS NOT NULL)                                             AS ecart_pesee_moyen_pct,
            (SELECT ROUND(COALESCE(SUM(e), 0), 2) FROM (
                 SELECT MAX(economie_annuelle_mad) AS e FROM v_cockpit_economies
                  GROUP BY code_reference) x)                                          AS economies_total_mad,
            (SELECT COUNT(DISTINCT code_reference) FROM v_cockpit_economies)          AS nb_opportunites,
-           (SELECT ROUND(COALESCE(SUM(montant_estime_mad), 0), 2) FROM v_plan_achat
-             WHERE statut = 'RUPTURE')                                                AS budget_ruptures_mad,
+           -- Le budget des propositions ouvertes des references au plan non
+           -- couvert (moteur de couverture, 27/10/2026).
+           (SELECT ROUND(COALESCE(SUM(COALESCE(montant_total_mad, quantite_suggeree_kg * prix_estime_mad)), 0), 2)
+              FROM plan_achat
+             WHERE statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE')
+               AND code_reference = ANY($1))                                          AS budget_ruptures_mad,
            (SELECT ROUND(COALESCE(SUM(valeur_mad), 0), 2) FROM v_stock_dormant)      AS valeur_dormante_mad,
            (SELECT ROUND(100.0 * COALESCE((SELECT SUM(valeur_mad) FROM v_stock_dormant), 0)
                          / NULLIF(SUM(valeur_mad), 0), 1)
               FROM stock_magasin)                                                     AS pct_valeur_dormante",
     )
+    .bind(&plan_non_couvert)
     .fetch_all(&state.db)
     .await?;
-    if let Some(ligne) = lignes_en_json(&ind).as_array().and_then(|a| a.first()).cloned() {
+    if let Some(mut ligne) = lignes_en_json(&ind).as_array().and_then(|a| a.first()).cloned() {
+        if let Some(o) = ligne.as_object_mut() {
+            o.insert("nb_refs_en_alerte".into(), json!(etats.suivies().filter(|e| e.en_tension()).count()));
+        }
         sortie["indicateurs"] = ligne;
     }
 
@@ -1686,7 +1860,7 @@ pub async fn cockpit_analyse(
            (SELECT CAST(valeur_courante AS numeric)::float8 FROM parametre
              WHERE code_parametre = 'P_DSODefaut'),
            COUNT(*)
-         FROM v_stock_projete sp
+         FROM v_stock_reference sp
          LEFT JOIN fournisseur f ON f.code_fournisseur = sp.code_fournisseur",
     )
     .fetch_optional(&state.db)
@@ -1712,6 +1886,12 @@ pub async fn cockpit_analyse(
 
     user.masquer(&state.db, module::COCKPIT, &mut sortie).await?;
     Ok(Json(sortie))
+}
+
+/// Une requete a un parametre tableau de textes, rendue en JSON.
+async fn bloc_lie(db: &crate::db::Db, sql: &str, codes: &[String]) -> AppResult<Value> {
+    let lignes = sqlx::query(sql).bind(codes).fetch_all(db).await?;
+    Ok(lignes_en_json(&lignes))
 }
 
 /// Matrice des prix : une reference par ligne, un mois par colonne.

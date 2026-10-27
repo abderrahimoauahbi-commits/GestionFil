@@ -281,6 +281,14 @@ CREATE TABLE transfert (
     date_sortie         text,
     date_reception_dest text,
 
+    -- Date PREVUE de disponibilite au magasin destinataire (arbitrage du
+    -- 27/10/2026, migration 2026-10-27d) : obligatoire a l'expedition (passage
+    -- en VALIDE), revisable tant que le transfert est en route, figee apres —
+    -- garanti par trg_transfert_date_disponibilite (TRF-DATE, en 010). Le moteur
+    -- de couverture compte le transfert comme un arrivage a cette date ; un
+    -- transfert en route sans date est signale par C66.
+    date_disponibilite_prevue date,
+
     -- Qui repond de la marchandise pendant le trajet : chauffeur, chef de
     -- quai, transporteur. Distinct des comptes applicatifs, qui disent qui a
     -- SAISI — pas qui etait au volant.

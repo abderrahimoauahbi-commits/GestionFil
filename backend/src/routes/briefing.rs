@@ -51,14 +51,24 @@ pub async fn briefing(State(state): State<AppState>, user: Utilisateur) -> AppRe
 
     let mut points: Vec<Value> = Vec::new();
 
+    // L'ETAT DES REFERENCES ET LES CONTROLES QUI EN DEPENDENT VIENNENT DU MOTEUR DE
+    // COUVERTURE (27/10/2026). Un echec de lecture se tait, comme `compter`.
+    let etats = if peut(module::COCKPIT) || peut(module::STOCK) {
+        super::couverture::etats(db).await.ok()
+    } else {
+        None
+    };
+
     if peut(module::COCKPIT) {
-        let n = compter(db, "SELECT count(*) FROM v_controles WHERE anomalies > 0").await;
+        let controles = match &etats {
+            Some(e) => super::couverture::tous_les_controles(db, e).await.unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let en_anomalie = |c: &&Value| c["anomalies"].as_i64().unwrap_or(0) > 0;
+        let n = controles.iter().filter(en_anomalie).count() as i64;
         if n > 0 {
-            let bloquants = compter(
-                db,
-                "SELECT count(*) FROM v_controles WHERE anomalies > 0 AND criticite = 'BLOQUANT'",
-            )
-            .await;
+            let bloquants =
+                controles.iter().filter(en_anomalie).filter(|c| c["criticite"] == "BLOQUANT").count() as i64;
             points.push(point(
                 "controles",
                 "contrôle(s) de cohérence en anomalie",
@@ -70,28 +80,31 @@ pub async fn briefing(State(state): State<AppState>, user: Utilisateur) -> AppRe
         }
     }
 
-    if peut(module::STOCK) {
-        let n = compter(
-            db,
-            "SELECT count(*) FROM v_stock_projete WHERE statut IN ('RUPTURE','CRITIQUE')",
-        )
-        .await;
-        if n > 0 {
-            let ruptures =
-                compter(db, "SELECT count(*) FROM v_stock_projete WHERE statut = 'RUPTURE'").await;
+    if let (true, Some(e)) = (peut(module::STOCK), &etats) {
+        let c = e.compteurs();
+        let plan_non_couvert = c["nb_plan_non_couvert"].as_i64().unwrap_or(0);
+        let aujourdhui = c["nb_a_commander_aujourdhui"].as_i64().unwrap_or(0);
+        if plan_non_couvert > 0 {
             points.push(point(
                 "stock",
-                "référence(s) en rupture ou critique",
-                n,
-                if ruptures > 0 { "danger" } else { "alerte" },
+                "référence(s) au plan non couvert sur l'horizon",
+                plan_non_couvert,
+                "danger",
                 "/stock",
-                &if ruptures > 0 { format!("{ruptures} en rupture") } else { String::new() },
+                &if aujourdhui > 0 { format!("{aujourdhui} à commander aujourd'hui") } else { String::new() },
             ));
+        } else if aujourdhui > 0 {
+            points.push(point("stock", "référence(s) à commander aujourd'hui", aujourdhui, "alerte", "/plan-achat", ""));
         }
     }
 
     if peut(module::PLAN_ACHAT) {
-        let n = compter(db, "SELECT count(*) FROM v_plan_achat").await;
+        // Les propositions ouvertes, faites par le moteur (27/10/2026).
+        let n = compter(
+            db,
+            "SELECT count(*) FROM plan_achat WHERE statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE')",
+        )
+        .await;
         if n > 0 {
             points.push(point(
                 "plan_achat",

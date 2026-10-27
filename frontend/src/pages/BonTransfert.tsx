@@ -45,7 +45,12 @@ interface Entete extends Record<string, unknown> {
   bobines_totales: number
   palettes_totales: number
   jours_en_transit: number | null
+  /** Date prevue de disponibilite au destinataire ('AAAA-MM-JJ'), exigee a l'expedition (27/10/2026). */
+  date_disponibilite_prevue?: string | null
 }
+
+/** Le jour de Casablanca (20/10/2026), au format 'AAAA-MM-JJ'. */
+const aujourdhui = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Africa/Casablanca' })
 
 interface Ligne extends Record<string, unknown> {
   ligne_numero: number
@@ -95,6 +100,21 @@ export function BonTransfert({ type }: { type: 'sortie' | 'reception' }) {
   const { entete: e, lignes } = q.data
   const sortie = type === 'sortie'
   const titre = sortie ? 'BON DE SORTIE' : 'BON DE RECEPTION'
+
+  /* LA DATE PREVUE AU DESTINATAIRE, et son retard tant que le fil est en
+     route : passee la reception (ou l'annulation), il n'y a plus de retard. */
+  const dispo = (e.date_disponibilite_prevue ?? '').slice(0, 10)
+  const retard =
+    e.statut === 'VALIDE' && dispo
+      ? Math.round((Date.parse(aujourdhui()) - Date.parse(dispo)) / 86_400_000)
+      : 0
+  const valeurDispo = dispo
+    ? `${fmt.date(dispo)}${retard > 0 ? ` — en retard de ${retard} j` : ''}`
+    : e.statut === 'VALIDE'
+      ? '— sans date —'
+      : e.statut === 'BROUILLON'
+        ? '— à fixer à l’expédition —'
+        : '—'
 
   return (
     <div>
@@ -159,6 +179,7 @@ export function BonTransfert({ type }: { type: 'sortie' | 'reception' }) {
           />
           <Champ2 libelle="Expédié par" valeur={e.expediteur ?? '—'} />
           <Champ2 libelle="Reçu par" valeur={e.receptionnaire ?? '— a constater —'} />
+          <Champ2 libelle="Disponible à destination le" valeur={valeurDispo} />
         </div>
 
         <table className="mt-5 w-full border-collapse text-[11px]">

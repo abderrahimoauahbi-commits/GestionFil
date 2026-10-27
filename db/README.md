@@ -78,8 +78,9 @@ db/pg/
 ├── 010_declencheurs.sql          invariants (voir plus bas)
 ├── 010b_declencheurs_logique.sql solde, CMUP, capacité machine
 ├── 011_vues.sql                  vues de pilotage
-├── 012_controles.sql             contrôles métier C01–C37, C43, C44 (C38–C42, C45–C65 : migrations)
-├── 013_vues_cockpit.sql          le cockpit : Pareto, couvertures, économies
+├── 012_controles.sql             contrôles métier C01–C37 (sauf C05, C25, C27), C43, C44, C66
+│                                 (C38–C42, C45–C65 sauf C49 : migrations ; C05, C25 : moteur)
+├── 013_vues_cockpit.sql          le cockpit : Pareto, économies, devises, mono-source
 ├── 014_audit_operations.sql      journal d'audit des opérations
 ├── seed_*.sql                    référentiels, sécurité, qualités, comptes réels
 ├── migrations/                   une évolution = un fichier daté, REJOUABLE
@@ -134,11 +135,12 @@ Un rôle BOM sans densité sur la qualité **bloque la validation de la recette*
 | `v_conso_reelle` / `v_conso_retenue` | consommation réelle (correction N4) et sa provenance |
 | `v_stock_disponible` | stock agrégé par référence, hors magasins `inclure_mrp = 0` |
 | `v_encours_bc` | reliquat des BC envoyés |
-| `v_stock_min_dynamique` | stock minimum F3 (max de 4 sécurités) |
-| `v_stock_projete` | `stock + en-cours − besoins`, statut et jours de couverture ; le besoin décomposé : `besoin_plan_12m_kg`, `besoin_au_dela_12m_kg` (22c) |
-| `v_plan_achat` | quantité à commander (MOQ + multiple), tiering, sourcing, prix tracé |
-| `v_cockpit_stock` | KPI en un seul balayage |
-| `v_substitution_dispo` | alternatives disponibles sur rupture |
+| `v_stock_min_dynamique` | stock minimum F3 (max de 4 sécurités) — un seuil affiché, il n'entre plus dans aucun besoin (27e) |
+| `v_stock_physique` | ce qu'il y a dans les allées, sans projection : utilisable, quarantaine, mis de côté (restes, lots bloqués), fil sur machine au dernier constat, fil en route vers un magasin compté (`stock_transit_kg`) ; `stock_mrp_net_kg` retirée le 27/10/2026 |
+| `v_stock_reference` | **la lecture neutre d'une référence** (27/10/2026, 27e) : fournisseur et délai, classes, stock (MRP, total, physique net, quarantaine, mis de côté, machine, transit), consommation retenue, minimum — sans projection ni statut ; socle des vues d'état, d'analyse et de cockpit, à la place de `v_stock_projete` |
+| `v_substitution_dispo` | substituts d'un groupe d'équivalence qui ont du stock net ; l'état de la principale vient du moteur de couverture (27e) |
+| `v_stock_transit_reference` | le fil en route (transfert expédié, pas encore reçu) par référence et magasin d'arrivée, compté dans la valeur du stock et la couverture (10b) |
+| `v_facture_rapprochement` | le rapprochement 3-way d'une facture fournisseur, ligne par ligne : commandé (ligne de bon), pesé (ligne de réception), facturé, écarts de quantité et de prix (ADR-003 phase B, 14d) |
 | `v_fournisseur_scorecard` | conformité, ponctualité, OTIF, écart de pesée |
 | `v_stock_dormant` | références sans mouvement au-delà de `P_SeuilDormant` |
 | `v_lot_fefo` | proposition d'allocation FEFO |
@@ -147,9 +149,30 @@ Un rôle BOM sans densité sur la qualité **bloque la validation de la recette*
 | `v_lot_conditionnement_mesure` | par lot : poids d'une bobine mesuré et bobines par palette observées sur ses réceptions validées, locales et import (23a) |
 | `v_of_mois` / `v_besoin_of_qualite` | les OF retenus (PRÉVU, LANCÉ) mois par mois, au prorata des jours entre leur date et leur fin prévue (sans fin : le mois de leur date) ; par qualité et mois, m² du plan en service, m² des OF, part du plan couverte, part des OF au-delà du plan (22c) |
 | `v_besoin_of` | par OF, référence et mois : prévu (métrage × recette × (1 + perte de la qualité)), consommation déjà attribuée (écarts machine à effet consommation hors `MJ_CORRECTION`, déchet, perte, casse des décisions actives dont `id_of_periode` est l'OF, bobines déchargées au déchet / à la perte / à la casse, `CONSO_DIRECTE` − `RETOUR_CONSO` portant l'OF, contre-passés exclus) imputée aux mois les plus anciens d'abord, reste jamais négatif, parts liée au plan / au-delà ; un mois écoulé pèse sur le mois courant (22c) |
-| `v_besoin_of_mois` (`fn_besoin_of_mois`) | **les OF consomment le plan** : par référence et mois ≥ courant, la part du besoin MRP couverte par des OF (retirée, au prorata de la recette), le reste des OF dans le plan et au-delà. Une fonction plpgsql, opaque au planificateur : dépliée, elle portait la planification de `v_plan_achat` à des secondes. Vide sans OF (22c) |
 | `v_besoin_mois` | le besoin combiné par référence, mois et **origine** (`PLAN` / `AU_DELA_PLAN`) — la traçabilité de « OF + plan non couvert » (22c) |
-| `v_besoin_12m` / `v_besoin_horizon` / `v_besoin_horizon_of` | le plan (`besoin_mrp`) + l'ajustement des OF ; `v_besoin_12m` ajoute `besoin_plan_12m_kg`, `besoin_au_dela_12m_kg` ; `v_besoin_horizon` garde ses colonnes (2026-10-09k doit se rejouer), la part au-delà du plan du délai et de la couverture est dans `v_besoin_horizon_of` (`dem_lead_au_dela_kg`, `sorties_au_dela_kg`). Sans OF, valeurs identiques à avant (vérifié ligne à ligne le 22/10/2026). Le reste d'un OF compte en entier sur les jours qui restent du mois courant ; le plan, lui, au prorata (22c) |
+| `v_besoin_12m` | la lecture du plan restant (`besoin_mrp`, mois courant et suivants) : une entrée, pas un calcul de besoin ; le plan seul depuis 27b (`besoin_plan_12m_kg` = `besoin_12m_kg`, `besoin_au_dela_12m_kg` = 0) |
+
+**L'ancien calcul du besoin est retiré (27/10/2026, migration `2026-10-27e_source_unique_moteur.sql`).**
+Une seule source de vérité : le moteur de couverture (`backend/src/domain/couverture.rs`, lu par
+`routes/couverture.rs`), qui projette jour par jour. Sont supprimées `v_stock_projete`,
+`v_plan_achat`, `v_encours_fiable`, `v_besoin_horizon`, `v_besoin_horizon_of`, `v_besoin_of_mois`,
+`v_risque_mensuel`, `v_risque_reference`, `v_cockpit_stock`, `v_cockpit_couverture`, la colonne
+`v_stock_physique.stock_mrp_net_kg` et le paramètre `P_MrpInclureStockMachine`. Les vues qui
+gardaient un statut ou une projection pour l'afficher (`v_equivalence`, `v_etat_stock`,
+`v_etat_stock_conditionne`, `v_analyse_abc_xyz`, `v_cockpit_devise`, `v_cockpit_economies`,
+`v_cockpit_mono_source`, `v_cockpit_pareto`, `v_risque_sourcing`, `v_substitution_dispo`,
+`v_supervision*`, `v_cockpit_files`) sont redéfinies sans lui, sur `v_stock_reference` ; la route
+ajoute les colonnes du moteur (statut, jours couverts, 1re rupture, quantité à commander).
+`snapshot_mrp` prend le solde et l'état du moteur (`PLAN_NON_COUVERT`, `SOUS_SECURITE`, `COUVERT`,
+les anciens états restant admis). Gardées parce qu'elles ne calculent ni besoin ni projection :
+`v_besoin_mrp_calcule`, `v_besoin_12m`, `v_besoin_mois`, `v_conso_retenue`,
+`v_stock_min_dynamique`, `v_stock_disponible`.
+
+Le **transfert en route** porte une date prévue de disponibilité au magasin destinataire
+(`transfert.date_disponibilite_prevue`, migration `2026-10-27d`) : obligatoire à l'expédition,
+révisable tant qu'il est en route, figée après (déclencheur `trg_transfert_date_disponibilite`,
+`TRF-DATE` ; chaque révision journalisée par `trg_audit_transfert_date`). Le moteur le compte comme
+un arrivage à cette date ; sans date, C66 le signale.
 
 ---
 
@@ -157,7 +180,7 @@ Un rôle BOM sans densité sur la qualité **bloque la validation de la recette*
 
 ```powershell
 psql -d gestionfil -c "SELECT * FROM v_controles;"          # tableau de bord
-psql -d gestionfil -c "SELECT * FROM v_ctl_c05;"            # détail d'un contrôle
+psql -d gestionfil -c "SELECT * FROM v_ctl_c28;"            # détail d'un contrôle
 ```
 
 C01–C14 traduisent les contrôles du CDC en requêtes exécutables. C15–C37 ont été ajoutés, dont :
@@ -183,7 +206,7 @@ Les migrations du 09/10/2026 (audit v5) et du 10/10 ajoutent, tous en **signal**
 | C46 | champ sensible sans ligne dans le modèle de droits d'un rôle | 09a |
 | C47 | fil prêté à une autre usine, non rendu dans le délai (`P_PretJoursAlerte`) | 09d |
 | C48 | chargement : fil chargé déjà consommé, à relire | 09e |
-| C49 | proposition d'achat estimée surtout sur la prolongation du plan | 09k |
+| C49 | ~~proposition d'achat estimée surtout sur la prolongation du plan~~ — **retiré le 27/10/2026** (le moteur n'a pas de prolongation) | 09k, retiré par 27e |
 | C50 | moyenne du plan éloignée de plus de 50 % de la consommation réelle | 09k |
 | C51 | référence suivie au lot avec du fil sans lot, à identifier | 09s |
 | C52 | réception validée dont une entrée est contre-passée | 09u |
@@ -198,12 +221,23 @@ Les migrations du 09/10/2026 (audit v5) et du 10/10 ajoutent, tous en **signal**
 | C61 | OF clôturé dont la consommation réelle (fil + hors machine) s'écarte du prévu (métrage × recette) de plus de `P_EcartOfPct` (15 %) | 22b |
 | C62 | consommation directe sans OF **ni qualité** (non contre-passée) : l'historique d'avant le 23/10/2026, « Non attribué » dans les statistiques par qualité ; depuis, une consommation sans OF nomme sa qualité (base) | 22d, 23b |
 | C63 | sur l'état courant des étages : ligne qui porte plus de bobines que sa voie n'en tient (`fn_bobines_voie`), ou voies d'un même étage plus larges, ensemble, que la machine (une voie = un OF et une largeur) | 22d |
-| C64 | qualité et mois où les OF retenus (PRÉVU, LANCÉ) dépassent le plan de production en service : le besoin augmente de l'excédent, c'est voulu ; on le montre (`v_ctl_c64` : m² du plan, des OF, au-delà, les OF) | 22c |
+| C64 | qualité et mois où les OF retenus (PRÉVU, LANCÉ) dépassent le plan de production en service : un simple signal que la direction garde : depuis 27b, le besoin vient du plan seul et l'excédent des OF n'y entre plus ; on le montre (`v_ctl_c64` : m² du plan, des OF, au-delà, les OF) | 22c |
 | C65 | mouvement d'un magasin daté de la période de comptage (du jour d'ouverture au jour de clôture) d'un inventaire clôturé, saisi après son ouverture : passé pendant le comptage avant le gel du 23/10/2026, ou antidaté après la clôture — le comptage ne l'a pas vu (ajustements de l'inventaire et leurs contre-passations exclus). Même étendue que le gel (24a) : pour un tournant ou un ciblé, seul compte un mouvement dont une ligne porte une référence de l'inventaire (sa liste, ou ses lignes avant 24b) | 23g, 24a, 24b |
+| C66 | transfert en route (`VALIDE`) sans date prévue de disponibilité : le moteur de couverture le liste « sans date » et ne le compte pas, jusqu'à ce qu'une date soit saisie | 27d, 27e |
 
-C28 dit désormais ce que fait `P_EncoursRetardInclus` (comptée ou retirée de la couverture) ; C31,
-C32 et le coût de revient gardent les réceptions clôturées ; C35 et C36 lisent l'état des machines
-(`machine_etat`). Le banc vérifie la liste exacte C01–C65.
+**Le 27/10/2026 (migration 27e, une seule source de vérité : le moteur de couverture).** **C05**
+(plan non couvert sur l'horizon, ex-« stock projeté négatif ») et **C25** (stock mobilisable face à
+un équivalent en tension) gardent leur sens mais sont **calculés par le moteur et servis par le
+serveur** sous les mêmes codes (`couverture::controles_moteur`, `CONTROLES_MOTEUR`) : ils ne sont
+plus dans `v_controles`, et l'écran des contrôles, le briefing et l'assistant les reçoivent mêlés
+aux autres (`tous_les_controles`). **C27** (écart majeur : couverture confortable, magasin sous le
+minimum) et **C49** sont **retirés** — le moteur n'a ni seuils de jours ni prolongation. **C28**
+(commande en retard) est **rebranché** sur la règle du moteur : une ligne de bon validé dont la date
+(de la ligne, sinon de l'en-tête) est dépassée est en retard et hors couverture — plus de tolérance
+`P_RetardBCJours`, un libellé fixe (`P_EncoursRetardInclus` n'a plus de lecteur). **C66** naît
+(transfert en route sans date prévue). C31, C32 et le coût de revient gardent les réceptions
+clôturées ; C35 et C36 lisent l'état des machines (`machine_etat`). `v_controles` porte donc
+C01–C66 moins C05, C25, C27 et C49.
 
 **C11 est le contrôle central** : il compare le solde de `stock_magasin` au grand livre. `stock_magasin` n'est qu'un cache ; `ligne_mouvement` fait foi. Toute divergence signale un bug applicatif, et le solde est reconstructible.
 
@@ -241,3 +275,5 @@ C32 et le coût de revient gardent les réceptions clôturées ; C35 et C36 lise
 - [ADR-001 — Décisions fondatrices](../docs/ADR-001-decisions-fondatrices.md)
 - [ADR-002 — Les 18 règles de gestion du 08/10/2026](../docs/ADR-002-regles-de-gestion-2026-10.md)
 - [Écarts au cahier des charges](../docs/ecarts-cahier-des-charges.md)
+- [ADR-003 — Réception unifiée GR → IR → Landed Cost](../docs/ADR-003-reception-unifiee-gr-ir-landed-cost.md)
+- [Matrice des types de mouvement](../docs/matrice-mouvements.md) — générée par `python db/pg/matrice.py`

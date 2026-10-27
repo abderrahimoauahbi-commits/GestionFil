@@ -1,18 +1,27 @@
 /**
- * Stock projete = stock disponible + en-cours fournisseur − besoins sur 12 mois.
+ * LE STOCK PROJETÉ EST UNE VUE DU MOTEUR DE COUVERTURE (27/10/2026, une seule
+ * source de vérité). Plus de « stock disponible + en-cours − besoins sur 12 mois »
+ * ni d'échelle RUPTURE / CRITIQUE / ATTENTION / OK : chaque référence suivie
+ * (une demande au plan, du stock ou un arrivage) a l'état que le moteur lui donne
+ * en projetant le plan jour par jour —
  *
- * Le filtrage passe par un RAIL LATERAL plutot que par des onglets en haut : il
- * porte le NOMBRE de references derriere chaque statut. « Rupture » seul invite
- * a cliquer pour savoir ; « Rupture 12 » a deja repondu.
+ *   * PLAN NON COUVERT : une rupture est prévue sur l'horizon du plan ;
+ *   * SOUS LA SÉCURITÉ : le solde passe sous la sécurité, sans rupture ;
+ *   * COUVERT : ni l'un ni l'autre ;
  *
- * Les compteurs se calculent sur le jeu complet, une seule fois, et ne bougent
- * pas quand on filtre : un compteur qui suivrait le filtre afficherait toujours
- * le total de ce qu'on regarde deja, et ne dirait plus rien.
+ * et, à part, « à commander aujourd'hui » (la date limite de commande de la
+ * première proposition est atteinte ou dépassée). Les mêmes chiffres que l'onglet
+ * « À commander » du plan d'achat : disponible compté, couvert jusqu'au, première
+ * rupture, plan non couvert, arrivages comptés, proposition.
+ *
+ * Le filtrage passe par un RAIL LATÉRAL : il porte le NOMBRE de références derrière
+ * chaque état, calculé une fois sur le jeu complet.
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle,
+  CalendarClock,
   CheckCircle2,
   ClipboardList,
   FileText,
@@ -21,17 +30,12 @@ import {
   PackageX,
   Shuffle,
   ShoppingCart,
-  TrendingDown,
 } from 'lucide-react'
 import { api } from '../api/client'
 import { cn } from '../lib/utils'
 import { EnTetePage } from '../components/Layout'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
-import {
-  PanneauFiltres,
-  useFiltres,
-  type ChampFiltre,
-} from '../composants/PanneauFiltres'
+import { PanneauFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
 import { TableDroits, type Colonne } from '../components/TableDroits'
 import { fmt } from '../lib/utils'
 import {
@@ -43,260 +47,133 @@ import { useOuvrirVue } from '../lib/navigation'
 import { BesoinReference } from '../composants/BesoinOf'
 import { Badge, Bouton } from '../composants/ui/base'
 import { StatutBadge } from '../composants/StatutBadge'
+import { libelleStatut } from '../lib/statuts'
 
 const MODULE = 'STOCK'
 
+/** Une ligne : celle de l'onglet « À commander », avec ce que le stock dit en plus. */
 interface LigneProjete {
   code_reference: string
-  designation: string
+  designation: string | null
   fournisseur_nom: string | null
-  stock_mrp_kg: number
-  encours_kg: number
-  /** Le fil sur les metiers : sorti du magasin, pas encore consomme (06/10/2026). */
-  kg_sur_machine?: number
-  /** Ce que le calcul compte du fil sur machine (constat recent, lot non bloque, reglage). */
-  stock_machine_kg?: number
-  /** Le besoin du plan seul (27/10/2026 : les OF n'y entrent plus). */
-  besoin_12m_kg: number
-  stock_projete_kg: number
-  jours_couverture: number | null
-  /** Bornes de l'echelle logique, servies par la vue : la jauge s'y gradue. */
-  seuil_critique_jours: number | null
-  seuil_alerte_jours: number | null
-  conso_mensuelle_kg: number | null
-  classe_xyz: string | null
-  delai_livraison_jours: number | null
-  unite_catalogue: string | null
-  cmup_mad: number | null
-  valeur_totale_mad: number | null
-  date_derniere_sortie: string | null
-  source_conso: string | null
-  statut: string
   classe_abc: string | null
-  /** Les deux couches, separement : c'est ce qui explique le statut final. */
-  statut_physique: string | null
-  statut_logique: string | null
+  classe_xyz: string | null
+  unite_catalogue: string | null
+  /** PLAN_NON_COUVERT | SOUS_SECURITE | COUVERT */
+  statut: string
+  /** Jours couverts depuis aujourd'hui jusqu'à la veille de la 1re rupture ; null : tout l'horizon. */
+  jours_couverture: number | null
+  disponible_kg: number
+  magasin_kg: number
+  machine_kg: number
+  kg_sur_machine: number | null
+  plan_horizon_kg: number
+  couvert_jusqu_au: string | null
+  couvert_tout_horizon: boolean
+  premiere_rupture: string | null
+  premier_passage_securite: string | null
+  plan_non_couvert_kg: number
+  arrivages_comptes_kg: number
+  prochain_arrivage_date: string | null
+  prochain_arrivage_kg: number | null
+  qte_a_commander_kg: number | null
+  date_limite_commande: string | null
+  a_commander_aujourdhui: boolean
+  delai_j: number
+  defaut_donnees: string | null
+  quarantaine_kg: number
+  bloque_kg: number
+  restes_kg: number
+  en_retard_kg: number
+  sans_date_kg: number
   stock_physique_net_kg: number | null
-  stock_quarantaine_kg: number | null
-  stock_min_kg: number | null
-  stock_max_kg: number | null
-  sur_stock: number | null
-  encours_retarde_kg: number | null
-  nb_lignes_retardees: number | null
-  retard_max_jours: number | null
-  ecart_majeur: number | null
-  besoins_calcules_le: string | null
+  /** Le plan ramené à un mois de 30 jours, tel que le moteur le consomme. */
+  plan_mois_kg: number | null
+  cmup_mad: number | null
   [k: string]: unknown
 }
 
+const kg = (v: number | null | undefined, d = 0) => fmt.nombre(v ?? 0, d)
+
 /**
- * Pourquoi cette ligne est-elle dans cet etat ?
- *
- * Le statut seul ne dit rien de sa cause : « critique » peut venir du magasin
- * vide aujourd'hui, d'une couverture trop courte demain, ou d'un camion qu'on
- * n'attend plus. Sans la cause, l'operateur doit reconstituer le calcul de
- * tete — et il finit par ne plus lire l'alerte.
+ * Pourquoi cet état ? Le moteur le dit en une date : la rupture, le passage sous
+ * la sécurité. Le statut seul obligerait à rouvrir le calcul de tête.
  */
-function motifAlerte(l: LigneProjete): string | null {
-  if (l.statut === 'OK') return null
-  if (l.statut === 'RUPTURE') {
-    return (l.stock_physique_net_kg ?? 0) <= 0
-      ? 'magasin vide'
-      : 'les besoins de l horizon depassent le stock et les commandes'
+function motif(l: LigneProjete): string | null {
+  if (l.statut === 'PLAN_NON_COUVERT') {
+    return l.premiere_rupture
+      ? `rupture le ${fmt.date(l.premiere_rupture)}${l.plan_non_couvert_kg > 0.05 ? `, ${kg(l.plan_non_couvert_kg)} kg non couverts` : ''}`
+      : null
   }
-  if (l.statut_physique === 'CRITIQUE') {
-    return `magasin sous son minimum (${fmt.nombre(l.stock_physique_net_kg ?? 0, 0)} pour ${fmt.nombre(l.stock_min_kg ?? 0, 0)} kg)`
-  }
-  if ((l.nb_lignes_retardees ?? 0) > 0) {
-    return `${fmt.nombre(l.encours_retarde_kg ?? 0, 0)} kg ecartes : commande en retard de ${l.retard_max_jours} j`
-  }
-  if (l.jours_couverture != null) {
-    return `${fmt.nombre(l.jours_couverture, 0)} jours de couverture`
+  if (l.statut === 'SOUS_SECURITE') {
+    return l.premier_passage_securite ? `sous la sécurité le ${fmt.date(l.premier_passage_securite)}` : null
   }
   return null
 }
 
-/**
- * La couverture, en chiffre et en jauge.
- *
- * TROIS CHOIX QUI SE TIENNENT.
- *
- * La COULEUR vient du statut calcule, jamais d'un seuil ecrit ici. Peindre en
- * rouge tout ce qui passe sous soixante jours contredirait le modele a double
- * declencheur : une reference a 55 jours mais au-dessus de son minimum magasin
- * n'est pas critique, et la ligne afficherait deux verdicts opposes — la
- * couverture en rouge, la colonne Statut en vert, a deux cases d'ecart.
- *
- * La GRADUATION vient de la base, pas du code. Le plein de la jauge est le
- * seuil d'alerte (P_SeuilAlerte), le repere le seuil critique
- * (P_SeuilCritique) ; tous deux voyagent dans la vue. Ecrits en dur, ils
- * cesseraient de suivre le parametre le jour ou la direction le deplace : le
- * chiffre changerait de statut, la barre non.
- *
- * La LARGEUR est fixe. Une jauge qui s'etirerait avec la colonne ne serait
- * comparable d'une ligne a l'autre que par accident — or c'est le seul usage
- * d'une jauge dans une liste : voir d'un coup laquelle est la plus courte.
- */
-function JaugeCouverture({ ligne: l }: { ligne: LigneProjete }) {
-  if (l.jours_couverture == null) return <span className="text-attenue-texte">—</span>
-
-  const plein = l.seuil_alerte_jours ?? 0
-  const critique = l.seuil_critique_jours ?? 0
-  const grave = l.statut === 'RUPTURE' || l.statut === 'CRITIQUE'
-  const alerte = l.statut === 'ATTENTION'
-
-  // Une couverture negative existe : la projection retranche les besoins de
-  // l'horizon et peut passer sous zero. La jauge se vide, elle ne s'inverse pas.
-  const part = plein > 0 ? Math.min(Math.max(l.jours_couverture / plein, 0), 1) : 0
-
-  return (
-    <span
-      className="relative inline-flex h-[18px] w-[86px] items-center justify-end overflow-hidden rounded-[3px] bg-attenue/40 px-1.5"
-      title={
-        plein > 0
-          ? `${fmt.nombre(l.jours_couverture, 0)} jours — critique en dessous de ${critique}, confortable a partir de ${plein}`
-          : `${fmt.nombre(l.jours_couverture, 0)} jours`
-      }
-    >
-      <span
-        aria-hidden
-        className={cn(
-          'absolute inset-y-0 left-0 transition-[width] duration-150 ease-out',
-          grave ? 'bg-danger/25' : alerte ? 'bg-alerte/30' : 'bg-succes/25',
-        )}
-        style={{ width: `${part * 100}%` }}
-      />
-      {/* Repere du seuil critique : sans lui la jauge dit « peu », avec lui elle
-          dit « peu, et de quel cote de la limite ». */}
-      {plein > 0 && critique > 0 && critique < plein && (
-        <span
-          aria-hidden
-          className="absolute inset-y-0 w-px bg-texte/25"
-          style={{ left: `${(critique / plein) * 100}%` }}
-        />
-      )}
-      <span
-        className={cn(
-          'relative tabular-nums',
-          grave ? 'font-medium text-danger' : alerte ? 'text-alerte' : 'text-texte',
-        )}
-      >
-        {fmt.nombre(l.jours_couverture, 0)} j
-      </span>
-    </span>
-  )
-}
-
-/** Chaque statut, ce qu'il veut dire, et la couleur de son compteur. */
-const STATUTS = [
+/** Les états du moteur, ce qu'ils veulent dire, et la couleur de leur compteur. */
+const ETATS = [
   {
-    cle: 'RUPTURE',
-    libelle: 'Rupture',
-    resume: 'Projeté a zéro ou négatif',
+    cle: 'PLAN_NON_COUVERT',
+    resume: 'Une rupture est prévue sur l’horizon du plan',
     Icone: PackageX,
     ton: 'danger' as const,
   },
   {
-    cle: 'CRITIQUE',
-    libelle: 'Critique',
-    resume: 'Sous le stock minimum, ou moins de 60 j',
-    Icone: TrendingDown,
-    ton: 'danger' as const,
-  },
-
-  {
-    cle: 'ATTENTION',
-    libelle: 'Attention',
-    resume: 'Moins de 90 jours de couverture',
+    cle: 'SOUS_SECURITE',
+    resume: 'Le solde passe sous la sécurité, sans rupture',
     Icone: AlertTriangle,
     ton: 'alerte' as const,
   },
   {
-    cle: 'OK',
-    libelle: 'Situation normale',
-    resume: 'Couverture suffisante',
+    cle: 'COUVERT',
+    resume: 'Ni rupture ni passage sous la sécurité',
     Icone: CheckCircle2,
     ton: 'succes' as const,
   },
 ]
 
-/** Ce sur quoi une question peut porter, avec le type qui decide des operateurs. */
 /**
- * Filtres du stock projete.
- *
- * Uniquement des axes que l'on choisit, jamais de comparateur a saisir : sur
- * cet ecran, les questions reelles sont « quelles references en tension »,
- * « chez quel fournisseur », « quelle classe » — pas « couverture < 42 ».
+ * Filtres : des axes que l'on choisit, jamais un comparateur à saisir.
  */
 const CHAMPS_FILTRABLES: ChampFiltre<LigneProjete>[] = [
-  { cle: 'statut', libelle: 'Statut', type: 'liste', valeur: (l) => l.statut },
-  // Le fournisseur se filtre en tapant (24/10/2026) : sa liste grandit.
+  { cle: 'statut', libelle: 'État', type: 'liste', valeur: (l) => libelleStatut('statut_stock', l.statut) },
   { cle: 'fournisseur', libelle: 'Fournisseur', type: 'liste', recherche: true, valeur: (l) => l.fournisseur_nom },
   { cle: 'classe', libelle: 'Classe ABC', type: 'liste', valeur: (l) => l.classe_abc },
   { cle: 'reference', libelle: 'Référence', type: 'texte', valeur: (l) => l.code_reference },
 ]
 
 /**
- * Le menu au clic droit sur une ligne de stock.
- *
- * IL NE CREE AUCUN CHEMIN. Chacune de ces quatre destinations reste atteignable
- * par la navigation ordinaire ; le menu ne fait que les atteindre AVEC la
- * reference deja portee. C'est la difference entre « ouvrir l'ecran des
- * mouvements » et « voir l'historique de PES-20/2 » : le second evite a
- * l'operateur de retaper un code qu'il a sous les yeux, et donc de le retaper
- * faux. Un menu contextuel ne s'ouvre ni au clavier ni au doigt : y loger une
- * action unique la rendrait inaccessible a une partie des postes.
- *
- * Les liens portent `?reference=`, et les trois ecrans vises le lisent. Un
- * parametre qu'une page ignorerait serait pire que pas de lien du tout :
- * l'entree promettrait un filtre et livrerait une liste entiere.
+ * Le menu au clic droit : il n'ouvre aucun chemin nouveau, il porte la référence
+ * vers des écrans existants (commande, fiche, mouvements, équivalents, inventaire).
  */
-function ActionsLigne({
-  ligne: l,
-  ouvrir,
-}: {
-  ligne: LigneProjete
-  ouvrir: (chemin: string) => void
-}) {
+function ActionsLigne({ ligne: l, ouvrir }: { ligne: LigneProjete; ouvrir: (chemin: string) => void }) {
   const ref = encodeURIComponent(l.code_reference)
-  const tendu = l.statut === 'RUPTURE' || l.statut === 'CRITIQUE'
-
+  const tendu = l.statut !== 'COUVERT'
   return (
     <>
       <MenuContextuelTitre>{l.code_reference}</MenuContextuelTitre>
       <MenuContextuelSeparateur />
-
-      {/* Commander en tete quand la ligne est en tension : c'est l'action que
-          l'acheteur cherche, et la remonter evite de la lire dans une liste. */}
       {tendu && (
         <MenuContextuelElement onSelect={() => ouvrir(`/bons-commande/nouveau?reference=${ref}`)}>
-          <ShoppingCart /> Commander cette reference
+          <ShoppingCart /> Commander cette référence
         </MenuContextuelElement>
       )}
-
       <MenuContextuelElement onSelect={() => ouvrir(`/catalogue?reference=${ref}`)}>
         <FileText /> Ouvrir la fiche
       </MenuContextuelElement>
-
       <MenuContextuelElement onSelect={() => ouvrir(`/mouvements?reference=${ref}`)}>
-        <History /> Voir l historique des mouvements
+        <History /> Voir l’historique des mouvements
       </MenuContextuelElement>
-
       <MenuContextuelElement onSelect={() => ouvrir(`/equivalences?reference=${ref}`)}>
-        <Shuffle /> Chercher un equivalent
+        <Shuffle /> Chercher un équivalent
       </MenuContextuelElement>
-
       {!tendu && (
         <MenuContextuelElement onSelect={() => ouvrir(`/bons-commande/nouveau?reference=${ref}`)}>
-          <ShoppingCart /> Commander cette reference
+          <ShoppingCart /> Commander cette référence
         </MenuContextuelElement>
       )}
-
       <MenuContextuelSeparateur />
-
-      {/* L'inventaire ne porte pas la reference : il se lance par magasin, et
-          l'ecran demande lequel. Promettre un inventaire cible ici serait
-          promettre ce que le module ne fait pas. */}
       <MenuContextuelElement onSelect={() => ouvrir('/inventaires')}>
         <ClipboardList /> Lancer un inventaire
       </MenuContextuelElement>
@@ -309,11 +186,9 @@ export function Stock() {
   const [filtre, setFiltre] = useState('')
   const [recherche, setRecherche] = useState('')
   const filtres = useFiltres(CHAMPS_FILTRABLES)
-  // La reference ouverte : son besoin decompose et ses OF, en haut de la liste.
+  // La référence ouverte : son besoin, en haut de la liste.
   const [ouverte, setOuverte] = useState<string | null>(null)
 
-  // Un seul appel, sans filtre serveur : le jeu tient largement en memoire, et
-  // le garder entier permet de compter chaque statut sans quatre requetes.
   const q = useQuery({
     queryKey: ['stock-projete'],
     queryFn: ({ signal }) => api.get<LigneProjete[]>('/api/stock/projete?limite=2000', { signal }),
@@ -323,9 +198,10 @@ export function Stock() {
 
   const comptes = useMemo(() => {
     const m: Record<string, number> = {}
-    for (const l of toutes) m[l.statut] = (m[l.statut] ?? 0) + 1
-    for (const c of toutes) {
-      if (c.classe_abc) m[`ABC:${c.classe_abc}`] = (m[`ABC:${c.classe_abc}`] ?? 0) + 1
+    for (const l of toutes) {
+      m[l.statut] = (m[l.statut] ?? 0) + 1
+      if (l.a_commander_aujourdhui) m.AUJOURDHUI = (m.AUJOURDHUI ?? 0) + 1
+      if (l.classe_abc) m[`ABC:${l.classe_abc}`] = (m[`ABC:${l.classe_abc}`] ?? 0) + 1
     }
     return m
   }, [toutes])
@@ -337,9 +213,10 @@ export function Stock() {
 
   const lignes = useMemo(() => {
     const f = recherche.trim().toLowerCase()
-    const base = toutes
+    return toutes
       .filter((l) => {
         if (!filtre) return true
+        if (filtre === 'AUJOURDHUI') return l.a_commander_aujourdhui
         if (filtre.startsWith('ABC:')) return l.classe_abc === filtre.slice(4)
         return l.statut === filtre
       })
@@ -350,51 +227,44 @@ export function Stock() {
           (l.designation ?? '').toLowerCase().includes(f) ||
           (l.fournisseur_nom ?? '').toLowerCase().includes(f),
       )
-    return base.filter(filtres.retenir)
+      .filter(filtres.retenir)
   }, [toutes, filtre, recherche, filtres])
 
   const groupes: GroupeRail[] = [
     {
       entrees: [
-        {
-          cle: '',
-          libelle: 'Toutes les références',
-          resume: 'Sans filtre',
-          Icone: Layers,
-          compte: toutes.length,
-        },
+        { cle: '', libelle: 'Toutes les références', resume: 'Suivies par le moteur', Icone: Layers, compte: toutes.length },
       ],
     },
     {
-      titre: 'Par statut',
-      entrees: STATUTS.map((s) => ({
-        cle: s.cle,
-        libelle: s.libelle,
-        resume:
-          s.cle === 'CRITIQUE' && toutes[0]?.seuil_critique_jours != null
-            ? `Sous le stock minimum, ou moins de ${toutes[0].seuil_critique_jours} j`
-            : s.cle === 'ATTENTION' && toutes[0]?.seuil_alerte_jours != null
-              ? `Moins de ${toutes[0].seuil_alerte_jours} jours de couverture`
-              : s.resume,
-        Icone: s.Icone,
-        compte: comptes[s.cle] ?? 0,
-        ton: s.ton,
-      })),
+      titre: 'Par état (moteur de couverture)',
+      entrees: [
+        ...ETATS.map((s) => ({
+          cle: s.cle,
+          libelle: libelleStatut('statut_stock', s.cle),
+          resume: s.resume,
+          Icone: s.Icone,
+          compte: comptes[s.cle] ?? 0,
+          ton: s.ton,
+        })),
+        {
+          cle: 'AUJOURDHUI',
+          libelle: 'À commander aujourd’hui',
+          resume: 'Date limite de commande atteinte ou dépassée',
+          Icone: CalendarClock,
+          compte: comptes.AUJOURDHUI ?? 0,
+          ton: 'danger' as const,
+        },
+      ],
     },
   ]
-
   if (classes.length > 0) {
     groupes.push({
       titre: 'Par classe ABC',
       entrees: classes.map((c) => ({
         cle: `ABC:${c}`,
         libelle: `Classe ${c}`,
-        resume:
-          c === 'A'
-            ? 'Le gros du capital immobilise'
-            : c === 'B'
-              ? 'Poids intermediaire'
-              : 'Nombreuses, faible valeur',
+        resume: c === 'A' ? 'Le gros du capital immobilisé' : c === 'B' ? 'Poids intermédiaire' : 'Nombreuses, faible valeur',
         compte: comptes[`ABC:${c}`] ?? 0,
         ton: c === 'A' ? ('danger' as const) : ('neutre' as const),
       })),
@@ -409,101 +279,120 @@ export function Stock() {
     },
     {
       champ: 'statut',
-      entete: 'Statut',
-      // Le statut, sa CAUSE, et le sur-stock qui est un axe distinct. Les trois
-      // tiennent dans la meme cellule parce qu'ils se lisent ensemble : « rouge »
-      // sans « pourquoi » oblige a rouvrir le calcul de tete.
+      entete: 'État',
+      // L'état, sa cause en une date, et le défaut de données s'il y en a un.
       rendu: (l) => {
-        const motif = motifAlerte(l)
+        const m = motif(l)
         return (
-          <div className="flex items-center gap-1.5 whitespace-nowrap" title={motif ?? undefined}>
+          <div className="flex items-center gap-1.5 whitespace-nowrap" title={m ?? undefined}>
             <StatutBadge entite="statut_stock" code={l.statut} />
-            {l.sur_stock === 1 && <Badge ton="neutre">sur-stock</Badge>}
-            {l.ecart_majeur === 1 && <Badge ton="alerte">ecart a vérifier</Badge>}
-            {motif && <span className="max-w-[11rem] truncate text-[11px] text-attenue-texte">{motif}</span>}
+            {l.a_commander_aujourdhui && <Badge ton="danger">à commander</Badge>}
+            {l.defaut_donnees && (
+              <Badge ton="alerte" title={l.defaut_donnees}>
+                donnée
+              </Badge>
+            )}
+            {m && <span className="max-w-[12rem] truncate text-[11px] text-attenue-texte">{m}</span>}
           </div>
         )
       },
     },
     {
-      champ: 'quantite_kg',
-      entete: 'Stock (kg)',
-      numerique: true,
-      rendu: (l) => fmt.nombre(l.stock_mrp_kg, 1),
-    },
-    {
-      champ: 'stock_projete_kg',
-      entete: 'Projeté (kg)',
+      champ: 'disponible_kg',
+      entete: 'Disponible (kg)',
       numerique: true,
       rendu: (l) => (
-        <span className={l.stock_projete_kg < 0 ? 'font-medium text-danger' : ''}>
-          {fmt.nombre(l.stock_projete_kg, 1)}
+        <span
+          title={
+            l.machine_kg > 0.05
+              ? `${kg(l.magasin_kg, 1)} kg en magasins comptés + ${kg(l.machine_kg, 1)} kg sur métiers`
+              : undefined
+          }
+        >
+          {kg(l.disponible_kg, 1)}
         </span>
       ),
     },
     {
-      champ: 'jours_couverture',
-      entete: 'Couverture',
-      numerique: true,
-      /* La couverture se colore selon le STATUT calcule, jamais selon un seuil
-         ecrit ici. Peindre en rouge tout ce qui passe sous soixante jours
-         contredirait le modele a double declencheur : une reference a 55 jours
-         mais au-dessus de son minimum magasin n'est pas critique, et l'ecran
-         afficherait alors deux verdicts opposes sur la meme ligne. */
-      rendu: (l) => <JaugeCouverture ligne={l} />,
-    },
-    {
-      champ: 'date_derniere_entree',
-      entete: 'En-cours (kg)',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => fmt.nombre(l.encours_kg, 1),
-    },
-    {
-      /* LE FIL SUR MACHINE (regle 9, 08/10/2026) : hors du magasin — le
-         « Physique » ne le contient pas. La colonne montre ce que le calcul des
-         besoins COMPTE (P_MrpInclureStockMachine, lot non bloque ; au dernier
-         constat QUEL QUE SOIT SON AGE depuis le 27/10/2026) ; le reste, s'il y
-         en a, est signale a cote (audit v5, F16). */
-      // Le champ declare dans la grille (kg_sur_machine) porte la colonne ; la
-      // valeur affichee est celle que le calcul compte.
-      champ: 'kg_sur_machine',
-      entete: 'Sur machine compté (kg)',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => {
-        const compte = l.stock_machine_kg ?? 0
-        const total = l.kg_sur_machine ?? 0
-        if (!total) return '—'
-        return (
-          <span title={total - compte > 0.05 ? `${fmt.nombre(total, 1)} kg sur machine, dont ${fmt.nombre(total - compte, 1)} non comptés (lot bloqué)` : undefined}>
-            {fmt.nombre(compte, 1)}
-            {total - compte > 0.05 && <span className="text-attenue-texte"> / {fmt.nombre(total, 1)}</span>}
+      champ: 'couvert_jusqu_au',
+      entete: 'Couvert jusqu’au',
+      rendu: (l) =>
+        l.couvert_tout_horizon ? (
+          <span className="text-succes">tout l’horizon</span>
+        ) : l.couvert_jusqu_au ? (
+          <span className="tabular-nums">
+            {fmt.date(l.couvert_jusqu_au)}
+            {l.jours_couverture != null && <span className="text-attenue-texte"> · {l.jours_couverture} j</span>}
           </span>
-        )
-      },
+        ) : (
+          <span className="font-medium text-danger">rupture aujourd’hui</span>
+        ),
     },
     {
-      champ: 'designation',
-      entete: 'Fournisseur',
-      rendu: (l) => <span className="whitespace-nowrap">{fmt.texte(l.fournisseur_nom)}</span>,
-      secondaire: true,
+      champ: 'plan_non_couvert_kg',
+      entete: 'Plan non couvert (kg)',
+      numerique: true,
+      rendu: (l) =>
+        l.plan_non_couvert_kg > 0.05 ? (
+          <span className="font-medium text-danger">{kg(l.plan_non_couvert_kg)}</span>
+        ) : (
+          <span className="text-attenue-texte">—</span>
+        ),
     },
-
-    /* --- Les colonnes du classeur qui manquaient ------------------------
-       La vue en expose trente-six, l'ecran n'en montrait sept. Celles-ci
-       sont marquees `secondaire` : elles apparaissent au-dela de 1280 px et
-       restent accessibles par le menu de colonnes. Une tablette de magasin
-       garde ses sept colonnes lisibles ; un poste de bureau voit tout. */
+    {
+      champ: 'qte_a_commander_kg',
+      entete: 'À commander',
+      numerique: true,
+      rendu: (l) =>
+        l.qte_a_commander_kg ? (
+          <span className={cn('whitespace-nowrap tabular-nums', l.a_commander_aujourdhui && 'font-medium text-danger')}>
+            {kg(l.qte_a_commander_kg)} kg
+            {l.date_limite_commande && (
+              <span className="text-attenue-texte"> · avant le {fmt.date(l.date_limite_commande)}</span>
+            )}
+          </span>
+        ) : (
+          <span className="text-attenue-texte">—</span>
+        ),
+    },
+    {
+      champ: 'plan_horizon_kg',
+      entete: 'Plan sur l’horizon (kg)',
+      numerique: true,
+      secondaire: true,
+      rendu: (l) => kg(l.plan_horizon_kg),
+    },
+    {
+      champ: 'arrivages_comptes_kg',
+      entete: 'Arrivages comptés (kg)',
+      numerique: true,
+      secondaire: true,
+      rendu: (l) =>
+        l.arrivages_comptes_kg > 0.05 ? (
+          <span
+            title={
+              l.prochain_arrivage_date
+                ? `prochain : ${kg(l.prochain_arrivage_kg)} kg le ${fmt.date(l.prochain_arrivage_date)}`
+                : undefined
+            }
+          >
+            {kg(l.arrivages_comptes_kg)}
+          </span>
+        ) : (
+          <span className="text-attenue-texte">—</span>
+        ),
+    },
+    {
+      champ: 'fournisseur_nom',
+      entete: 'Fournisseur',
+      secondaire: true,
+      rendu: (l) => <span className="whitespace-nowrap">{fmt.texte(l.fournisseur_nom)}</span>,
+    },
     {
       champ: 'classe_abc',
       entete: 'ABC / XYZ',
       largeur: '78px',
       secondaire: true,
-      // Les deux classements ensemble : la valeur ET la regularite. Une
-      // reference AX se pilote au fil de l'eau, une AZ demande un stock de
-      // securite — c'est le croisement qui dit la politique, pas chaque
-      // lettre prise seule.
       rendu: (l) =>
         !l.classe_abc ? (
           <span className="text-attenue-texte">—</span>
@@ -520,83 +409,11 @@ export function Stock() {
         ),
     },
     {
-      champ: 'stock_physique_net_kg',
-      entete: 'Physique (kg)',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => fmt.nombre(l.stock_physique_net_kg ?? 0, 1),
-    },
-    {
-      champ: 'stock_min_kg',
-      entete: 'Minimum (kg)',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => (l.stock_min_kg == null ? '—' : fmt.nombre(l.stock_min_kg, 1)),
-    },
-    {
-      champ: 'conso_mensuelle_kg',
-      entete: 'Conso / mois',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) =>
-        l.conso_mensuelle_kg == null ? '—' : fmt.nombre(l.conso_mensuelle_kg, 1),
-    },
-    {
-      champ: 'besoin_12m_kg',
-      entete: 'Besoin horizon',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => (l.besoin_12m_kg == null ? '—' : fmt.nombre(l.besoin_12m_kg, 1)),
-    },
-    {
-      champ: 'delai_livraison_jours',
+      champ: 'delai_j',
       entete: 'Délai (j)',
       numerique: true,
       secondaire: true,
-      rendu: (l) => l.delai_livraison_jours ?? '—',
-    },
-    {
-      champ: 'unite_catalogue',
-      entete: 'Unité',
-      secondaire: true,
-      rendu: (l) => fmt.texte(l.unite_catalogue),
-    },
-    {
-      champ: 'cmup_mad',
-      entete: 'CMUP',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => (l.cmup_mad == null ? '—' : fmt.nombre(l.cmup_mad, 2)),
-    },
-    {
-      champ: 'valeur_totale_mad',
-      entete: 'Valeur (MAD)',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => (l.valeur_totale_mad == null ? '—' : fmt.nombre(l.valeur_totale_mad, 2)),
-    },
-    {
-      champ: 'sur_stock',
-      entete: 'Sur-stock',
-      largeur: '80px',
-      secondaire: true,
-      // Le sur-stock est un drapeau SEPARE du statut, pas une valeur de
-      // l'echelle : une reference peut etre en sur-stock ET en alerte, si le
-      // stock dort dans le mauvais magasin.
-      rendu: (l) =>
-        l.sur_stock ? (
-          <span className="rounded-[3px] bg-alerte/12 px-1.5 py-px text-[11px] text-alerte">
-            oui
-          </span>
-        ) : (
-          <span className="text-attenue-texte">—</span>
-        ),
-    },
-    {
-      champ: 'date_derniere_sortie',
-      entete: 'Dernière sortie',
-      secondaire: true,
-      rendu: (l) => fmt.date(l.date_derniere_sortie),
+      rendu: (l) => l.delai_j ?? '—',
     },
   ]
 
@@ -604,7 +421,7 @@ export function Stock() {
     <div>
       <EnTetePage
         titre="Stock projeté"
-        sous_titre="Stock disponible + en-cours fournisseur − besoins sur 12 mois"
+        sous_titre="La couverture du plan par le moteur : ce qui est compté aujourd’hui, ce qui arrive à sa date, jusqu’où le plan est couvert"
       />
 
       <PageAvecRail
@@ -615,11 +432,7 @@ export function Stock() {
               groupes={groupes}
               actif={filtre}
               surChoix={setFiltre}
-              recherche={{
-                valeur: recherche,
-                surChangement: setRecherche,
-                placeholder: 'Référence, fournisseur…',
-              }}
+              recherche={{ valeur: recherche, surChangement: setRecherche, placeholder: 'Référence, fournisseur…' }}
             />
             <PanneauFiltres
               champs={CHAMPS_FILTRABLES}
@@ -634,7 +447,7 @@ export function Stock() {
       >
         {filtres.actifs > 0 && (
           <div className="mb-2 text-[12px] text-attenue-texte">
-            {lignes.length} reference(s) sur {toutes.length} apres filtrage.
+            {lignes.length} référence(s) sur {toutes.length} après filtrage.
           </div>
         )}
         {ouverte && (
@@ -649,8 +462,8 @@ export function Stock() {
           </section>
         )}
         <TableDroits
-          exportable="etat-des-stocks"
-          imprimable="État des stocks"
+          exportable="stock-projete"
+          imprimable="Stock projeté"
           module={MODULE}
           menuContextuel={(l) => <ActionsLigne ligne={l} ouvrir={ouvrir} />}
           surClic={(l) => setOuverte((o) => (o === l.code_reference ? null : l.code_reference))}

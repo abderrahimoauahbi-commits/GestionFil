@@ -262,12 +262,21 @@ export const STATUTS = {
     RESOLUE: d('Résolue', 'neutre'),
     IGNOREE: d('Ignorée', 'neutre'),
   },
-  /** snapshot_mrp.statut_couleur — le statut du stock projeté (v_etat_stock, v_stock_projete). */
+  /**
+   * snapshot_mrp.statut_couleur — L'ÉTAT D'UNE RÉFÉRENCE AU MOTEUR DE COUVERTURE
+   * (27/10/2026, une seule source de vérité) : plan non couvert (une rupture est
+   * prévue sur l'horizon), sous la sécurité (sans rupture), couvert. Les quatre
+   * codes de l'ancien calcul (v_stock_projete, retiré) ne restent que pour lire
+   * l'historique des photos de plan.
+   */
   statut_stock: {
-    RUPTURE: d('Rupture', 'danger'),
-    CRITIQUE: d('Critique', 'danger'),
-    ATTENTION: d('Attention', 'alerte'),
-    OK: d('OK', 'succes'),
+    PLAN_NON_COUVERT: d('Plan non couvert', 'danger'),
+    SOUS_SECURITE: d('Sous la sécurité', 'alerte'),
+    COUVERT: d('Couvert', 'succes'),
+    RUPTURE: d('Rupture (ancien calcul)', 'danger'),
+    CRITIQUE: d('Critique (ancien calcul)', 'danger'),
+    ATTENTION: d('Attention (ancien calcul)', 'alerte'),
+    OK: d('OK (ancien calcul)', 'succes'),
   },
   /** alerte.gravite — le même vocabulaire que la criticité des contrôles (v_controles). */
   criticite: {

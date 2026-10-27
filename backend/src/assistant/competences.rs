@@ -468,14 +468,14 @@ pub async fn executer(
                 Resolution::Une(c) => c,
                 Resolution::Ambigue(v) => return Ok(v),
             };
+            // Le stock se lit en SQL ; l'etat de couverture (statut, jours
+            // couverts, 1re rupture, plan non couvert) vient du moteur (27/10/2026).
             let rows = sqlx::query(
-                "SELECT code_reference, designation, statut,
+                "SELECT code_reference, designation,
                         ROUND(stock_physique_net_kg, 2)::float8 AS stock_kg,
-                        ROUND(stock_projete_kg, 2)::float8       AS stock_projete_kg,
-                        ROUND(jours_couverture)::float8          AS jours_couverture,
                         ROUND(conso_mensuelle_kg, 2)::float8     AS conso_mensuelle_kg,
                         delai_livraison_jours, fournisseur_nom
-                   FROM v_stock_projete
+                   FROM v_stock_reference
                   WHERE code_reference = $1",
             )
             .bind(&code)
@@ -484,26 +484,32 @@ pub async fn executer(
             if rows.is_empty() {
                 json!({ "trouve": false, "code_reference": code })
             } else {
-                json!({ "trouve": true, "stock": lignes_en_json(&rows) })
+                let mut stock = lignes_en_json(&rows);
+                crate::routes::couverture::etats(&state.db).await?.enrichir(&mut stock, "statut");
+                json!({ "trouve": true, "stock": stock })
             }
         }
 
         "references_en_tension" => {
-            let rows = sqlx::query(
-                "SELECT code_reference, designation, statut,
-                        ROUND(stock_physique_net_kg, 2)::float8 AS stock_kg,
-                        ROUND(jours_couverture)::float8         AS jours_couverture,
-                        delai_livraison_jours, fournisseur_nom
-                   FROM v_stock_projete
-                  WHERE statut <> 'OK'
-                  ORDER BY CASE statut WHEN 'RUPTURE' THEN 0 WHEN 'CRITIQUE' THEN 1 ELSE 2 END,
-                           jours_couverture NULLS FIRST
-                  LIMIT $1",
-            )
-            .bind(borne(args, "limite", 15, 60))
-            .fetch_all(&state.db)
-            .await?;
-            json!({ "en_tension": lignes_en_json(&rows) })
+            // LA TENSION DU MOTEUR DE COUVERTURE (27/10/2026) : plan non couvert,
+            // puis sous la securite, la rupture la plus proche d'abord.
+            let etats = crate::routes::couverture::etats(&state.db).await?;
+            let limite = borne(args, "limite", 15, 60).max(0) as usize;
+            let lignes: Vec<Value> = etats
+                .en_tension()
+                .iter()
+                .take(limite)
+                .map(|e| {
+                    json!({
+                        "code_reference": e.code_reference, "designation": e.designation,
+                        "statut": e.statut, "stock_kg": e.disponible_kg,
+                        "jours_couverture": e.jours_couverture, "premiere_rupture": e.premiere_rupture,
+                        "plan_non_couvert_kg": e.plan_non_couvert_kg, "delai_livraison_jours": e.delai_j,
+                        "fournisseur_nom": e.fournisseur_nom,
+                    })
+                })
+                .collect();
+            json!({ "en_tension": lignes })
         }
 
         "equivalents" => {

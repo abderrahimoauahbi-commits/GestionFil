@@ -379,6 +379,12 @@ AFTER UPDATE OF statut ON transfert FOR EACH ROW
 WHEN (OLD.statut IS DISTINCT FROM NEW.statut)
 EXECUTE FUNCTION fn_trg_audit_transfert_statut();
 
+-- La revision de la date prevue de disponibilite (27/10/2026) est journalisee
+-- par `trg_audit_transfert_date` (AFTER UPDATE OF date_disponibilite_prevue),
+-- qui reste dans la migration 2026-10-27d : il s'appuie sur
+-- `fn_trg_audit_modification`, qui n'existe que par les migrations 2026-10-08d
+-- et suivantes. L'invariant TRF-DATE est en 010.
+
 CREATE OR REPLACE FUNCTION fn_trg_audit_plan_achat_figement() RETURNS trigger AS $$
 BEGIN
     INSERT INTO audit_log (table_concernee, operation, id_enregistrement,

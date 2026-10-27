@@ -128,14 +128,34 @@ pub async fn valider_reception(
 /// L'ancien nom `valider` est conserve comme alias, mais il decrivait mal ce
 /// qui se passe — il ecrivait les DEUX mouvements d'un coup, et la marchandise
 /// arrivait a destination avant d'avoir voyage.
+///
+/// LA DATE PREVUE DE DISPONIBILITE (27/10/2026) : obligatoire a l'expedition,
+/// garantie en base (TRF-DATE). Elle vient du corps (`date_disponibilite_prevue`)
+/// ou, a defaut, de celle deja saisie sur le transfert en preparation.
 pub async fn expedier_transfert(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    corps: axum::body::Bytes,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::MOUVEMENTS, Action::Valider).await?;
-    let r = transfert::expedier(&state.db, &user, &id).await?;
+    // Le corps est FACULTATIF : vide (avec ou sans en-tete JSON), il ne porte rien.
+    let corps: Expedition = if corps.iter().all(u8::is_ascii_whitespace) {
+        Expedition::default()
+    } else {
+        serde_json::from_slice(&corps)
+            .map_err(|e| AppError::Invalide(format!("corps de l'expedition illisible : {e}")))?
+    };
+    let date = corps.date_disponibilite_prevue.filter(|d| !d.trim().is_empty());
+    let r = transfert::expedier(&state.db, &user, &id, date.as_deref()).await?;
     Ok(Json(serde_json::to_value(r)?))
+}
+
+/// Le corps (facultatif) de l'expedition d'un transfert.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct Expedition {
+    #[serde(default)]
+    pub date_disponibilite_prevue: Option<String>,
 }
 
 /// Reception : quelqu'un constate l'arrivee au magasin destinataire.

@@ -18,10 +18,18 @@
  * sous zéro.
  *
  * La liste : une rangée par référence, et une ligne ↳ d'information seulement
- * quand quelque chose est compté à part (fil sur métiers, restes) ou laissé hors
- * couverture (quarantaine, bloqué, en retard, sans date, en route). Le détail se
- * déplie sous la ligne, au clic : la courbe du solde, le calcul de la première
- * proposition, les ressources et arrivages, la chronologie, le plan par mois.
+ * quand quelque chose est compté à part (fil sur métiers, restes, fil en route à
+ * sa date), laissé hors couverture (quarantaine, bloqué, en retard, sans date),
+ * ou qu'un défaut de données a imposé un réglage par défaut (pas de classe ABC).
+ * Le détail se déplie sous la ligne, au clic : la courbe du solde, le calcul de
+ * la première proposition, les ressources et arrivages, la chronologie, le plan
+ * par mois.
+ *
+ * LE FIL EN ROUTE EST UN ARRIVAGE (27/10/2026) : un transfert expédié est compté
+ * à sa date prévue de disponibilité (catégorie « en route ») ; dépassée sans
+ * nouvelle date, il est « en retard » ; expédié avant la règle sans date, « sans
+ * date ». LA FENÊTRE D'UNE COMMANDE est [D, F[ : D inclus, F exclu, 30 jours
+ * pleins par défaut.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -76,10 +84,17 @@ interface LigneCouverture extends Record<string, unknown> {
   hors_plan_kg?: number
   en_retard_kg?: number
   sans_date_kg?: number
+  /** Le fil en route vers un magasin compté, compté à sa date prévue de disponibilité (27/10/2026). */
   transit_kg?: number
   /** Bons non validés et bons livrés après l'horizon : non comptés, montrés (27/10/2026). */
   non_valide_kg?: number
   apres_horizon_kg?: number
+  /** L'état au moteur : PLAN_NON_COUVERT, SOUS_SECURITE, COUVERT (27/10/2026). */
+  statut?: string
+  a_commander_aujourdhui?: boolean
+  arrivages_comptes_kg?: number
+  /** Un défaut de la fiche qui impose un réglage par défaut (pas de classe ABC) : signalé, jamais bloquant. */
+  defaut_donnees?: string | null
 }
 
 interface EnteteCouverture {
@@ -158,6 +173,8 @@ interface Arrivage {
   numero_dossier?: string | null
   numero_facture?: string | null
   numero_transfert?: string | null
+  /** La date prévue de disponibilité d'un transfert en route (27/10/2026). */
+  date_disponibilite_prevue?: string | null
   code_magasin_source?: string | null
   code_magasin_dest?: string | null
   lot_fournisseur?: string | null
@@ -193,6 +210,7 @@ interface DetailCouverture extends EnteteCouverture {
     multiple_kg: number | null
     source_multiple: string
     kg_palette: number | null
+    defaut_donnees?: string | null
   }
   synthese: LigneCouverture
   ressources: {
@@ -301,7 +319,7 @@ const CATEGORIES: Record<string, { libelle: string; ton: 'succes' | 'alerte' | '
   SANS_DATE: { libelle: 'sans date', ton: 'neutre' },
   NON_VALIDE: { libelle: 'non validé', ton: 'neutre' },
   APRES_HORIZON: { libelle: 'après l’horizon', ton: 'neutre' },
-  TRANSIT: { libelle: 'en route', ton: 'info' },
+  TRANSIT: { libelle: 'en route, compté à sa date', ton: 'succes' },
 }
 
 /** La source d'un réglage, toujours dite (fournisseur, paramètre global, classe ABC). */
@@ -329,6 +347,8 @@ function partsInformation(l: LigneCouverture) {
     positif(l.machine_kg) && `sur métiers ${kg(l.machine_kg)} kg`,
     positif(l.restes_kg) && `restes ${kg(l.restes_kg)} kg`,
   ].filter(Boolean) as string[]
+  // Le fil en route est un arrivage compté à sa date (27/10/2026) : dit à part.
+  const enRoute = positif(l.transit_kg) ? `en route ${kg(l.transit_kg)} kg, compté à sa date` : null
   const nonComptes = [
     positif(l.quarantaine_kg) && `quarantaine ${kg(l.quarantaine_kg)} kg`,
     positif(l.bloque_kg) && `bloqué ${kg(l.bloque_kg)} kg`,
@@ -337,23 +357,25 @@ function partsInformation(l: LigneCouverture) {
   const horsCouverture = [
     positif(l.en_retard_kg) && `en retard ${kg(l.en_retard_kg)} kg`,
     positif(l.sans_date_kg) && `sans date ${kg(l.sans_date_kg)} kg`,
-    positif(l.transit_kg) && `en route ${kg(l.transit_kg)} kg`,
     positif(l.non_valide_kg) && `bons non validés ${kg(l.non_valide_kg)} kg`,
     positif(l.apres_horizon_kg) && `après l’horizon ${kg(l.apres_horizon_kg)} kg`,
   ].filter(Boolean) as string[]
-  const vide = !dont.length && !nonComptes.length && !horsCouverture.length
-  return { dont, nonComptes, horsCouverture, vide }
+  const defaut = l.defaut_donnees ?? null
+  const vide = !dont.length && !nonComptes.length && !horsCouverture.length && !enRoute && !defaut
+  return { dont, enRoute, nonComptes, horsCouverture, defaut, vide }
 }
 
 /** La ligne ↳ d'information : seulement quand quelque chose est compté à part ou laissé hors couverture. */
 function LigneInformation({ l }: { l: LigneCouverture }) {
-  const { dont, nonComptes, horsCouverture, vide } = partsInformation(l)
+  const { dont, enRoute, nonComptes, horsCouverture, defaut, vide } = partsInformation(l)
   if (vide) return null
   return (
     <div className="-my-1 flex items-baseline gap-2 text-[12px] text-attenue-texte">
       <CornerDownRight aria-label="information sur la ligne" className="size-3.5 shrink-0 translate-y-0.5" />
       <div className="flex min-w-0 flex-wrap gap-x-4 gap-y-0.5">
+        {defaut && <span className="text-alerte">défaut de données : {defaut}</span>}
         {dont.length > 0 && <span>dont {dont.join(', ')}</span>}
+        {enRoute && <span>{enRoute}</span>}
         {nonComptes.length > 0 && <span>non compté : {nonComptes.join(', ')}</span>}
         {horsCouverture.length > 0 && <span>hors couverture : {horsCouverture.join(', ')}</span>}
       </div>
@@ -588,7 +610,7 @@ export function ACommander({
       {(d?.regles_provisoires?.length ?? 0) > 0 && (
         <details className="mb-3 rounded-[var(--radius)] border border-bordure bg-surface px-3 py-1.5 text-[12px]">
           <summary className="cursor-pointer select-none text-attenue-texte hover:text-texte">
-            Règles provisoires des dates d’arrivage — à confirmer
+            Règles des dates d’arrivage, de la fenêtre et des réglages par défaut
           </summary>
           <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-attenue-texte">
             {d!.regles_provisoires!.map((r) => (
@@ -696,6 +718,9 @@ export function DetailReference({ reference }: { reference: string }) {
           {r.source_multiple}
           {r.kg_palette ? ` · palette ordinaire ${kg(r.kg_palette)} kg (fiche)` : ''}
         </p>
+      )}
+      {r?.defaut_donnees && (
+        <p className="text-alerte">Défaut de données, signalé (jamais bloquant) : {r.defaut_donnees}.</p>
       )}
 
       {(d.jours?.length ?? 0) > 1 && (
@@ -957,7 +982,16 @@ function Ressources({ d }: { d: DetailCouverture }) {
                   {a.date && (
                     <span className="tabular-nums">
                       le {dateCourte(a.date)}
-                      {a.source_date && <span className="text-attenue-texte"> (date de {a.source_date === 'ligne' ? 'la ligne' : 'l’en-tête'})</span>}
+                      {a.source_date && (
+                        <span className="text-attenue-texte">
+                          {' '}
+                          ({a.source_date === 'ligne'
+                            ? 'date de la ligne'
+                            : a.source_date === 'en-tête'
+                              ? 'date de l’en-tête'
+                              : a.source_date})
+                        </span>
+                      )}
                     </span>
                   )}
                   <Badge ton={c.ton}>{a.compte ? 'compté' : `non compté · ${c.libelle}`}</Badge>

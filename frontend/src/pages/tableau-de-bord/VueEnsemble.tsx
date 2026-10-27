@@ -47,7 +47,8 @@ import { Bloc, EnPanne, Marge, Vide, libelleMois, useFiles } from './commun'
 
 interface MoisRisque {
   annee_mois: string
-  statut: 'COUVERT' | 'TENDU' | 'RUPTURE'
+  /** L'état du mois au moteur de couverture (27/10/2026). */
+  statut: 'COUVERT' | 'SOUS_SECURITE' | 'PLAN_NON_COUVERT'
 }
 interface Risque {
   code_reference: string
@@ -131,8 +132,8 @@ export function VueEnsemble() {
     const mois = risques[0]?.mois?.map((m) => m.annee_mois) ?? []
     return {
       mois,
-      rupture: mois.map((_, i) => risques.filter((r) => r.mois[i]?.statut === 'RUPTURE').length),
-      tendu: mois.map((_, i) => risques.filter((r) => r.mois[i]?.statut === 'TENDU').length),
+      rupture: mois.map((_, i) => risques.filter((r) => r.mois[i]?.statut === 'PLAN_NON_COUVERT').length),
+      tendu: mois.map((_, i) => risques.filter((r) => r.mois[i]?.statut === 'SOUS_SECURITE').length),
     }
   }, [risques])
   const urgentes = useMemo(
@@ -217,13 +218,13 @@ export function VueEnsemble() {
           />
           <CarteStat
             Icone={PackageX}
-            libelle="Références en rupture"
-            valeur={n('nb_ruptures') == null ? '—' : `${nn('nb_ruptures')}`}
+            libelle="Plan non couvert"
+            valeur={n('nb_plan_non_couvert') == null ? '—' : `${nn('nb_plan_non_couvert')}`}
             unite={`/ ${nn('nb_references')}`}
-            precision={`${nn('nb_critiques')} critiques · ${nn('nb_attention')} en attention`}
-            ton={nn('nb_ruptures') > 0 ? 'danger' : 'succes'}
+            precision={`${nn('nb_a_commander_aujourdhui')} à commander aujourd’hui · ${nn('nb_sous_securite')} sous la sécurité`}
+            ton={nn('nb_plan_non_couvert') > 0 ? 'danger' : 'succes'}
             barres={horizon.rupture.length >= 3 ? horizon.rupture : undefined}
-            aide="Les barres : les références en rupture prévues, mois par mois, sur l'horizon du plan."
+            aide="Moteur de couverture. Les barres : les références au plan non couvert, mois par mois, sur l'horizon du plan."
           />
           <CarteStat
             Icone={PiggyBank}
@@ -313,7 +314,7 @@ export function VueEnsemble() {
         <Bloc
           className="xl:col-span-2"
           titre="Risque de rupture, mois par mois"
-          sousTitre="Nombre de références sous leur stock de sécurité, commandes en cours comprises"
+          sousTitre="Moteur de couverture : références au plan non couvert ou sous la sécurité, arrivages comptés à leur date"
           lien={{ vers: '/tableau-de-bord/situation', libelle: 'Mur de risques' }}
         >
           {qRisques.isError ? (
@@ -328,8 +329,8 @@ export function VueEnsemble() {
               libelles={horizon.mois.map(libelleMois)}
               unite="références"
               series={[
-                { cle: 'r', libelle: 'En rupture', valeurs: horizon.rupture, couleur: TON.danger },
-                { cle: 't', libelle: 'Tendues', valeurs: horizon.tendu, couleur: TON.alerte },
+                { cle: 'r', libelle: 'Plan non couvert', valeurs: horizon.rupture, couleur: TON.danger },
+                { cle: 't', libelle: 'Sous la sécurité', valeurs: horizon.tendu, couleur: TON.alerte },
               ]}
             />
           )}
@@ -345,10 +346,9 @@ export function VueEnsemble() {
               centre={String(nn('nb_references'))}
               sousCentre="références"
               parts={[
-                { libelle: 'Au vert', valeur: nn('nb_ok'), couleur: TON.succes },
-                { libelle: 'En attention', valeur: nn('nb_attention'), couleur: TON.alerte },
-                { libelle: 'Critiques', valeur: nn('nb_critiques'), couleur: 'color-mix(in srgb, hsl(var(--danger)) 55%, transparent)' },
-                { libelle: 'En rupture', valeur: nn('nb_ruptures'), couleur: TON.danger },
+                { libelle: 'Couvert', valeur: nn('nb_couvert'), couleur: TON.succes },
+                { libelle: 'Sous la sécurité', valeur: nn('nb_sous_securite'), couleur: TON.alerte },
+                { libelle: 'Plan non couvert', valeur: nn('nb_plan_non_couvert'), couleur: TON.danger },
               ]}
             />
           )}
@@ -473,9 +473,9 @@ export function VueEnsemble() {
               hauteur={180}
               libelles={(a.abc_statut ?? []).map((x) => `Classe ${x.classe_abc}`)}
               series={[
-                { cle: 'ok', libelle: 'Au vert', valeurs: (a.abc_statut ?? []).map((x) => x.ok), couleur: TON.succes },
-                { cle: 'at', libelle: 'Attention', valeurs: (a.abc_statut ?? []).map((x) => x.attention), couleur: TON.alerte },
-                { cle: 'al', libelle: 'En alerte', valeurs: (a.abc_statut ?? []).map((x) => x.en_alerte), couleur: TON.danger },
+                { cle: 'ok', libelle: 'Couvert', valeurs: (a.abc_statut ?? []).map((x) => x.ok), couleur: TON.succes },
+                { cle: 'at', libelle: 'Sous la sécurité', valeurs: (a.abc_statut ?? []).map((x) => x.attention), couleur: TON.alerte },
+                { cle: 'al', libelle: 'Plan non couvert', valeurs: (a.abc_statut ?? []).map((x) => x.en_alerte), couleur: TON.danger },
               ]}
             />
           )}

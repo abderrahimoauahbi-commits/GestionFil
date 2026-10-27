@@ -117,8 +117,11 @@ GROUP BY pp.id_plan, lpp.rang_mois, lpp.mois, lpp.annee_mois, rc.code_reference;
 -- l'OF est du court terme et ne sert que l'axe production / statistiques
 -- (v_of_mois, v_besoin_of_qualite, v_of_bilan, C64). La definition en service
 -- garde les deux colonnes ajoutees par 22c, besoin_plan_12m_kg (= besoin_12m_kg)
--- et besoin_au_dela_12m_kg (= 0), reprises par v_stock_projete ;
--- v_besoin_of_mois et v_besoin_horizon_of existent encore, vides.
+-- et besoin_au_dela_12m_kg (= 0). Elles etaient reprises par v_stock_projete, et
+-- v_besoin_of_mois et v_besoin_horizon_of survivaient, vides : les trois sont
+-- retirees depuis le 27/10/2026 (une seule source de verite, le moteur de
+-- couverture, migration 2026-10-27e). Cette vue reste : c'est la lecture du plan
+-- restant (une entree, pas un calcul de besoin).
 DROP VIEW IF EXISTS v_besoin_12m CASCADE;
 CREATE VIEW v_besoin_12m AS
 -- -----------------------------------------------------------------------------
@@ -328,25 +331,41 @@ CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_
 WHERE r.actif = 1;
 
 -- -----------------------------------------------------------------------------
--- v_stock_physique   —   LA REALITE, par opposition a la projection
+-- v_stock_physique   —   LA REALITE, sans projection
 --
--- La couverture en jours est un raisonnement, pas un constat. Elle suppose que
--- les besoins sont a jour, que les commandes arrivent a l'heure, et que tout ce
--- qui est en stock est utilisable. Ces trois hypotheses tombent regulierement :
--- un camion reste en douane, un lot passe en quarantaine, une consommation
--- exceptionnelle vide le magasin avant que le MRP ne l'ait integre.
+-- Cette vue ne raisonne pas. Elle dit ce qu'il y a dans les allees, maintenant :
+-- l'utilisable, la quarantaine, ce qui est mis de cote (restes, lots bloques),
+-- le fil sur machine et le fil en route vers un magasin compte.
 --
--- Cette vue ne raisonne pas. Elle dit ce qu'il y a dans les allees, maintenant.
--- C'est le VETO qui s'imposera a la projection : l'alerte finale est le pire des
--- deux, jamais la moyenne, jamais la plus optimiste.
+-- 27/10/2026 : une seule source de verite, le moteur de couverture (migration
+-- 2026-10-27e_source_unique_moteur.sql). La colonne stock_mrp_net_kg — et le
+-- parametre P_MrpInclureStockMachine qui la reglait — est retiree : le moteur
+-- (backend/src/domain/couverture.rs) fait seul le compte du disponible et de la
+-- projection. Le fil sur machine compte au dernier constat, quel que soit son
+-- age (2026-10-27b, decision du 26/10/2026) : P_JoursInventMachine ne sert plus
+-- que le signal C36.
 --
--- La definition en service (migrations 2026-10-02 a 2026-10-10b) ajoute les
--- restes, les lots bloques, le fil sur machine et le transit. LE FIL SUR MACHINE
--- COMPTE AU DERNIER CONSTAT, QUEL QUE SOIT SON AGE (2026-10-27b, decision du
--- 26/10/2026) : P_JoursInventMachine ne sert plus que le signal C36.
+-- FICHIERS D'ORIGINE SANS LOTS NI MACHINES. La definition en service
+-- (migrations 2026-10-02 a 2026-10-27e, voir socle/schema.sql) lit les restes
+-- et les lots bloques dans `lot` et `stock_lot`, le fil sur machine dans
+-- `machine_etat`. Ces tables ne sont pas dans 001-018 : les colonnes qui en
+-- viennent y valent donc zero, avec leur nom et leur place, pour que les vues
+-- qui les lisent (v_stock_reference) se chargent ici a l'identique. Le transit,
+-- lui, se calcule comme en service.
 -- -----------------------------------------------------------------------------
 DROP VIEW IF EXISTS v_stock_physique CASCADE;
 CREATE VIEW v_stock_physique AS
+WITH en_route AS (
+    -- Le fil en route (transfert expedie, pas encore recu) vers un magasin
+    -- compte : ni en quarantaine, ni hors MRP.
+    SELECT lt.code_reference,
+           ROUND(SUM(lt.quantite_kg), 4) AS kg
+      FROM transfert t
+      JOIN ligne_transfert lt ON lt.id_transfert = t.id_transfert
+      JOIN magasin md         ON md.code_magasin = t.code_magasin_dest
+     WHERE t.statut = 'VALIDE' AND md.inclure_mrp = 1 AND md.est_quarantaine = 0
+     GROUP BY lt.code_reference
+)
 SELECT
     r.code_reference,
 
@@ -358,76 +377,38 @@ SELECT
     ROUND(COALESCE(SUM(CASE WHEN mg.est_quarantaine = 1
                             THEN sm.quantite_kg END), 0), 4)          AS stock_quarantaine_kg,
 
-    -- Reserve a un ordre de fabrication en cours. Le terme est pose des
-    -- maintenant, a zero : il n'existe aucune table d'ordre de fabrication dans
-    -- ce produit. Le jour ou elle existera, seule cette ligne changera, et le
-    -- veto se resserrera de lui-meme partout ou il est lu. Poser un zero
-    -- explicite vaut mieux qu'un terme absent qu'on oubliera d'ajouter.
+    -- Mis de cote = restes + lots bloques (en service : depuis `lot`).
     0.0                                                               AS stock_reserve_kg,
 
     ROUND(COALESCE(SUM(CASE WHEN mg.inclure_mrp = 1 AND mg.est_quarantaine = 0
-                            THEN sm.quantite_kg END), 0) - 0.0, 4)    AS stock_physique_net_kg
+                            THEN sm.quantite_kg END), 0) - 0.0, 4)    AS stock_physique_net_kg,
+    0.0                                                               AS stock_restes_kg,
+    0.0                                                               AS stock_bloque_kg,
+    -- Le fil sur machine, au dernier constat (en service : `machine_etat`).
+    0.0                                                               AS stock_machine_kg,
+    ROUND(COALESCE(MAX(er.kg), 0), 4)                                 AS stock_transit_kg
 FROM reference r
 LEFT JOIN stock_magasin sm ON sm.code_reference = r.code_reference
 LEFT JOIN magasin       mg ON mg.code_magasin   = sm.code_magasin
+LEFT JOIN en_route      er ON er.code_reference = r.code_reference
 WHERE r.actif = 1
 GROUP BY r.code_reference;
 
 -- -----------------------------------------------------------------------------
--- v_encours_fiable   —   ce qu'on peut RAISONNABLEMENT attendre
+-- v_stock_reference   —   la lecture NEUTRE d'une reference (27/10/2026)
 --
--- v_encours_bc compte toute commande ouverte, qu'elle soit prevue demain ou en
--- retard de six mois. La couverture s'en trouve gonflee par des marchandises
--- que plus personne n'attend vraiment.
---
--- Passe la tolerance de retard, la quantite sort du calcul : la couverture
--- s'effondre, et l'alerte vire. C'est voulu — le retard REEL doit annuler la
--- prevision, pas la prolonger. La quantite retardee reste comptee a part, pour
--- que l'ecran dise POURQUOI la couverture a chute.
+-- Une seule source de verite, le moteur de couverture (migration 2026-10-27e).
+-- Cette vue remplace v_stock_projete comme socle des vues d'etat, d'analyse et
+-- de cockpit, SANS projection ni statut : ce qui se lit sans calcul de besoin —
+-- fournisseur et delai, classes, stock (disponible au MRP, total, physique net,
+-- quarantaine, mis de cote, machine, transit), consommation retenue et minimum
+-- recalcule (un seuil affiche, il n'entre plus dans aucun besoin). Le statut,
+-- les jours couverts, la 1re rupture et la quantite a commander viennent du
+-- moteur (backend/src/domain/couverture.rs) : la route qui sert l'ecran les
+-- ajoute.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_encours_fiable CASCADE;
-CREATE VIEW v_encours_fiable AS
-SELECT
-    lb.code_reference,
-    ROUND(SUM(CASE WHEN substr(lb.date_livraison_prevue, 1, 10) >= to_char(current_date - (p_ret.v)::integer, 'YYYY-MM-DD')
-                     OR lb.date_livraison_prevue IS NULL
-                   THEN lb.quantite_restante_kg ELSE 0 END), 4)       AS encours_fiable_kg,
-    ROUND(SUM(CASE WHEN substr(lb.date_livraison_prevue, 1, 10) <  to_char(current_date - (p_ret.v)::integer, 'YYYY-MM-DD')
-                   THEN lb.quantite_restante_kg ELSE 0 END), 4)       AS encours_retarde_kg,
-    SUM(CASE WHEN substr(lb.date_livraison_prevue, 1, 10) <  to_char(current_date - (p_ret.v)::integer, 'YYYY-MM-DD')
-             THEN 1 ELSE 0 END)                                       AS nb_lignes_retardees,
-    MIN(CASE WHEN substr(lb.date_livraison_prevue, 1, 10) <  to_char(current_date - (p_ret.v)::integer, 'YYYY-MM-DD')
-             THEN lb.date_livraison_prevue END)                       AS plus_ancien_retard,
-    MAX(CASE WHEN substr(lb.date_livraison_prevue, 1, 10) <  to_char(current_date - (p_ret.v)::integer, 'YYYY-MM-DD')
-             THEN CAST((current_date - (lb.date_livraison_prevue)::date) AS bigint) END)
-                                                                      AS retard_max_jours
-FROM ligne_bc lb
-JOIN bon_commande bc ON bc.id_bc = lb.id_bc
-CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_RetardBCJours') p_ret
-WHERE bc.statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')
-  AND lb.statut NOT IN ('ANNULE','SOLDE')
-  AND lb.type_ligne = 'MARCHANDISE'
-  AND lb.quantite_restante_kg > 0
-GROUP BY lb.code_reference;
-
--- -----------------------------------------------------------------------------
--- v_stock_projete   (remplace I1)
---
--- ALERTE A DOUBLE DECLENCHEUR. Le statut final est le PIRE des deux :
---
---   * le declencheur LOGIQUE — la couverture en jours, calculee sur les besoins
---     du MRP et sur l'en-cours fiable. Excellent pour planifier, faux des que le
---     MRP n'a pas ete relance ou qu'une commande traine ;
---   * le declencheur PHYSIQUE — le stock reellement utilisable, hors
---     quarantaine et hors reserve, compare a un plancher absolu. Il ne raisonne
---     pas, donc il ne se trompe pas.
---
--- Prendre le pire des deux, et jamais la moyenne : une alerte qui s'adoucit
--- parce que l'autre moitie du calcul est optimiste est pire qu'une alerte
--- absente, parce qu'elle se lit comme un feu vert.
--- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stock_projete CASCADE;
-CREATE VIEW v_stock_projete AS
+DROP VIEW IF EXISTS v_stock_reference CASCADE;
+CREATE VIEW v_stock_reference AS
 SELECT
     r.code_reference,
     r.designation,
@@ -444,337 +425,41 @@ SELECT
     sd.stock_total_kg,
     sd.valeur_totale_mad,
 
-    -- --- REALITE PHYSIQUE ---------------------------------------------------
     ph.stock_physique_net_kg,
     ph.stock_quarantaine_kg,
     ph.stock_reserve_kg,
-
-    -- --- EN-COURS : ce qu'on attend, et ce qu'on n'attend plus --------------
-    COALESCE(ef.encours_fiable_kg, 0)       AS encours_kg,
-    COALESCE(ef.encours_retarde_kg, 0)      AS encours_retarde_kg,
-    COALESCE(ef.nb_lignes_retardees, 0)     AS nb_lignes_retardees,
-    ef.retard_max_jours,
-    COALESCE(b.besoin_12m_kg, 0)            AS besoin_12m_kg,
-
-    -- Projection = stock utilisable + en-cours FIABLE - besoins. Une commande
-    -- en retard au-dela de la tolerance ne compte plus : le retard reel annule
-    -- la prevision au lieu de la prolonger.
-    ROUND(ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
-          - COALESCE(b.besoin_12m_kg, 0), 4)                          AS stock_projete_kg,
+    ph.stock_machine_kg,
+    ph.stock_transit_kg,
 
     cr.conso_mensuelle_kg,
     cr.source_conso,
-    CASE WHEN COALESCE(cr.conso_mensuelle_kg, 0) > 0
-         THEN ROUND((ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
-                     - COALESCE(b.besoin_12m_kg, 0)) / (cr.conso_mensuelle_kg / 30.0), 1)
-    END                                     AS jours_couverture,
-
-    -- Les deux bornes de l'echelle logique, exposees telles quelles. L'ecran en
-    -- a besoin pour graduer la jauge de couverture. Sans elles il ecrirait 60 et
-    -- 90 en dur, et la jauge cesserait de suivre le parametre le jour ou la
-    -- direction le deplace : le chiffre changerait de statut, la barre non.
-    CAST(p_crit.v   AS numeric)                AS seuil_critique_jours,
-    CAST(p_alerte.v AS numeric)                AS seuil_alerte_jours,
-
-    -- Le minimum recalcule (F3, MAX de quatre securites) : c'est LUI le seuil
-    -- du veto physique, et non un plancher absolu en kilos. La difference n'est
-    -- pas cosmetique — le minimum se parametre par reference, un plancher global
-    -- traite pareil un fil livre en huit jours et un autre en trois mois.
-    sm.stock_min_kg,
-    sm.terme2_couverture_kg,
-
-    -- Le maximum : au-dela, le stock immobilise du capital sans servir la
-    -- couverture. Plancher a une fois et demie le minimum, majore d'un mois de
-    -- consommation supplementaire (P_MargeJours).
-    ROUND(GREATEST(sm.stock_min_kg * 1.5, sm.stock_min_kg + COALESCE(cr.conso_mensuelle_kg, 0)
-                                * CAST(p_marge.v AS numeric) / 30.0), 4)   AS stock_max_kg,
-
-    -- --- DECLENCHEUR A : la logique, en jours de couverture ----------------
-    -- Echelle 60 / 90 jours. Elle ne juge PAS le stock d'aujourd'hui mais ce
-    -- qu'il devient une fois les besoins de l'horizon retranches et les
-    -- commandes fiables ajoutees.
-    CASE
-        -- Ni consommation, ni besoin planifie : personne ne demande cette
-        -- reference. Un stock nul n'y est pas une rupture mais une reference
-        -- inutilisee, et la compter en rupture noie les vraies sous des fausses.
-        -- Ce test doit preceder celui du stock : teste apres, il ne sert jamais,
-        -- car un stock nul est deja tombe dans RUPTURE.
-        WHEN COALESCE(cr.conso_mensuelle_kg, 0) = 0
-         AND COALESCE(b.besoin_12m_kg, 0) = 0 THEN 'OK'
-        WHEN (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
-              - COALESCE(b.besoin_12m_kg, 0)) <= 0 THEN 'RUPTURE'
-        WHEN COALESCE(cr.conso_mensuelle_kg, 0) = 0 THEN 'OK'
-        WHEN (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
-              - COALESCE(b.besoin_12m_kg, 0))
-             / (cr.conso_mensuelle_kg / 30.0) < CAST(p_crit.v AS numeric)  THEN 'CRITIQUE'
-        WHEN (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
-              - COALESCE(b.besoin_12m_kg, 0))
-             / (cr.conso_mensuelle_kg / 30.0) < CAST(p_alerte.v AS numeric) THEN 'ATTENTION'
-        ELSE 'OK'
-    END                                     AS statut_logique,
-
-    -- --- DECLENCHEUR B : le veto physique ----------------------------------
-    -- Aucun raisonnement : ce qu'il y a dans les allees, maintenant, compare au
-    -- minimum recalcule. Une reference que personne ne demande n'a pas de seuil.
-    CASE
-        WHEN COALESCE(cr.conso_mensuelle_kg, 0) = 0
-         AND COALESCE(b.besoin_12m_kg, 0) = 0 THEN 'OK'
-        WHEN ph.stock_physique_net_kg <= 0 THEN 'RUPTURE'
-        WHEN COALESCE(sm.stock_min_kg, 0) > 0
-         AND ph.stock_physique_net_kg < sm.stock_min_kg THEN 'CRITIQUE'
-        ELSE 'OK'
-    END                                     AS statut_physique,
-
-    -- --- STATUT FINAL : le PIRE des deux -----------------------------------
-    -- Jamais la moyenne, jamais le plus optimiste. Une alerte qui s'adoucit
-    -- parce que l'autre moitie du calcul va bien se lit comme un feu vert.
-    --
-    -- Le SUR-STOCK n'y figure PAS. Simule sur les donnees reelles, le placer
-    -- dans cette echelle interceptait 72 references sur 124 et eteignait la
-    -- couche logique : 31 d'entre elles passaient sous 90 jours de couverture
-    -- tout en affichant « suspendre la prochaine commande ». Le sur-stock ne
-    -- mesure pas un risque de manquer, il mesure du capital immobilise : c'est
-    -- un SECOND AXE, porte par le drapeau ci-dessous.
-    CASE
-        WHEN COALESCE(cr.conso_mensuelle_kg, 0) = 0
-         AND COALESCE(b.besoin_12m_kg, 0) = 0 THEN 'OK'
-        WHEN ph.stock_physique_net_kg <= 0
-          OR (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
-              - COALESCE(b.besoin_12m_kg, 0)) <= 0 THEN 'RUPTURE'
-        -- Le veto physique s'impose ici, avant l'echelle logique.
-        WHEN COALESCE(sm.stock_min_kg, 0) > 0
-         AND ph.stock_physique_net_kg < sm.stock_min_kg THEN 'CRITIQUE'
-        WHEN COALESCE(cr.conso_mensuelle_kg, 0) = 0 THEN 'OK'
-        WHEN (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
-              - COALESCE(b.besoin_12m_kg, 0))
-             / (cr.conso_mensuelle_kg / 30.0) < CAST(p_crit.v AS numeric)  THEN 'CRITIQUE'
-        WHEN (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
-              - COALESCE(b.besoin_12m_kg, 0))
-             / (cr.conso_mensuelle_kg / 30.0) < CAST(p_alerte.v AS numeric) THEN 'ATTENTION'
-        ELSE 'OK'
-    END                                     AS statut,
-
-    -- --- SECOND AXE : le sur-stock -----------------------------------------
-    -- Juge sur la PROJECTION, pas sur le stock du jour. Compare un stock
-    -- physique a un maximum calibre au mois pendant que la projection retranche
-    -- douze mois de besoins revient a declarer excessif tout stock sain pour
-    -- l'annee : la simulation en donnait 72 sur 124.
-    CASE WHEN COALESCE(sm.stock_min_kg, 0) > 0
-          AND (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
-               - COALESCE(b.besoin_12m_kg, 0))
-              > GREATEST(sm.stock_min_kg * 1.5, sm.stock_min_kg + COALESCE(cr.conso_mensuelle_kg, 0)
-                                      * CAST(p_marge.v AS numeric) / 30.0)
-         THEN 1 ELSE 0 END                  AS sur_stock,
-    -- --- DECLENCHEUR C : l'ecart majeur ------------------------------------
-    -- Le filet de securite. La logique dit qu'on est confortable, le magasin dit
-    -- qu'on est sous le minimum : quelque chose n'a pas ete declare — une casse,
-    -- une consommation, une erreur de saisie, un vol. Ce n'est pas une alerte de
-    -- stock, c'est une alerte de VERITE des donnees, et elle se traite autrement.
-    CASE WHEN COALESCE(cr.conso_mensuelle_kg, 0) > 0
-          AND (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
-               - COALESCE(b.besoin_12m_kg, 0)) / (cr.conso_mensuelle_kg / 30.0)
-              > CAST(p_ecart.v AS numeric)
-          AND ph.stock_physique_net_kg < COALESCE(r.stock_min_kg, 0)
-         THEN 1 ELSE 0 END                  AS ecart_majeur,
-
-    -- Fraicheur du raisonnement. La projection melange un stock VIVANT a des
-    -- besoins FIGES au dernier calcul MRP : sans cette date a cote du statut,
-    -- une alerte verte peut n'etre que le reflet d'un calcul qui n'a pas ete
-    -- relance depuis que le plan a change.
-    (SELECT MAX(date_calcul) FROM besoin_mrp)                         AS besoins_calcules_le
+    sm.stock_min_kg
 FROM reference r
-JOIN      v_stock_disponible sd ON sd.code_reference = r.code_reference
-JOIN      v_stock_physique   ph ON ph.code_reference = r.code_reference
-JOIN      v_stock_min_dynamique sm ON sm.code_reference = r.code_reference
-LEFT JOIN fournisseur         f ON f.code_fournisseur = r.code_fournisseur
-LEFT JOIN v_encours_fiable   ef ON ef.code_reference = r.code_reference
-LEFT JOIN v_besoin_12m        b ON b.code_reference  = r.code_reference
-LEFT JOIN v_conso_retenue    cr ON cr.code_reference = r.code_reference
-CROSS JOIN (SELECT valeur_courante v FROM parametre WHERE code_parametre = 'P_DelaiDefaut')      p_delai
-CROSS JOIN (SELECT valeur_courante v FROM parametre WHERE code_parametre = 'P_SeuilCritique')    p_crit
-CROSS JOIN (SELECT valeur_courante v FROM parametre WHERE code_parametre = 'P_SeuilAlerte')      p_alerte
-CROSS JOIN (SELECT valeur_courante v FROM parametre WHERE code_parametre = 'P_MargeJours')       p_marge
-CROSS JOIN (SELECT valeur_courante v FROM parametre WHERE code_parametre = 'P_EcartCouvertureJours') p_ecart
+JOIN      v_stock_disponible    sd ON sd.code_reference   = r.code_reference
+JOIN      v_stock_physique      ph ON ph.code_reference   = r.code_reference
+JOIN      v_stock_min_dynamique sm ON sm.code_reference   = r.code_reference
+LEFT JOIN fournisseur            f ON f.code_fournisseur  = r.code_fournisseur
+LEFT JOIN v_conso_retenue       cr ON cr.code_reference   = r.code_reference
+CROSS JOIN (SELECT valeur_courante v FROM parametre WHERE code_parametre = 'P_DelaiDefaut') p_delai
 WHERE r.actif = 1;
 
 -- =============================================================================
--- 4. PLAN D'ACHAT
+-- 4. ET 5. L'ANCIEN CALCUL DU BESOIN — RETIRE LE 27/10/2026
 -- =============================================================================
-
--- -----------------------------------------------------------------------------
--- v_plan_achat   (remplace I2)
---
--- CORRECTIONS :
---  * quantite : la formule I2 du CDC renvoyait 0 en silence des que
---    multiple_achat_kg etait NULL (NULLIF -> NULL -> GREATEST ignore les NULL).
---  * le MOQ ne s'applique que si l'on commande effectivement.
---  * le tiering porte desormais sur le MONTANT REELLEMENT COMMANDE (arrondi +
---    MOQ compris) et non sur un montant intermediaire different de l'affichage.
---  * prix : repli CMUP -> catalogue converti en MAD, explicitement trace.
---  * stock_min : formule dynamique F3 au lieu du seul stock_min catalogue.
--- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_plan_achat CASCADE;
-CREATE VIEW v_plan_achat AS
-WITH base AS (
-    SELECT
-        -- `smd.stock_min_kg` etait cite ici EN PLUS de `sp.*`, qui l'expose
-        -- deja : la CTE produisait donc DEUX colonnes du meme nom. SQLite
-        -- l'accepte et resout `a.stock_min_kg` sur la premiere venue ;
-        -- PostgreSQL refuse, et c'est ce refus qui a revele le doublon.
-        --
-        -- Verifie avant de corriger : `v_stock_projete.stock_min_kg` vient
-        -- lui-meme de `v_stock_min_dynamique`, et les deux colonnes sont
-        -- identiques sur les 124 references. Aucun chiffre n'etait donc faux
-        -- — mais la vue promettait la formule dynamique en s'en remettant a
-        -- l'ordre des colonnes pour l'obtenir.
-        sp.*,
-        r.moq_kg,
-        r.multiple_achat_kg,
-        r.facteur_kg,
-        -- Prix retenu et sa provenance
-        COALESCE(r.cmup_mad, ROUND(r.prix_catalogue_kg * COALESCE(tc.taux, 1.0), 4)) AS prix_retenu_mad,
-        CASE WHEN r.cmup_mad IS NOT NULL THEN 'CMUP' ELSE 'CATALOGUE' END            AS source_prix,
-        -- Besoin net avant MOQ / multiple
-        GREATEST(0.0, ROUND(smd.stock_min_kg - sp.stock_projete_kg, 4))                   AS besoin_net_kg
-    FROM v_stock_projete       sp
-    JOIN reference              r   ON r.code_reference = sp.code_reference
-    JOIN v_stock_min_dynamique smd  ON smd.code_reference = sp.code_reference
-    LEFT JOIN taux_change      tc   ON tc.code_devise = r.code_devise_catalogue
-                                   AND to_char(current_date, 'YYYY-MM-DD') >= substr(tc.date_debut, 1, 10)
-                                   AND (tc.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(tc.date_fin, 1, 10))
-), calcul AS (
-    SELECT
-        base.*,
-        -- MOQ applique seulement s'il y a quelque chose a commander
-        CASE WHEN besoin_net_kg > 0
-             THEN GREATEST(besoin_net_kg, COALESCE(moq_kg, 0))
-             ELSE 0.0 END AS qte_avec_moq_kg
-    FROM base
-), arrondi AS (
-    SELECT
-        calcul.*,
-        CASE
-            WHEN qte_avec_moq_kg <= 0 THEN 0.0
-            WHEN multiple_achat_kg IS NULL OR multiple_achat_kg <= 0 THEN ROUND(qte_avec_moq_kg, 4)
-            -- L'ARRONDI AU MULTIPLE SUPERIEUR, VRAIMENT. La formule precedente
-            -- — `CAST((q + m - 0,0001) / m AS bigint)` — supposait qu'une
-            -- conversion en entier TRONQUE. PostgreSQL ARRONDIT. Le resultat
-            -- commandait un multiple de trop dans pres d'un cas sur deux :
-            -- 1 600 kg au multiple de 1 000 donnaient 3 000 kg au lieu de 2 000,
-            -- et un besoin tombant pile sur un multiple en ajoutait un entier.
-            -- Mesure le 17/09/2026. `CEIL` dit exactement ce qu'on veut dire.
-            ELSE ROUND(CEIL(qte_avec_moq_kg / multiple_achat_kg) * multiple_achat_kg, 4)
-        END AS qte_a_commander_kg
-    FROM calcul
-)
-SELECT
-    a.code_reference,
-    a.designation,
-    a.code_fournisseur,
-    a.fournisseur_nom,
-    a.fournisseur_pays,
-    a.delai_livraison_jours,
-    a.classe_abc,
-    a.classe_xyz,
-    a.unite_catalogue,
-    a.stock_mrp_kg,
-    a.encours_kg,
-    a.besoin_12m_kg,
-    a.stock_projete_kg,
-    a.jours_couverture,
-    a.conso_mensuelle_kg,
-    a.source_conso,
-    a.statut,
-    a.stock_min_kg,
-    a.qte_a_commander_kg,
-    CASE WHEN a.facteur_kg > 0 THEN ROUND(a.qte_a_commander_kg / a.facteur_kg, 4) END AS qte_a_commander_unite,
-    a.prix_retenu_mad                                        AS prix_estime_mad,
-    a.source_prix,
-    ROUND(a.qte_a_commander_kg * a.prix_retenu_mad, 2)       AS montant_estime_mad,
-
-    -- Tiering F7, calcule sur le montant reellement commande
-    CASE
-        WHEN a.statut = 'RUPTURE' THEN 'TIER 1'
-        WHEN a.classe_abc = 'A'
-         AND a.qte_a_commander_kg * a.prix_retenu_mad >= (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_SeuilTier1') THEN 'TIER 1'
-        WHEN a.qte_a_commander_kg * a.prix_retenu_mad >= (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_SeuilTier2') THEN 'TIER 2'
-        WHEN a.qte_a_commander_kg * a.prix_retenu_mad >= (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_SeuilTier3') THEN 'TIER 3'
-        ELSE 'TIER 4'
-    END AS tier,
-
-    -- Sourcing : nombre d'alternatives ACTIVES et en cours de validite
-    -- MULTI-SOURCE exige un autre FOURNISSEUR, pas seulement une autre
-    -- reference. Deux articles equivalents achetes a la meme maison tombent
-    -- ensemble : compter les references faisait passer ce cas pour une securite
-    -- d'approvisionnement, et le plan d'achat s'y fiait.
-    CASE WHEN (
-        SELECT COUNT(*)
-        FROM reference_groupe_equiv rge1
-        JOIN reference_groupe_equiv rge2 ON rge2.code_groupe_equiv = rge1.code_groupe_equiv
-                                        AND rge2.code_reference   <> rge1.code_reference
-                                        AND rge2.actif = 1
-        JOIN reference r2 ON r2.code_reference = rge2.code_reference AND r2.actif = 1
-        JOIN reference r1 ON r1.code_reference = rge1.code_reference
-        WHERE rge1.code_reference = a.code_reference AND rge1.actif = 1
-          AND r2.code_fournisseur IS DISTINCT FROM r1.code_fournisseur
-    ) > 0 THEN 'MULTI-SOURCE' ELSE 'MONO-SOURCE' END AS risque_sourcing,
-
-    to_char(current_date + (a.delai_livraison_jours)::integer, 'YYYY-MM-DD') AS date_besoin_prevue
-FROM arrondi a
-WHERE a.qte_a_commander_kg > 0
-ORDER BY
-    CASE a.statut WHEN 'RUPTURE' THEN 1 WHEN 'CRITIQUE' THEN 2 WHEN 'ATTENTION' THEN 3 ELSE 4 END,
-    a.qte_a_commander_kg * a.prix_retenu_mad DESC;
-
--- =============================================================================
--- 5. COCKPIT
--- =============================================================================
-
--- -----------------------------------------------------------------------------
--- v_cockpit_stock   (remplace I3)
--- Un seul balayage par CTE, la ou la vue I3 du CDC rescannait v_stock_projete
--- 4 fois et v_plan_achat 3 fois (chacune rescannant elle-meme v_stock_projete).
--- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_cockpit_stock CASCADE;
-CREATE VIEW v_cockpit_stock AS
-WITH s AS (SELECT statut, classe_abc FROM v_stock_projete),
-     p AS (SELECT montant_estime_mad, classe_abc, tier FROM v_plan_achat)
-SELECT
-    (SELECT COUNT(*) FROM s WHERE statut = 'RUPTURE')                        AS nb_ruptures,
-    (SELECT COUNT(*) FROM s WHERE statut = 'CRITIQUE')                       AS nb_critiques,
-
-    (SELECT COUNT(*) FROM s WHERE statut = 'ATTENTION')                      AS nb_attention,
-    -- Le sur-stock est un SECOND AXE : il ne dit pas qu'on va manquer, il dit
-    -- qu'on immobilise. Il se compte a part, jamais dans l'echelle d'alerte.
-    (SELECT COUNT(*) FROM v_stock_projete WHERE sur_stock = 1)               AS nb_sur_stock,
-    (SELECT COUNT(*) FROM v_stock_projete WHERE ecart_majeur = 1)            AS nb_ecart_majeur,
-    -- FRAICHEUR. Le stock est vivant, les besoins sont figes au dernier calcul
-    -- MRP : sans cette date a cote des compteurs, un tableau tout vert peut
-    -- n'etre que le reflet d'un calcul qu'on n'a pas relance depuis que le plan
-    -- a change. L'erreur va toujours dans le sens rassurant.
-    (SELECT MAX(date_calcul) FROM besoin_mrp)                                AS besoins_calcules_le,
-    -- La condition de C29 est RECOPIEE ici plutot que lue depuis v_ctl_c29 :
-    -- les controles naissent dans 012, apres ce fichier. SQLite accepterait la
-    -- vue et n'echouerait qu'a la premiere lecture — la base se construirait
-    -- « integre » et le cockpit casserait a l'ouverture.
-    (SELECT COUNT(*) FROM plan_production pp
-      WHERE pp.statut = 'EN_COURS'
-        AND (NOT EXISTS (SELECT 1 FROM besoin_mrp b WHERE b.id_plan = pp.id_plan)
-          OR COALESCE(pp.date_modification, pp.date_creation)
-             > (SELECT MAX(date_calcul) FROM besoin_mrp b WHERE b.id_plan = pp.id_plan)))
-                                                                             AS besoins_perimes,
-    (SELECT COUNT(*) FROM s WHERE statut = 'OK')                             AS nb_ok,
-    (SELECT COUNT(*) FROM s)                                                 AS nb_references,
-    (SELECT ROUND(COALESCE(SUM(valeur_mad), 0), 2) FROM stock_magasin)       AS valeur_stock_mad,
-    (SELECT COUNT(*) FROM p)                                                 AS nb_refs_a_commander,
-    (SELECT ROUND(COALESCE(SUM(montant_estime_mad), 0), 2) FROM p)           AS budget_a_engager_mad,
-    (SELECT COUNT(*) FROM p WHERE classe_abc = 'A')                          AS nb_classe_a_alerte,
-    (SELECT COUNT(*) FROM p WHERE tier = 'TIER 1')                           AS nb_tier1,
-    (SELECT COUNT(*) FROM fournisseur WHERE actif = 1)                       AS nb_fournisseurs_actifs,
-    (SELECT COUNT(*) FROM bon_commande WHERE statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')) AS nb_bc_ouverts,
-    (SELECT ROUND(COALESCE(SUM(montant_total_mad), 0), 2) FROM bon_commande
-      WHERE statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL'))                   AS montant_bc_ouverts_mad,
-    (SELECT COUNT(*) FROM alerte WHERE statut = 'OUVERTE' AND gravite IN ('CRITIQUE','BLOQUANT')) AS nb_alertes_critiques;
+-- Une seule source de verite, le moteur de couverture (migration
+-- 2026-10-27e_source_unique_moteur.sql). Ces vues etaient definies ici et ne
+-- le sont plus — l'ancien calcul ne reste pas en parallele :
+--   * v_encours_fiable (en-cours « fiable » selon P_RetardBCJours) ;
+--   * v_stock_projete (remplacait I1 : double declencheur RUPTURE / CRITIQUE /
+--     ATTENTION / OK, stock projete = physique net + en-cours fiable - besoin) ;
+--   * v_plan_achat (remplacait I2 : proposition « minimum - projete », MOQ,
+--     multiple, palier) ;
+--   * v_cockpit_stock (remplacait I3 : compteurs du cockpit).
+-- Le moteur (backend/src/domain/couverture.rs) projette jour par jour ; le
+-- plan d'achat genere prend sa 1re proposition (domain/plan_achat.rs) ; les
+-- compteurs du cockpit sont calcules par la route. Les vues qui gardaient un
+-- statut ou une projection pour l'afficher sont redefinies sans lui, sur
+-- v_stock_reference.
 
 -- =============================================================================
 -- 6. SUBSTITUTION, FOURNISSEURS, DORMANT, LOTS
@@ -782,14 +467,18 @@ SELECT
 
 -- -----------------------------------------------------------------------------
 -- v_substitution_dispo   (remplace I5)
+--
+-- 27/10/2026 : une seule source de verite, le moteur de couverture (migration
+-- 2026-10-27e). La vue ne filtre plus la principale sur RUPTURE / CRITIQUE (le
+-- statut de v_stock_projete, retiree) et ne porte plus de stock projete : elle
+-- liste les substituts qui ont du stock ; l'etat de la principale vient du
+-- moteur, cote serveur.
 -- -----------------------------------------------------------------------------
 DROP VIEW IF EXISTS v_substitution_dispo CASCADE;
 CREATE VIEW v_substitution_dispo AS
 SELECT
     r1.code_reference           AS ref_principale,
     r1.designation              AS designation_principale,
-    sp1.statut                  AS statut_principale,
-    sp1.stock_projete_kg        AS stock_projete_principale,
     rge1.code_groupe_equiv,
     ge.libelle                  AS groupe_libelle,
     rge1.priorite               AS priorite_principale,
@@ -800,8 +489,7 @@ SELECT
     rge2.est_preferentielle,
     -- LE STOCK D'UN SUBSTITUT SE LIT NET : sans ses lots Restes ni ses lots
     -- bloques (02/10/2026). Un Reste ne remplace pas un lot de production.
-    ph2.stock_physique_net_kg   AS stock_substitut_kg,
-    sp2.stock_projete_kg        AS stock_projete_substitut
+    ph2.stock_physique_net_kg   AS stock_substitut_kg
 FROM reference r1
 JOIN reference_groupe_equiv rge1 ON rge1.code_reference = r1.code_reference AND rge1.actif = 1
 JOIN groupe_equiv           ge   ON ge.code_groupe_equiv = rge1.code_groupe_equiv AND ge.actif = 1
@@ -809,11 +497,8 @@ JOIN reference_groupe_equiv rge2 ON rge2.code_groupe_equiv = rge1.code_groupe_eq
                                 AND rge2.code_reference   <> rge1.code_reference
                                 AND rge2.actif = 1
 JOIN reference              r2   ON r2.code_reference = rge2.code_reference AND r2.actif = 1
-JOIN v_stock_projete       sp1   ON sp1.code_reference = r1.code_reference
-JOIN v_stock_projete       sp2   ON sp2.code_reference = r2.code_reference
-JOIN v_stock_physique     ph2   ON ph2.code_reference = r2.code_reference
+JOIN v_stock_physique       ph2  ON ph2.code_reference = r2.code_reference
 WHERE r1.actif = 1
-  AND sp1.statut IN ('RUPTURE','CRITIQUE')
   AND ph2.stock_physique_net_kg > 0
 ORDER BY r1.code_reference, rge2.est_preferentielle DESC, rge2.priorite;
 
@@ -951,8 +636,9 @@ WHERE sl.quantite_kg > 0;
 -- v_cockpit_files
 -- Les compteurs du poste de travail : ce qui ATTEND QUELQU'UN, ici, maintenant.
 --
--- Ils ne se confondent pas avec ceux de v_cockpit_stock, qui decrivent un ETAT
--- (combien de references en rupture, quelle valeur de stock). Ceux-ci decrivent
+-- Ils ne se confondent pas avec ceux de l'etat du stock (combien de references
+-- en rupture, quelle valeur de stock), que la route du cockpit calcule au moteur
+-- de couverture depuis le 27/10/2026 (v_cockpit_stock retiree). Ceux-ci decrivent
 -- une FILE : chacun se vide quand quelqu'un fait son travail, et chacun mene a
 -- une liste sur laquelle on peut agir. Un compteur qui ne mene nulle part n'a
 -- rien a faire sur un ecran d'accueil.
@@ -1011,9 +697,8 @@ SELECT
         AND bc.statut IN ('BROUILLON','EN_CONTROLE','DEMANDE_PRIX','EN_ATTENTE_VALIDATION','VALIDE'))
         AS nb_receptions_a_regulariser,
 
-    -- Stock
-    (SELECT COUNT(*) FROM v_plan_achat WHERE stock_projete_kg < stock_min_kg)
-        AS nb_refs_sous_minimum,
+    -- Stock. nb_refs_sous_minimum (lu de v_plan_achat) est retire le 27/10/2026 :
+    -- une seule source de verite, le moteur de couverture (migration 2026-10-27e).
     (SELECT COUNT(*) FROM v_stock_dormant)
         AS nb_refs_dormantes,
     (SELECT ROUND(COALESCE(SUM(valeur_mad), 0), 2) FROM v_stock_dormant)
@@ -1038,188 +723,13 @@ SELECT
         AS nb_bc_demande_prix;
 
 -- -----------------------------------------------------------------------------
--- v_risque_mensuel
--- Le mur de risques : mois par mois, la reference tient-elle ?
+-- v_risque_mensuel, v_risque_reference — RETIREES LE 27/10/2026
 --
--- La question d'une usine n'est pas « combien ai-je en stock » mais « est-ce que
--- je tiens le plan de production ». Un stock confortable aujourd'hui qui tombe a
--- zero en fevrier est un probleme de fevrier, et il faut le voir en aout, quand
--- on peut encore commander.
---
--- La projection part du stock disponible au MRP, puis deroule les mois :
---     fin(m) = fin(m-1) + entrees attendues(m) - besoin(m)
---
--- Deux choix qui changent la lecture, et qu'il faut assumer :
---   * les entrees viennent des bons OUVERTS. Ignorer une commande en route
---     ferait crier a la rupture pour une matiere deja engagee ;
---   * une livraison dont la date promise est deja passee est imputee au premier
---     mois de l'horizon plutot qu'oubliee. Elle est en retard, pas annulee — et
---     le retard se lit ailleurs, sur le poste de travail.
+-- Le mur de risques projetait mois par mois (stock MRP + entrees attendues -
+-- besoin) et triait les references a risque. Une seule source de verite, le
+-- moteur de couverture (migration 2026-10-27e) : la projection est celle du
+-- moteur, jour par jour, et la route du mur de risques l'appelle.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_risque_mensuel CASCADE;
-CREATE VIEW v_risque_mensuel AS
-WITH horizon AS (
-    -- Les besoins figes du plan EN SERVICE. Un plan cloture ne peuple pas le
-    -- mur : ses besoins ne sont plus ceux de l'atelier.
-    --
-    -- L'horizon demarre au MOIS COURANT, pas au premier mois du plan. Un plan
-    -- lance en juillet et lu en octobre a trois mois derriere lui : leurs
-    -- besoins ont deja ete consommes, et le stock d'aujourd'hui en porte la
-    -- trace. Les recompter creuserait une rupture imaginaire, d'autant plus
-    -- profonde que le plan est ancien — le mur annoncerait la catastrophe tout
-    -- l'exercice, et plus personne ne le regarderait.
-    SELECT bm.code_reference,
-           bm.annee_mois,
-           bm.rang_mois,
-           ROUND(SUM(bm.quantite_kg), 4) AS besoin_kg
-      FROM besoin_mrp bm
-      JOIN plan_production pp ON pp.id_plan = bm.id_plan
-     WHERE pp.statut = 'EN_COURS'
-       AND to_char(current_date, 'YYYY-MM-DD') BETWEEN pp.date_debut AND pp.date_fin
-       AND bm.annee_mois >= to_char(current_date, 'YYYY-MM')
-     -- `annee_mois` est en correspondance 1:1 avec `rang_mois` dans un
-     -- plan donne (verifie : aucun couple n'en porte deux).
-     GROUP BY bm.code_reference, bm.rang_mois, bm.annee_mois
-),
-premier_mois AS (
-    SELECT code_reference, MIN(annee_mois) AS annee_mois
-      FROM horizon GROUP BY code_reference
-),
-attendu_brut AS (
-    SELECT lb.code_reference,
-           substr(COALESCE(lb.date_livraison_prevue, bc.date_livraison_prevue), 1, 7)
-               AS annee_mois,
-           lb.quantite_restante_kg AS entrees_kg
-      FROM ligne_bc lb
-      JOIN bon_commande bc ON bc.id_bc = lb.id_bc
-     WHERE bc.statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')
-       AND lb.statut NOT IN ('SOLDE','ANNULE')
-       AND lb.quantite_restante_kg > 0
-),
-attendu AS (
-    SELECT ab.code_reference,
-           CASE WHEN ab.annee_mois IS NULL OR ab.annee_mois < pm.annee_mois
-                THEN pm.annee_mois ELSE ab.annee_mois END AS annee_mois,
-           ROUND(SUM(ab.entrees_kg), 4) AS entrees_kg
-      FROM attendu_brut ab
-      JOIN premier_mois pm ON pm.code_reference = ab.code_reference
-     GROUP BY 1, 2
-),
-projection AS (
-    SELECT h.code_reference,
-           h.annee_mois,
-           h.rang_mois,
-           h.besoin_kg,
-           COALESCE(a.entrees_kg, 0)                     AS entrees_kg,
-           ROUND(COALESCE(sd.stock_mrp_kg, 0), 4)        AS stock_initial_kg,
-           ROUND(COALESCE(sd.stock_mrp_kg, 0)
-                 + SUM(COALESCE(a.entrees_kg, 0) - h.besoin_kg) OVER (
-                       PARTITION BY h.code_reference ORDER BY h.rang_mois
-                       ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 4)
-                                                          AS stock_fin_kg,
-           ROUND(COALESCE(smd.stock_min_kg, 0), 4)        AS stock_min_kg
-      FROM horizon h
-      LEFT JOIN attendu a                 ON a.code_reference   = h.code_reference
-                                         AND a.annee_mois       = h.annee_mois
-      LEFT JOIN v_stock_disponible sd     ON sd.code_reference  = h.code_reference
-      LEFT JOIN v_stock_min_dynamique smd ON smd.code_reference = h.code_reference
-)
-SELECT p.code_reference,
-       r.designation,
-       r.classe_abc,
-       p.annee_mois,
-       p.rang_mois,
-       p.besoin_kg,
-       p.entrees_kg,
-       p.stock_initial_kg,
-       p.stock_fin_kg,
-       p.stock_min_kg,
-       -- TENDU n'est pas une nuance de RUPTURE : c'est le mois ou l'on entame le
-       -- stock de securite. La, la decision d'achat se prend encore sereinement ;
-       -- en RUPTURE, il est deja trop tard.
-       CASE WHEN p.stock_fin_kg < 0              THEN 'RUPTURE'
-            WHEN p.stock_fin_kg < p.stock_min_kg THEN 'TENDU'
-            ELSE 'COUVERT' END                    AS statut
-  FROM projection p
-  JOIN reference r ON r.code_reference = p.code_reference;
-
--- -----------------------------------------------------------------------------
--- v_risque_reference
--- Une ligne par reference a risque : de quoi TRIER le mur.
---
--- L'ordre est le message. Une rupture en fevrier sur une matiere de classe A
--- mono-source a 90 jours de delai n'a rien a voir avec une tension en juin sur
--- une classe C que trois fournisseurs proposent. Le tri croise donc l'echeance,
--- la criticite ABC, le sourcing et le delai — c'est-a-dire le temps qu'il reste
--- REELLEMENT pour agir.
---
--- Le sourcing reprend mot pour mot la definition de v_plan_achat (groupes
--- d'equivalence) : deux definitions du mono-source dans le meme produit se
--- contrediraient un jour.
--- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_risque_reference CASCADE;
-CREATE VIEW v_risque_reference AS
-SELECT
-    rm.code_reference,
-    rm.designation,
-    rm.classe_abc,
-    ref.code_fournisseur,
-    f.nom AS fournisseur_nom,
-    COALESCE(f.delai_livraison_jours,
-             (SELECT CAST(valeur_courante AS bigint) FROM parametre
-               WHERE code_parametre = 'P_DelaiDefaut')) AS delai_livraison_jours,
-    -- Meme regle que v_plan_achat : un autre FOURNISSEUR, pas une autre
-    -- reference. Le mur de risques trie sur ce champ ; le fausser reviendrait a
-    -- reculer dans la liste une reference reellement mono-source.
-    CASE WHEN (
-        SELECT COUNT(*)
-        FROM reference_groupe_equiv rge1
-        JOIN reference_groupe_equiv rge2 ON rge2.code_groupe_equiv = rge1.code_groupe_equiv
-                                        AND rge2.code_reference   <> rge1.code_reference
-                                        AND rge2.actif = 1
-        JOIN reference r2 ON r2.code_reference = rge2.code_reference AND r2.actif = 1
-        JOIN reference r1 ON r1.code_reference = rge1.code_reference
-        WHERE rge1.code_reference = rm.code_reference AND rge1.actif = 1
-          AND r2.code_fournisseur IS DISTINCT FROM r1.code_fournisseur
-    ) > 0 THEN 'MULTI-SOURCE' ELSE 'MONO-SOURCE' END    AS risque_sourcing,
-    MIN(rm.stock_min_kg)                                AS stock_min_kg,
-    MIN(rm.stock_initial_kg)                            AS stock_initial_kg,
-    SUM(CASE WHEN rm.statut = 'RUPTURE' THEN 1 ELSE 0 END)       AS nb_mois_rupture,
-    SUM(CASE WHEN rm.statut = 'TENDU'   THEN 1 ELSE 0 END)       AS nb_mois_tendu,
-    MIN(CASE WHEN rm.statut = 'RUPTURE'  THEN rm.annee_mois END) AS premier_mois_rupture,
-    MIN(CASE WHEN rm.statut <> 'COUVERT' THEN rm.annee_mois END) AS premier_mois_risque,
-    MIN(CASE WHEN rm.statut <> 'COUVERT' THEN rm.rang_mois END)  AS rang_premier_risque,
-    -- Jours restants avant le premier mois a risque, DELAI FOURNISSEUR DEDUIT.
-    -- Negatif, il est deja trop tard pour commander a temps : c'est le seul
-    -- chiffre qui dise s'il reste une decision a prendre ou un degat a limiter.
-    CAST(((MIN(CASE WHEN rm.statut <> 'COUVERT' THEN rm.annee_mois END) || '-01')::date - current_date)
-         - COALESCE(f.delai_livraison_jours,
-                    (SELECT CAST(valeur_courante AS bigint) FROM parametre
-                      WHERE code_parametre = 'P_DelaiDefaut')) AS bigint)
-                                                        AS marge_decision_jours,
-    -- Un equivalent en stock change la NATURE du risque : ce n'est plus « il
-    -- faut commander et attendre » mais « il faut decider ». Le dire evite de
-    -- traiter en urgence ce qui se resout par un arbitrage.
-    (SELECT ROUND(COALESCE(MAX(e.equivalent_stock_kg), 0), 3) FROM v_equivalence e
-      WHERE e.code_reference = rm.code_reference
-        AND e.interchangeable = 1)                      AS equivalent_dispo_kg,
-    (SELECT e.equivalent_reference FROM v_equivalence e
-      WHERE e.code_reference = rm.code_reference
-        AND e.interchangeable = 1
-      ORDER BY e.equivalent_stock_kg DESC LIMIT 1)      AS equivalent_reference
-  FROM v_risque_mensuel rm
-  JOIN reference ref      ON ref.code_reference = rm.code_reference
-  LEFT JOIN fournisseur f ON f.code_fournisseur = ref.code_fournisseur
- -- Toutes ces colonnes dependent de `code_reference`, deja groupe : la
- -- designation et la classe ABC viennent de la reference, le fournisseur et son
- -- delai en decoulent. Les citer ne change aucune ligne.
- GROUP BY rm.code_reference, rm.designation, rm.classe_abc,
-          ref.code_fournisseur, f.nom, f.delai_livraison_jours
--- Les expressions sont repetees plutot que citees par leur alias :
--- HAVING s'evalue AVANT la projection, donc avant que l'alias existe.
--- SQLite l'admettait, la norme SQL non.
-HAVING SUM(CASE WHEN rm.statut = 'RUPTURE' THEN 1 ELSE 0 END) > 0
-    OR SUM(CASE WHEN rm.statut = 'TENDU'   THEN 1 ELSE 0 END) > 0;
 
 -- =============================================================================
 -- 8. STATISTIQUES
@@ -1552,16 +1062,19 @@ GROUP BY rc.code_qualite, rc.code_role, rc.role_libelle;
 -- v_equivalence
 -- « Quels equivalents pour cette reference ? » — sans condition.
 --
--- v_substitution_dispo repond a une autre question : « ou une rupture est-elle
--- couvrable tout de suite ». Elle filtre donc deux fois — la principale doit
--- etre en RUPTURE ou CRITIQUE, le substitut doit avoir du stock. Excellente
--- pour le cockpit, inutilisable partout ailleurs : au moment de commander, de
--- receptionner ou de sortir de la matiere, on a besoin de connaitre les
--- equivalents AVANT que la situation ne se degrade.
+-- v_substitution_dispo repond a une autre question : « quel substitut a du
+-- stock tout de suite ». Elle filtre donc sur le stock du substitut. Au moment
+-- de commander, de receptionner ou de sortir de la matiere, on a besoin de
+-- connaitre les equivalents AVANT que la situation ne se degrade.
 --
 -- Cette vue-ci ne filtre rien d'autre que l'activite des rattachements. Les
--- deux cotes portent leur stock et leur statut : c'est a l'ecran de decider ce
+-- deux cotes portent leur stock et leur besoin : c'est a l'ecran de decider ce
 -- qu'il met en avant.
+--
+-- 27/10/2026 : une seule source de verite, le moteur de couverture (migration
+-- 2026-10-27e). Les colonnes stock_projete_kg, statut, equivalent_stock_projete_kg
+-- et equivalent_statut (lues de v_stock_projete, retiree) sont retirees ; l'etat
+-- de chaque cote vient du moteur, cote serveur.
 -- -----------------------------------------------------------------------------
 DROP VIEW IF EXISTS v_equivalence CASCADE;
 CREATE VIEW v_equivalence AS
@@ -1577,8 +1090,6 @@ SELECT
     rge1.est_preferentielle,
     r1.unite_catalogue,
     COALESCE(sd1.stock_mrp_kg, 0)       AS stock_kg,
-    sp1.stock_projete_kg,
-    sp1.statut,
     COALESCE(b1.besoin_12m_kg, 0)       AS besoin_12m_kg,
 
     r2.code_reference                   AS equivalent_reference,
@@ -1594,8 +1105,6 @@ SELECT
     r2.prix_catalogue_kg                AS equivalent_prix_catalogue_kg,
     r2.code_devise_catalogue            AS equivalent_devise,
     COALESCE(sd2.stock_mrp_kg, 0)       AS equivalent_stock_kg,
-    sp2.stock_projete_kg                AS equivalent_stock_projete_kg,
-    sp2.statut                          AS equivalent_statut,
     COALESCE(b2.besoin_12m_kg, 0)       AS equivalent_besoin_12m_kg,
 
     -- Deux references du meme groupe chez le MEME fournisseur ne sont pas une
@@ -1622,8 +1131,6 @@ LEFT JOIN fournisseur       f1   ON f1.code_fournisseur   = r1.code_fournisseur
 LEFT JOIN fournisseur       f2   ON f2.code_fournisseur   = r2.code_fournisseur
 LEFT JOIN v_stock_disponible sd1 ON sd1.code_reference    = r1.code_reference
 LEFT JOIN v_stock_disponible sd2 ON sd2.code_reference    = r2.code_reference
-LEFT JOIN v_stock_projete    sp1 ON sp1.code_reference    = r1.code_reference
-LEFT JOIN v_stock_projete    sp2 ON sp2.code_reference    = r2.code_reference
 LEFT JOIN v_besoin_12m       b1  ON b1.code_reference     = r1.code_reference
 LEFT JOIN v_besoin_12m       b2  ON b2.code_reference     = r2.code_reference
 WHERE rge1.actif = 1

@@ -174,15 +174,15 @@ export function AnalyseTableau() {
 
           {/* ---- ABC | Trésorerie | Lots ----------------------------------------- */}
           <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-            <Bloc titre="Classes ABC croisées au statut" sousTitre={`A ${ind?.nb_classe_a ?? 0} · B ${ind?.nb_classe_b ?? 0} · C ${ind?.nb_classe_c ?? 0} · non classées ${ind?.nb_non_classees ?? 0}`}>
+            <Bloc titre="Classes ABC croisées à l’état de couverture" sousTitre={`A ${ind?.nb_classe_a ?? 0} · B ${ind?.nb_classe_b ?? 0} · C ${ind?.nb_classe_c ?? 0} · non classées ${ind?.nb_non_classees ?? 0}`}>
               <Colonnes
                 empilees
                 hauteur={200}
                 libelles={d.abc_statut.map((x) => `Classe ${x.classe_abc}`)}
                 series={[
-                  { cle: 'ok', libelle: 'Au vert', valeurs: d.abc_statut.map((x) => x.ok), couleur: TON.succes },
-                  { cle: 'at', libelle: 'Attention', valeurs: d.abc_statut.map((x) => x.attention), couleur: TON.alerte },
-                  { cle: 'al', libelle: 'En alerte', valeurs: d.abc_statut.map((x) => x.en_alerte), couleur: TON.danger },
+                  { cle: 'ok', libelle: 'Couvert', valeurs: d.abc_statut.map((x) => x.ok), couleur: TON.succes },
+                  { cle: 'at', libelle: 'Sous la sécurité', valeurs: d.abc_statut.map((x) => x.attention), couleur: TON.alerte },
+                  { cle: 'al', libelle: 'Plan non couvert', valeurs: d.abc_statut.map((x) => x.en_alerte), couleur: TON.danger },
                 ]}
               />
             </Bloc>

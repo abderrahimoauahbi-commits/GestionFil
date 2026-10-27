@@ -45,6 +45,82 @@ struct Question {
     lien: &'static str,
 }
 
+/// Marque une question calculee par le moteur de couverture, et non en SQL.
+const MOTEUR: &str = "";
+
+/// Le resume et le detail d'une question calculee par le moteur de couverture
+/// (27/10/2026), ou `None` si elle se lit en SQL. Les controles y passent aussi :
+/// C05 et C25 ne sont plus dans `v_controles`.
+async fn par_le_moteur(state: &AppState, id: &str) -> AppResult<Option<(Value, Value)>> {
+    if !matches!(id, "tension" | "couverture" | "controles") {
+        return Ok(None);
+    }
+    let etats = super::couverture::etats(&state.db).await?;
+    Ok(Some(match id {
+        "tension" => {
+            let c = etats.compteurs();
+            let detail: Vec<Value> = etats
+                .en_tension()
+                .iter()
+                .take(30)
+                .map(|e| {
+                    json!({
+                        "code_reference": e.code_reference, "designation": e.designation,
+                        "statut": e.statut, "jours_couverture": e.jours_couverture,
+                        "premiere_rupture": e.premiere_rupture, "stock_kg": e.disponible_kg.round(),
+                        "fournisseur_nom": e.fournisseur_nom,
+                    })
+                })
+                .collect();
+            (
+                json!({
+                    "plan_non_couvert": c["nb_plan_non_couvert"], "sous_securite": c["nb_sous_securite"],
+                    "total": c["nb_references"], "aujourdhui": c["nb_a_commander_aujourdhui"],
+                }),
+                Value::Array(detail),
+            )
+        }
+        "couverture" => {
+            let mut v: Vec<&super::couverture::Etat> =
+                etats.suivies().filter(|e| e.jours_couverture.is_some()).collect();
+            v.sort_by_key(|e| (e.jours_couverture, e.code_reference.clone()));
+            let ligne = |e: &super::couverture::Etat| {
+                json!({
+                    "code_reference": e.code_reference, "designation": e.designation,
+                    "jours": e.jours_couverture, "jours_couverture": e.jours_couverture,
+                    "premiere_rupture": e.premiere_rupture, "stock_kg": e.disponible_kg.round(),
+                    "plan_horizon_kg": e.plan_horizon_kg.round(), "delai_livraison_jours": e.delai_j,
+                })
+            };
+            (
+                v.first().map(|e| ligne(e)).unwrap_or(Value::Null),
+                Value::Array(v.iter().take(20).map(|e| ligne(e)).collect()),
+            )
+        }
+        _ => {
+            let tous = super::couverture::tous_les_controles(&state.db, &etats).await?;
+            let mut en_anomalie: Vec<Value> =
+                tous.iter().filter(|c| c["anomalies"].as_i64().unwrap_or(0) > 0).cloned().collect();
+            let graves = en_anomalie
+                .iter()
+                .filter(|c| matches!(c["criticite"].as_str(), Some("BLOQUANT") | Some("CRITIQUE")))
+                .count();
+            let rang = |c: &Value| match c["criticite"].as_str() {
+                Some("BLOQUANT") => 0,
+                Some("CRITIQUE") => 1,
+                _ => 2,
+            };
+            en_anomalie.sort_by(|a, b| {
+                rang(a).cmp(&rang(b)).then(b["anomalies"].as_i64().cmp(&a["anomalies"].as_i64()))
+            });
+            (
+                json!({ "en_anomalie": en_anomalie.len(), "graves": graves, "total": tous.len() }),
+                Value::Array(en_anomalie),
+            )
+        }
+    }))
+}
+
 /// Le catalogue.
 ///
 /// Chaque requete a ete executee contre la base avant d'etre inscrite ici : un
@@ -56,24 +132,12 @@ const CATALOGUE: &[Question] = &[
         libelle: "Quelles references sont en tension ?",
         theme: "Stock",
         mots: "tension rupture critique alerte manque risque penurie",
-        resume: "SELECT
-                   COUNT(*) FILTER (WHERE statut IN ('RUPTURE','CRITIQUE')) AS graves,
-                   COUNT(*) FILTER (WHERE statut = 'ATTENTION')             AS attention,
-                   COUNT(*)                              AS total
-                 FROM v_stock_projete",
-        detail: Some(
-            "SELECT code_reference, designation, statut,
-                    ROUND(jours_couverture) AS jours_couverture,
-                    ROUND(stock_physique_net_kg) AS stock_kg,
-                    fournisseur_nom
-             FROM v_stock_projete
-             WHERE statut <> 'OK'
-             ORDER BY CASE statut WHEN 'RUPTURE' THEN 0 WHEN 'CRITIQUE' THEN 1 ELSE 2 END,
-                      jours_couverture
-             LIMIT 30",
-        ),
-        gabarit: "{graves} reference(s) en rupture ou critique, {attention} en attention, \
-                  sur {total} suivies.",
+        // CALCULEE PAR LE MOTEUR DE COUVERTURE (27/10/2026) : voir `par_le_moteur`.
+        resume: MOTEUR,
+        detail: None,
+        gabarit: "{plan_non_couvert} reference(s) au plan non couvert sur l'horizon, \
+                  {sous_securite} sous la securite, sur {total} suivies ; \
+                  {aujourdhui} a commander aujourd'hui.",
         lien: "/stock",
     },
     Question {
@@ -81,26 +145,12 @@ const CATALOGUE: &[Question] = &[
         libelle: "Quelle reference tiendra le moins longtemps ?",
         theme: "Stock",
         mots: "couverture jours tiendra combien temps duree autonomie",
-        resume: "SELECT code_reference, designation,
-                        ROUND(jours_couverture) AS jours,
-                        ROUND(stock_physique_net_kg) AS stock_kg
-                 FROM v_stock_projete
-                 WHERE jours_couverture IS NOT NULL
-                 ORDER BY jours_couverture
-                 LIMIT 1",
-        detail: Some(
-            "SELECT code_reference, designation,
-                    ROUND(jours_couverture) AS jours_couverture,
-                    ROUND(stock_physique_net_kg) AS stock_kg,
-                    ROUND(conso_mensuelle_kg) AS conso_mensuelle_kg,
-                    delai_livraison_jours
-             FROM v_stock_projete
-             WHERE jours_couverture IS NOT NULL
-             ORDER BY jours_couverture
-             LIMIT 20",
-        ),
-        gabarit: "{code_reference} — {designation} — tient {jours} jours, \
-                  avec {stock_kg} kg en magasin.",
+        // CALCULEE PAR LE MOTEUR DE COUVERTURE (27/10/2026) : jours couverts
+        // jusqu'a la premiere rupture du plan.
+        resume: MOTEUR,
+        detail: None,
+        gabarit: "{code_reference} — {designation} — tient {jours} jours (rupture le {premiere_rupture}), \
+                  avec {stock_kg} kg disponibles.",
         lien: "/stock",
     },
     Question {
@@ -156,7 +206,7 @@ const CATALOGUE: &[Question] = &[
         theme: "Finance",
         mots: "concentration pareto abc immobilise reparti principales",
         resume: "WITH t AS (
-                   SELECT valeur_totale_mad v FROM v_stock_projete
+                   SELECT valeur_totale_mad v FROM v_stock_reference
                    WHERE valeur_totale_mad > 0
                  ),
                  c AS (
@@ -172,7 +222,7 @@ const CATALOGUE: &[Question] = &[
         detail: Some(
             "SELECT code_reference, designation, classe_abc,
                     ROUND(valeur_totale_mad) AS valeur_mad
-             FROM v_stock_projete
+             FROM v_stock_reference
              WHERE valeur_totale_mad > 0
              ORDER BY valeur_totale_mad DESC
              LIMIT 20",
@@ -186,23 +236,14 @@ const CATALOGUE: &[Question] = &[
         libelle: "Ou dort-on sur trop de stock ?",
         theme: "Stock",
         mots: "sur-stock surstock trop excedent dort dormant immobilise inutile",
-        resume: "SELECT COUNT(*) FILTER (WHERE sur_stock = 1) AS sur_stock,
-                        (SELECT COUNT(*) FROM v_stock_dormant) AS dormantes,
-                        COUNT(*) AS total
-                 FROM v_stock_projete",
-        detail: Some(
-            "SELECT code_reference, designation,
-                    ROUND(jours_couverture) AS jours_couverture,
-                    ROUND(stock_physique_net_kg) AS stock_kg,
-                    ROUND(stock_max_kg) AS stock_max_kg,
-                    ROUND(valeur_totale_mad) AS valeur_mad
-             FROM v_stock_projete
-             WHERE sur_stock = 1
-             ORDER BY valeur_totale_mad DESC
-             LIMIT 30",
-        ),
-        gabarit: "{sur_stock} reference(s) en sur-stock, et {dormantes} sans mouvement \
-                  depuis le seuil de dormance.",
+        // LE SUR-STOCK DE L'ANCIEN CALCUL (projete au-dela d'un maximum) est
+        // retire avec lui (27/10/2026) : reste le stock DORMANT, qui se constate.
+        resume: "SELECT (SELECT COUNT(*) FROM v_stock_dormant) AS dormantes,
+                        (SELECT ROUND(COALESCE(SUM(valeur_mad), 0)) FROM v_stock_dormant) AS valeur,
+                        (SELECT COUNT(*) FROM v_stock_reference) AS total",
+        detail: Some("SELECT * FROM v_stock_dormant ORDER BY valeur_mad DESC LIMIT 30"),
+        gabarit: "{dormantes} reference(s) sans mouvement depuis le seuil de dormance \
+                  ({valeur} MAD immobilises), sur {total} actives.",
         lien: "/stock",
     },
     Question {
@@ -454,13 +495,18 @@ pub async fn repondre(
             ))
         })?;
 
-    let ligne = sqlx::query(question.resume).fetch_one(&state.db).await?;
-    let resume = lignes_en_json(std::slice::from_ref(&ligne));
-    let resume = resume.get(0).cloned().unwrap_or(Value::Null);
-
-    let detail = match question.detail {
-        Some(sql) => lignes_en_json(&sqlx::query(sql).fetch_all(&state.db).await?),
-        None => json!([]),
+    let (resume, detail) = match par_le_moteur(&state, question.id).await? {
+        Some(calcul) => calcul,
+        None => {
+            let ligne = sqlx::query(question.resume).fetch_one(&state.db).await?;
+            let resume = lignes_en_json(std::slice::from_ref(&ligne));
+            let resume = resume.get(0).cloned().unwrap_or(Value::Null);
+            let detail = match question.detail {
+                Some(sql) => lignes_en_json(&sqlx::query(sql).fetch_all(&state.db).await?),
+                None => json!([]),
+            };
+            (resume, detail)
+        }
     };
 
     Ok(Json(json!({

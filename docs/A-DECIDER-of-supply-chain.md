@@ -381,3 +381,240 @@ faits, pas d'une théorie.
 > simultanées.**
 > **La consommation réelle par qualité est la somme des écarts constatés, attribués à l'OF qui
 > occupait la portion pendant la période — jamais une estimation théorique.**
+
+## 15. Moteur de couverture v2 : la couverture cible (spécification du 27/10/2026, À VALIDER)
+
+> **Statut : rien n'est codé.** Cette section fixe les décisions prises dans la discussion du
+> 27/10/2026. Le code ne commence qu'après la validation de ce texte. **La logique de Q0 est
+> validée** et ne se rediscute plus. Seuls les points du § 15.9 restent ouverts.
+
+### 15.1 Notations et formules
+
+```
+j = 0 (aujourd'hui) … H (fin de l'horizon du plan en service)
+p(t)       besoin planifié DATÉ du jour t (plan de production → besoin_mrp, réparti au jour)
+P(a,b)     Σ p(t), t ∈ [a, b[  (la seule mesure du besoin dans le moteur ; aucune moyenne)
+S0         stock compté aujourd'hui (magasins inclus au MRP, hors quarantaine et bloqué, restes comptés,
+           fil sur machine au dernier constat), comme aujourd'hui
+A(t)       arrivages datés et comptés (lignes de bon validées, transferts en route datés)
+B(t)       solde au soir du jour t = S0 + Σ_{k≤t} (A(k) − p(k))  (sans plafonner à 0)
+b(t)       point bas du jour t, AVANT ses arrivages = B(t−1) − p(t)   (b(0) = S0 − p(0))
+R          première rupture : premier t tel que B(t) < 0 (avec les propositions déjà placées)
+reste(R)   B(R−1) : le stock qui reste au début du jour de rupture (0 ≤ reste < p(R))
+
+C   couverture cible (jours) = 30 × couverture cible de l'article (mois)
+L   délai fournisseur (jours)
+N   couverture d'une commande (jours)
+S   jours de sécurité de la classe ABC
+NS(t) = P(t+1, t+1+S)   seuil de sécurité du jour t, en kg du plan daté
+
+D*  = R − C                       date de besoin (réception normale)
+D   = max(D*, L)                  réception possible (aujourd'hui + délai au plus tôt)
+Date limite de commande = D* − L
+Fenêtre de la commande  = [R, R+N[   ; si D > R (rupture inévitable) : [D, D+N[
+Q0  = besoin net de la fenêtre = P(fenêtre) − reste(R) − arrivages datés dans la fenêtre
+    = min Q tel que, Q reçu en D, aucune rupture avant la fin de la fenêtre
+X   = max_{t ∈ [0, L]} min( NS(t), NS(t) − b(t) )⁺      (sécurité, 1re proposition seulement)
+Q   = arrondi_fournisseur(Q0 + X)   (minimum de commande, multiple, palette)
+```
+
+### 15.2 Les définitions : chacune a un seul rôle
+
+| Notion | Définition | Ce qu'elle fixe | Source |
+|---|---|---|---|
+| **Couverture actuelle** | R − aujourd'hui : ce que le stock projeté couvre avec le plan daté et les arrivages datés | une mesure, jamais une décision | calculée |
+| **C, couverture cible** | la couverture souhaitée **au moment de la réception** | **la date** de la réception normale (C jours avant la rupture) | fiche article, **obligatoire** pour un article soumis au MRP |
+| **L, délai** | délai fournisseur | **la faisabilité** : date limite, retard, rupture inévitable | fournisseur, sinon `P_DelaiDefaut` |
+| **N, couverture d'une commande** | la durée de besoin qu'une commande couvre (l'intervalle entre deux réceptions en régime normal ; c'est la règle de lot « période » des ERP) | **la quantité** | fournisseur (`couverture_commande_j`), sinon `P_MargeJours` |
+| **S, sécurité ABC** | protection dynamique quand un creux sous NS est projeté dans [aujourd'hui, aujourd'hui + L] | **un complément X** à la 1re proposition, seulement s'il y a un creux | `P_SecuriteA/B/C` |
+| **Stock minimum** | garde-fou absolu en kg | **un signal** (« vérifier le plan »), **jamais une quantité** | fiche article (`stock_min_kg`) |
+
+**C ≠ N ≠ S ≠ stock minimum.** `P_CouvMinMois` n'entre dans aucune formule. « Plan / mois » n'est
+qu'un indicateur affiché.
+
+**La cible n'est pas un plancher physique permanent.** Elle dit qu'à la réception normale, le stock
+doit couvrir encore C jours. Juste après la réception, il couvre C + N jours.
+
+### 15.3 L'algorithme chronologique (une référence)
+
+1. **Charger** S0, les arrivages datés A(t) et le plan daté p(t) jusqu'à H, comme aujourd'hui.
+2. **Configuration.** Si C est absente, la configuration MRP est incomplète : on émet le signal
+   `CIBLE_NON_DEFINIE` et on ne fait pas de proposition (voir § 15.9-1). On calcule quand même
+   R et la couverture actuelle.
+3. **Projeter** B(t) et b(t) sans proposition. On en tire R et la couverture actuelle.
+4. **Sécurité.** On parcourt [0, L] et on compare b(t) à NS(t) :
+   - tS est le premier jour de franchissement ;
+   - X est la profondeur du creux le plus bas, plafonnée à NS ;
+   - si X = 0, la sécurité n'est pas appliquée.
+5. **Stock minimum.** On parcourt [0, L]. Si b(t) < stock minimum, on émet le signal
+   `SOUS_MINIMUM` avec la date du 1er franchissement. Aucune quantité n'est générée.
+6. **Boucle des propositions**, tant qu'une rupture R existe sur l'horizon et que le plafond de
+   propositions n'est pas atteint :
+   1. calculer D*, D, la date limite et la fenêtre ;
+   2. calculer Q0 ;
+   3. ajouter X à la 1re proposition seulement ;
+   4. calculer Q = arrondi(Q0 + X) ;
+   5. placer Q en D dans la projection (l'excédent d'arrondi et X restent en stock et repoussent la
+      rupture suivante) ;
+   6. recalculer R.
+7. **Si D > D*** : la commande est en retard sur la cible, signal `RETARD_CIBLE`.
+   **Si D > R** : la rupture est inévitable, signal `RUPTURE_INEVITABLE` ; le manque P(R, D) est
+   affiché, pas commandé.
+8. **Aucune décision n'est prise** : le moteur propose, l'utilisateur commande (« Commander »).
+
+### 15.4 Les états et les signaux
+
+**État d'une référence**, calculé sans proposition (le plus grave l'emporte) :
+
+| État | Condition | Remplace |
+|---|---|---|
+| `RUPTURE_INEVITABLE` | R < aujourd'hui + L : aucune commande passée aujourd'hui n'arrive à temps | `PLAN_NON_COUVERT` (qui signifiait « une rupture quelque part sur l'horizon ») |
+| `SOUS_SECURITE` | X > 0 : creux sous NS dans [aujourd'hui, aujourd'hui + L] | `SOUS_SECURITE`, au nouveau sens |
+| `SOUS_CIBLE` | couverture actuelle < C | nouveau |
+| `COUVERT` | couverture actuelle ≥ C (y compris sans rupture sur l'horizon) | `COUVERT` |
+
+**Signaux**, indépendants de l'état, ne bloquent jamais :
+- `CIBLE_NON_DEFINIE` (configuration incomplète) ;
+- `SOUS_MINIMUM` (vérifier le plan) ;
+- `RETARD_CIBLE` (date limite passée) ;
+- `HORIZON_COURT` (H < aujourd'hui + C : le plan est trop court pour juger la cible) ;
+- les données manquantes déjà connues (classe ABC absente…).
+
+Un contrôle `Cxx` pour `SOUS_MINIMUM` et un pour `CIBLE_NON_DEFINIE` sont servis par le moteur,
+comme C05 et C25.
+
+### 15.5 L'affichage
+
+- **Situation** (fenêtre de détail, stock projeté) :
+  - couverture actuelle, en jours, avec la date de rupture ;
+  - cible C, avec sa source ;
+  - **écart** (couverture − C, en jours) ;
+  - rupture projetée (date ou « aucune sur l'horizon ») ;
+  - date de besoin D*, date limite de commande ;
+  - sécurité : « appliquée : X kg, creux le tS (b = … kg sous NS = … kg) » ou « non appliquée » ;
+  - stock minimum : « respecté » ou « franchi le … ».
+- **Approvisionnement** : L, N et S, chacun avec sa source ; minimum de commande, multiple.
+- **Proposition** : la décomposition **Q0 (besoin net de [R, R+N[) + X (sécurité) + arrondi = Q**,
+  la fenêtre couverte et le stock projeté après réception.
+- **Listes** (« À commander », Surveillance, Stock projeté) : les colonnes Couverture actuelle |
+  Cible | Écart | Date limite | À commander, et l'état.
+- **Plan / mois** reste affiché comme indicateur, marqué « indicateur, non utilisé par le calcul ».
+- Les écrans disent leur source (« moteur de couverture, plan daté »).
+
+### 15.6 Les cas de test (ils deviennent des tests unitaires du moteur)
+
+Réglages communs : C = 60 j, N = 30 j, L = 30 j. Les chiffres sont vérifiés jour par jour.
+
+| Cas | Données | R | D* / D | Date limite | Q0 | X | Q | Stock à R+N |
+|---|---|---|---|---|---|---|---|---|
+| 1. Régulier | S0 = 1 800, 15 kg/j | J+120 | J+60 / J+60 | J+30 | 450 | 0 | 450 | 0 |
+| 2. Saison | S0 = 600 ; 5 kg/j jusqu'à J+89, 30 kg/j J+90→J+149, puis 5 kg/j | J+95 | J+35 / J+35 | J+5 | 900 | 0 | 900 | 0 |
+| 3. Arrivage avant le pic | cas 2 + bon de 1 000 kg à J+85 | J+128 (reste 10) | J+68 / J+68 | J+38 | 690 | 0 | 690 | 0 |
+| 4a. Sécurité sans arrivage | S0 = 600, 15 kg/j, S = 30 j (NS = 450) | J+40 | J−20 / J+30 (retard) | J−50 | 450 | **315** (creux dès J+10, b(30) = 135) | 765 | **315 = X** |
+| 4b. Sécurité, arrivage pendant le délai | S0 = 500 + bon de 900 kg à J+20, 15 kg/j, S = 30 j | J+93 (reste 5) | J+33 / J+33 | J+3 | 445 | **265** (creux dès J+3, b(20) = 185 avant l'arrivage) | 710 | **265 = X** |
+
+**Preuve d'absence de double compte**, à tester sur chaque cas :
+
+- **Bilan de Q0** :
+  S0 + A[0, R+N[ + Q0 = P(0, R+N) ⇒ le stock vaut 0 à R + N (cas 1 à 3).
+  Le cas 3 donne 600 + 1 000 + 690 = 2 290 = P(0, 158).
+- **Bilan de X** :
+  S0 + A + Q0 + X = P(0, R+N) + X ⇒ le stock à R + N vaut **exactement X**.
+  - Cas 4a : 600 + 765 − P(0, 70) = 315.
+  - Cas 4b : 500 + 900 + 710 − P(0, 123) = 265.
+  - Si X recomptait un besoin déjà couvert par Q0 ou par un arrivage, ce reste serait < X.
+- **X se consomme une fois**. Il repousse la rupture suivante de X / p jours (4a : 21 j ;
+  4b : 17 j), et la proposition suivante est retardée d'autant. À la réception d'après, le stock
+  est de nouveau exactement C : 900 kg, avec ou sans sécurité. **La sécurité ne gonfle pas le stock
+  en permanence.**
+- **L'arrivage n'est compté qu'une fois** :
+  - dans R, qu'il repousse : de J+33 à J+93 en 4b ;
+  - dans b(t) à partir de son jour d'arrivée.
+
+  Le jour même, b(t) est mesuré **avant** l'arrivage : c'est le creux réel, pas un besoin.
+- **Équivalence avec le calcul classique** à la date de commande t₀ = D* − L :
+  besoin du délai + besoin de N + plan des C jours suivants − stock à t₀ − arrivages.
+  - Les deux calculs portent sur le même intervalle [t₀, R + N[ (puisque R = t₀ + L + C) et sur
+    les mêmes ressources ; seul le découpage diffère.
+  - Cas 1 : 450 + 450 + 900 − 1 350 = 450.
+  - Cas 2 : 150 + 150 + 1 175 − 575 = 900.
+  - Cas 3 : 150 + 350 + 1 600 − 410 − 1 000 = 690.
+
+**Chronologie du cas 3** (preuve visuelle) :
+
+| Date | Stock début | Besoin | Arrivage | Commande | Stock fin | Couverture sans / avec la commande |
+|---|---:|---:|---:|---:|---:|---|
+| J0 | 600 | 5 | | | 595 | 128 j / 158 j |
+| J+38 (limite) | 410 | 5 | | | 405 | 90 / 120 |
+| J+68 = D | 260 | 5 | | +690 | 945 | **60 = C** / **90 = C+N** |
+| J+85 | 865 | 5 | +1 000 | | 1 860 | 43 / 73 |
+| J+128 = R | 700 | 30 | | | 670 | rupture / **30 = N** |
+| J+157 | 5 | 5 | | | **0** | — / 1 |
+
+### 15.7 Critères d'acceptation
+
+1. Les cas 1, 2, 3, 4a et 4b sont des tests unitaires de `domain/couverture.rs`, aux chiffres exacts
+   ci-dessus : R, D*, D, date limite, Q0, X, Q, stock à R+N.
+2. Les tests de **bilan** (stock à R+N = X) et d'**équivalence classique** passent sur ces cas et
+   sur un plan aléatoire (propriété : quels que soient le plan et les arrivages).
+3. Le moteur ne lit **aucune moyenne** : P(a,b) seul. « Plan / mois » ne sert qu'à l'affichage.
+4. Le stock minimum ne change **jamais** une quantité (test : même Q avec ou sans minimum).
+5. Un article sans cible : signal, pas de proposition, aucune valeur de repli.
+6. La simulation (`POST /api/couverture/{ref}/simulation`) applique les mêmes formules (C, N, L et
+   S modifiables dans les hypothèses).
+7. **Mode comparaison sur une copie de la base** avant la bascule. Le tableau par référence
+   (état, couverture, date limite, Q avant et après) est relu et **validé par l'utilisateur**.
+8. Le banc de tests et les tests de bout en bout passent ; l'aide et le manuel sont mis à jour
+   (définitions du § 15.2, indices des champs).
+
+### 15.8 L'impact (estimation de premier ordre, base de saisie, 27/10/2026)
+
+- Aujourd'hui, la commande se déclenche à la **sécurité ABC (30 j pour les trois classes)**.
+- Demain, elle se déclenchera à la **cible**. Les 125 références en ont déjà une, importée du
+  classeur :
+
+| Cible | Références | Avec un plan | Stock moyen en plus (plan daté des C − 30 jours à venir) | Valeur (CMUP) |
+|---|---:|---:|---:|---:|
+| 1 mois (30 j) | 6 | 3 | 0 kg | 0 MAD |
+| 2 mois (60 j) | 66 | 49 | ≈ 210 t | ≈ 4,36 M MAD |
+| 2,5 mois (75 j) | 53 | 31 | ≈ 44 t | ≈ 1,13 M MAD |
+| **Total** | **125** | **83** | **≈ 254 t** | **≈ 5,49 M MAD** |
+
+C'est une **estimation**. Elle compare la cible à la sécurité actuelle de 30 j, sur le plan
+daté. Ce n'est pas le résultat du moteur v2 : le chiffre exact, référence par référence, viendra
+du mode comparaison (critère 7). Elle suffit pour une conclusion : **les cibles importées du
+classeur engagent environ 5,5 M MAD de stock de plus.** Elles sont à revoir avant la bascule.
+Les 42 références sans plan ne changent pas.
+
+### 15.9 Points ouverts (à trancher avant le code)
+
+1. **Article sans cible.** Le § 15.3 propose : signal `CIBLE_NON_DEFINIE`, **pas de proposition**,
+   la rupture restant visible dans l'état. L'alternative serait une proposition à la rupture (C = 0),
+   affichée comme telle. Aujourd'hui, toutes les références ont une cible ; le cas ne vise que les
+   créations. Faut-il rendre la cible obligatoire à la saisie de l'article ?
+2. **Rattrapage d'un retard sur la cible** (cas 4a). Quand D* < aujourd'hui + L, la 1re proposition
+   arrive à L. La couverture à la réception reste alors sous C + N, et la boucle émet une 2e
+   proposition le lendemain (J+30 puis J+31). Sans sécurité, elle les émettrait le même jour
+   (J+30 deux fois). Faut-il **regrouper** en une seule proposition celles qui arrivent dans le
+   même délai, comme le ferait un acheteur ? Ce regroupement touche l'affichage et « Commander »,
+   pas Q0.
+3. **Ce que X protège.** Le creux est dans [aujourd'hui, aujourd'hui + L] : par construction, une
+   commande passée aujourd'hui arrive **après** lui. X ne protège donc pas ce creux-là. Le creux,
+   c'est le signal qui le traite (accélérer, avancer l'arrivage existant). X **reconstitue** la
+   protection entamée pour le cycle suivant. C'est conforme à la règle validée ; à confirmer en
+   connaissance de cause.
+4. **Les anciennes colonnes de l'article.** `stock_min_kg` est gardée et devient le garde-fou.
+   `marge_securite_pct` n'a plus de rôle : elle sera supprimée, après le relevé de ses lecteurs.
+   `couverture_min_mois` est renommée **couverture cible (mois)**. L'écran non monté
+   « stocks minimums à revoir » et sa route sont à retirer.
+5. **Les codes d'état.** `RUPTURE_INEVITABLE`, `SOUS_SECURITE`, `SOUS_CIBLE` et `COUVERT`
+   remplacent les trois états actuels. Le cockpit, le briefing, l'assistant et les contrôles C05 et
+   C25 suivent, puisqu'ils lisent tous `couverture::etats()`.
+
+### 15.10 Ce qui ne change pas
+
+- Le stock compté, le classement des arrivages, la quarantaine, les restes et le fil sur machine.
+- La source unique `couverture::etats()`.
+- Le prix, la devise et le fournisseur du plan d'achat.
+- « Commander » = une référence.
+- Aucune décision automatique : le moteur propose, l'utilisateur décide.

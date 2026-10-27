@@ -678,6 +678,8 @@ fn ligne(a: &Analyse) -> Value {
         "code_reference": a.fiche.code_reference,
         "designation": a.fiche.designation,
         "classe_abc": a.fiche.classe_abc,
+        // Une référence inactive se lit, mais ne se commande pas (generer() l'écarte).
+        "actif": a.fiche.actif,
         "code_fournisseur": a.fiche.code_fournisseur,
         "fournisseur_nom": a.fiche.fournisseur_nom,
         "disponible_kg": arrondi_kg(a.magasin_compte_kg + a.machine_compte_kg),
@@ -979,5 +981,17 @@ pub async fn detail(
     v["plan_mois"] = Value::Array(plan_mois);
     v["jours"] = serde_json::to_value(&r.jours).unwrap_or(Value::Null);
     user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;
+    // La quantité à commander masquée l'est aussi dans les étapes du calcul : le
+    // masquage se fait par nom de champ, et les propositions portent la même
+    // quantité sous d'autres noms (audit du 27/10/2026).
+    if v["synthese"].get("qte_a_commander_kg").is_none() {
+        if let Some(props) = v["propositions"].as_array_mut() {
+            for p in props.iter_mut().filter_map(Value::as_object_mut) {
+                for champ in ["besoin_theorique_kg", "apres_minimum_kg", "quantite_proposee_kg", "palettes_equivalentes"] {
+                    p.remove(champ);
+                }
+            }
+        }
+    }
     Ok(Json(v))
 }

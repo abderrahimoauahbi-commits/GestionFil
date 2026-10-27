@@ -62,6 +62,8 @@ interface LigneCouverture extends Record<string, unknown> {
   source_couverture?: string
   jours_securite?: number
   qte_a_commander_kg?: number | null
+  /** Inactive : lisible, jamais commandée (la génération l’écarte). */
+  actif?: boolean
   palettes_equivalentes?: number | null
   date_disponibilite?: string | null
   date_limite_commande?: string | null
@@ -621,7 +623,7 @@ export function ACommander({
         actions={
           commander
             ? (l) =>
-                positif(l.qte_a_commander_kg) ? (
+                positif(l.qte_a_commander_kg) && l.actif !== false ? (
                   // Icône seule sous 1536 px : la ligne garde sa date limite à 1366 px.
                   <Bouton
                     taille="xs"

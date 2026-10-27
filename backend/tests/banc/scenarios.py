@@ -3911,6 +3911,14 @@ def scenario_plan_detail(c, infra):
     # LES INDICATEURS SE CALCULENT A LA GENERATION (21/10/2026) : l'ecran les lit, dates.
     kpi = c.ok("Choukri", "GET", "/api/plan-achat/kpi")
     verifier(kpi.get("calcule_le") and kpi.get("globaux") is not None, f"indicateurs sans date ou vides : {kpi}")
+    # « A COMMANDER » = LES PROPOSITIONS OUVERTES (audit du 27/10/2026) : les indicateurs ne
+    # relisent plus l'ancien calcul de v_plan_achat, qui donnait un autre budget sur le meme ecran.
+    ouvertes = infra.sql("SELECT COALESCE(ROUND(SUM(quantite_suggeree_kg), 2), 0), count(*) FROM plan_achat "
+                         "WHERE statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE')")[0]
+    verifier(abs(float(kpi["globaux"]["quantite_kg"]) - float(ouvertes[0])) < 0.01
+             and int(kpi["globaux"]["refs_a_commander"]) == int(ouvertes[1]),
+             f"indicateurs {kpi['globaux'].get('quantite_kg')} kg / {kpi['globaux'].get('refs_a_commander')} refs "
+             f"contre propositions ouvertes {ouvertes}")
     liste = c.ok("Choukri", "GET", "/api/plan-achat/propositions")
     verifier(liste and "classe_abc" in liste[0] and "risque_source" not in liste[0],
              "la liste du plan d'achat relit encore le risque (il est au detail)")

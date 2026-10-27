@@ -217,6 +217,34 @@ en semaines ou en mois : à l'horizon d'achat, seul le plan existe. La règle du
   et `composants/BesoinOf.tsx` ne montrent plus que le plan (horizon, délai, mois par mois).
 - Le même jour, la proposition d'achat est passée au moteur de couverture (`2026-10-27c`, « Commander »).
 
+### Audit indépendant du 27/10 (copie de la base de saisie)
+
+Conforme : ressources (quarantaine, bloqués, prêts exclus ; restes, dormants, machine sans limite
+d'âge comptés ; bon partiellement reçu pour son reste), même quantité / D / date limite entre l'onglet
+et `generer()`, droits (LIRE pour l'onglet, ECRIRE pour Commander), aucun piège SQL. Simulation : un bon
+de 500 kg validé dans la fenêtre baisse la proposition de 500 kg exactement ; un OF lancé ne la change
+pas ; un lot bloqué sort des ressources et revient débloqué.
+
+Corrigé le même jour : les indicateurs « à commander » (budget, kilos, références, paliers, par
+fournisseur) lisent les propositions ouvertes, plus l'ancien `v_plan_achat` ; une quantité masquée l'est
+aussi dans les étapes du calcul ; une référence inactive se lit sans bouton « Commander ».
+
+**Restent à décider (aucun n'est codé)** :
+1. **Transfert en route** : la règle le compte, le moteur le laisse « hors couverture » faute de date
+   d'arrivée prévue (règle provisoire affichée). Le compter dès aujourd'hui, à une date saisie à
+   l'expédition, ou attendre la réception ?
+2. Fenêtre `[D, F[` (30 jours pleins, celle de l'exemple validé n°1) ou `[D, F]` ?
+3. Sans classe ABC, la sécurité la plus longue des trois (aucune référence aujourd'hui).
+4. Date de ligne dépassée d'un bon : prime-t-elle sur une nouvelle date d'en-tête ?
+5. Fenêtre et sécurité coupées à la fin de l'horizon du plan.
+6. `P_MrpInclureStockMachine` : le moteur compte toujours la machine (décision du 26/10) ; le
+   paramètre ne vaut plus que pour l'ancien calcul — le retirer ?
+7. Onglets Situation / Par fournisseur, `/api/plan-achat/detail`, briefing : les statuts de stock y
+   viennent encore de l'ancien calcul (`v_stock_projete`) ; les garder, les passer au moteur ou les
+   retirer ?
+8. Le moteur se lit avant la transaction de génération (≈ 0,5 s) : un bon validé dans cet intervalle
+   donne une proposition à régénérer — défaut technique mineur, laissé en l'état.
+
 ## 7. Ce que les données existantes donnent déjà (preuves, base de saisie, 22/10/2026)
 
 | Fait | Preuve |

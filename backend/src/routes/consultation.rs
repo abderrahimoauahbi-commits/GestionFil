@@ -1261,14 +1261,33 @@ pub async fn figer_kpi_plan_achat(db: &crate::db::Db, user: &Utilisateur) -> App
     // v_plan_achat sept fois. Une table temporaire, le temps de la lecture.
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    sqlx::query("CREATE TEMP TABLE pa_kpi ON COMMIT DROP AS SELECT * FROM v_plan_achat")
-        .execute(&mut *tx)
-        .await?;
 
     // La projection de stock, UNE fois aussi : chaque compte la replanifiait.
-    sqlx::query("CREATE TEMP TABLE sp_kpi ON COMMIT DROP AS SELECT statut, sur_stock, classe_abc FROM v_stock_projete")
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "CREATE TEMP TABLE sp_kpi ON COMMIT DROP AS
+         SELECT code_reference, statut, sur_stock, classe_abc FROM v_stock_projete",
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    // CE QUI EST « À COMMANDER » = LES PROPOSITIONS OUVERTES (27/10/2026) : elles
+    // viennent du moteur de couverture depuis 2026-10-27c. Lire v_plan_achat, son
+    // ancien calcul, donnait un autre budget et d'autres kilos sur le même écran
+    // (audit du 27/10). Le statut de stock reste celui de la projection.
+    sqlx::query(
+        "CREATE TEMP TABLE pa_kpi ON COMMIT DROP AS
+         SELECT pa.code_reference, pa.code_fournisseur,
+                pa.quantite_suggeree_kg AS qte_a_commander_kg,
+                pa.montant_total_mad    AS montant_estime_mad,
+                pa.urgence              AS tier,
+                pa.risque_identifie     AS risque_sourcing,
+                COALESCE(sp.statut, 'OK') AS statut
+           FROM plan_achat pa
+           LEFT JOIN sp_kpi sp ON sp.code_reference = pa.code_reference
+          WHERE pa.statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE')",
+    )
+    .execute(&mut *tx)
+    .await?;
 
     // Bloc « KPI globaux » et bloc « repartition par statut » de la feuille.
     let globaux = sqlx::query(

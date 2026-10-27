@@ -111,13 +111,14 @@ GROUP BY pp.id_plan, lpp.rang_mois, lpp.mois, lpp.annee_mois, rc.code_reference;
 -- toucherait le service Rust et six ecrans ; la correction du calcul, elle, ne
 -- pouvait pas attendre.
 --
--- LES OF CONSOMMENT LE PLAN (22/10/2026, migration 2026-10-22c_besoin_of.sql) :
--- par qualite et mois, besoin = OF retenus (PREVU, LANCE ; leur reste) +
--- max(0, plan - OF). La vue ci-dessous est celle du plan seul ; la definition
--- en service ajoute l'ajustement des OF (v_besoin_of_mois, fn_besoin_of_mois)
--- et deux colonnes, besoin_plan_12m_kg et besoin_au_dela_12m_kg (reprises par
--- v_stock_projete). v_besoin_horizon recoit l'ajustement sans changer de
--- colonnes ; sa part au-dela du plan est dans v_besoin_horizon_of.
+-- LE BESOIN EST LE PLAN SEUL (decision du 26/10/2026, migration
+-- 2026-10-27b_besoin_plan_seul.sql). Du 22/10 au 27/10 (2026-10-22c), les OF
+-- retenus consommaient le plan (besoin = OF + plan non couvert) ; c'est retire :
+-- l'OF est du court terme et ne sert que l'axe production / statistiques
+-- (v_of_mois, v_besoin_of_qualite, v_of_bilan, C64). La definition en service
+-- garde les deux colonnes ajoutees par 22c, besoin_plan_12m_kg (= besoin_12m_kg)
+-- et besoin_au_dela_12m_kg (= 0), reprises par v_stock_projete ;
+-- v_besoin_of_mois et v_besoin_horizon_of existent encore, vides.
 DROP VIEW IF EXISTS v_besoin_12m CASCADE;
 CREATE VIEW v_besoin_12m AS
 -- -----------------------------------------------------------------------------
@@ -338,6 +339,11 @@ WHERE r.actif = 1;
 -- Cette vue ne raisonne pas. Elle dit ce qu'il y a dans les allees, maintenant.
 -- C'est le VETO qui s'imposera a la projection : l'alerte finale est le pire des
 -- deux, jamais la moyenne, jamais la plus optimiste.
+--
+-- La definition en service (migrations 2026-10-02 a 2026-10-10b) ajoute les
+-- restes, les lots bloques, le fil sur machine et le transit. LE FIL SUR MACHINE
+-- COMPTE AU DERNIER CONSTAT, QUEL QUE SOIT SON AGE (2026-10-27b, decision du
+-- 26/10/2026) : P_JoursInventMachine ne sert plus que le signal C36.
 -- -----------------------------------------------------------------------------
 DROP VIEW IF EXISTS v_stock_physique CASCADE;
 CREATE VIEW v_stock_physique AS

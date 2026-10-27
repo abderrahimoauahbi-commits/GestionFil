@@ -1,8 +1,17 @@
-//! Generation du plan d'achat a partir du MRP (CDC E5 / F7).
+//! Generation du plan d'achat (CDC E5 / F7), et conversion en bons de commande.
 //!
-//! Le calcul (quantite avec MOQ et multiple, tiering, sourcing, prix retenu) est
-//! porte par la vue `v_plan_achat`. Le service la materialise en propositions
-//! revisables.
+//! LA QUANTITE ET LES DATES VIENNENT DU MOTEUR DE COUVERTURE (basculement du
+//! 27/10/2026, `domain/couverture.rs`) : la premiere proposition de chaque
+//! reference — quantite proposee (besoin du plan seul, securite, minimum de
+//! commande, arrondi au multiple), D comme date de besoin, date limite de
+//! commande, urgence deduite de cette date limite. Avant, elles venaient de la
+//! vue `v_plan_achat`, qui ne sert plus qu'aux indicateurs de l'onglet Situation.
+//!
+//! TOUT LE RESTE EST INCHANGE : le prix (dernier achat chez le fournisseur, puis
+//! catalogue converti, puis CMUP — memes formules que `v_plan_achat`), la devise,
+//! l'unite, le fournisseur de la fiche, le risque de sourcing ; et le cycle de vie
+//! (figer, ecarter, arbitrer, convertir ; la regeneration garde les propositions
+//! figees, arbitrees, commandees, ecartees).
 //!
 //! `source_prix` est propagee jusque dans la table : quand aucune reception
 //! reelle n'existe encore, le prix vient du catalogue. RG-08 interdit le repli
@@ -11,7 +20,7 @@
 
 use crate::auth::Utilisateur;
 use crate::db::{maintenant, Db};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -30,37 +39,101 @@ pub struct ResultatPlanAchat {
     pub budget_total_mad: f64,
     pub tier1: i64,
     pub date_generation: String,
+    /// Les references que le moteur propose mais qui ne peuvent pas devenir une
+    /// proposition d'achat : sans fournisseur sur la fiche, ou sans aucun prix
+    /// (ni dernier achat, ni catalogue, ni CMUP). Dites, jamais ecartees en silence
+    /// (27/10/2026 : l'ancien calcul echouait en entier sur la premiere).
+    pub references_non_proposees: Vec<String>,
+    /// Generation d'UNE reference (bouton « Commander » de l'onglet À commander) :
+    /// la proposition ouverte qui la porte desormais — la nouvelle, ou celle que
+    /// l'acheteur avait figee ou arbitree.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id_proposition: Option<String>,
 }
 
-/// Regenere les propositions d'achat.
+/// Les references proposees par le moteur, avec ce que la fiche donne pour les
+/// acheter : prix (memes formules et meme ordre que `v_plan_achat`), devise,
+/// unite, fournisseur. Les cinq tableaux du moteur sont les parametres `$n` a
+/// `$n+4`.
+fn source_moteur(n: usize) -> String {
+    format!(
+        "WITH moteur AS (
+        SELECT * FROM unnest(${}::text[], ${}::numeric[], ${}::date[], ${}::date[], ${}::numeric[])
+               AS m(code_reference, qte_kg, date_d, date_limite, complement_kg)
+
+    ), src AS (
+        SELECT m.code_reference, m.qte_kg, m.date_d, m.date_limite, m.complement_kg,
+               r.code_fournisseur, r.unite_catalogue, r.facteur_kg,
+               r.code_devise_catalogue AS devise, r.prix_catalogue_kg, tc.taux,
+               COALESCE(fn_dernier_prix_achat_mad(r.code_reference, r.code_fournisseur),
+                        round(r.prix_catalogue_kg * tc.taux, 4), r.cmup_mad) AS prix_mad,
+               CASE WHEN fn_dernier_prix_achat_mad(r.code_reference, r.code_fournisseur) IS NOT NULL THEN 'DERNIER_ACHAT'
+                    WHEN r.prix_catalogue_kg IS NOT NULL AND tc.taux IS NOT NULL THEN 'CATALOGUE'
+                    WHEN r.cmup_mad IS NOT NULL THEN 'CMUP'
+                    ELSE 'AUCUN' END AS source_prix
+          FROM moteur m
+          JOIN reference r ON r.code_reference = m.code_reference
+          -- Le taux du jour de la devise du catalogue : UN seul (le plus recent en
+          -- vigueur), la ou la jointure de la vue en aurait pris plusieurs.
+          LEFT JOIN LATERAL (
+                SELECT t.taux FROM taux_change t
+                 WHERE t.code_devise = r.code_devise_catalogue
+                   AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut::text, 1, 10)
+                   AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin::text, 1, 10))
+                 ORDER BY t.date_debut DESC LIMIT 1) tc ON true
+    )",
+        n,
+        n + 1,
+        n + 2,
+        n + 3,
+        n + 4
+    )
+}
+
+/// Regenere les propositions d'achat, toutes (`reference = None`) ou celle d'une
+/// seule reference (le bouton « Commander » de l'onglet À commander).
 ///
 /// Les propositions deja transformees en bon de commande (`COMMANDE`) ou
 /// ecartees (`IGNORE`) sont conservees : elles portent une decision humaine.
-/// Seules les propositions ouvertes sont remplacees.
+/// Seules les propositions ouvertes, ni figees ni arbitrees, sont remplacees.
 pub async fn generer(
     db: &Db,
     user: &Utilisateur,
     id_plan: Option<&str>,
+    reference: Option<&str>,
 ) -> AppResult<ResultatPlanAchat> {
+    // LE MOTEUR, avant la transaction (il ne fait que lire) : la premiere
+    // proposition de chaque reference, celle que l'onglet « À commander » montre.
+    let (aujourdhui, moteur) = crate::routes::couverture::premieres_propositions(db, reference).await?;
+    let codes: Vec<String> = moteur.iter().map(|p| p.code_reference.clone()).collect();
+    let quantites: Vec<f64> = moteur.iter().map(|p| p.quantite_kg).collect();
+    let dates_d: Vec<chrono::NaiveDate> = moteur.iter().map(|p| p.date_disponibilite).collect();
+    let limites: Vec<chrono::NaiveDate> = moteur.iter().map(|p| p.date_limite_commande).collect();
+    let complements: Vec<f64> = moteur.iter().map(|p| p.complement_multiple_kg).collect();
+
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
     let ignorees: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM plan_achat WHERE statut IN ('COMMANDE','IGNORE')",
+        "SELECT COUNT(*) FROM plan_achat WHERE statut IN ('COMMANDE','IGNORE')
+            AND ($1::text IS NULL OR code_reference = $1)",
     )
+    .bind(reference)
     .fetch_one(&mut *tx)
     .await?;
 
     // Les propositions ARBITREES survivent au recalcul. Une bascule sur une
     // reference equivalente est une decision humaine, prise sur des elements que
-    // le MRP ignore — un stock dormant, un delai plus court, un prix negocie.
+    // le calcul ignore — un stock dormant, un delai plus court, un prix negocie.
     // La balayer a chaque generation obligerait a la reprendre indefiniment, et
     // l'acheteur cesserait de s'en servir.
     let arbitrees: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM plan_achat
           WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
-            AND code_reference_origine IS NOT NULL",
+            AND code_reference_origine IS NOT NULL
+            AND ($1::text IS NULL OR code_reference = $1 OR code_reference_origine = $1)",
     )
+    .bind(reference)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -73,50 +146,79 @@ pub async fn generer(
     let figees: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM plan_achat
           WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
-            AND figee = 1",
+            AND figee = 1
+            AND ($1::text IS NULL OR code_reference = $1)",
     )
+    .bind(reference)
     .fetch_one(&mut *tx)
     .await?;
 
     // LA PURGE SE JOURNALISE EN UNE LIGNE (audit v5, T10) : une ligne
     // d'audit par proposition remplacee noyait le journal a chaque calcul. Le
-    // declencheur se tait sous le drapeau ; le resume dit combien.
-    sqlx::query("SELECT set_config('gestionfil.purge_plan', 'on', true)")
-        .execute(&mut *tx)
-        .await?;
+    // declencheur se tait sous le drapeau ; le resume dit combien. Pour une
+    // seule reference, le declencheur journalise la ligne lui-meme.
+    if reference.is_none() {
+        sqlx::query("SELECT set_config('gestionfil.purge_plan', 'on', true)")
+            .execute(&mut *tx)
+            .await?;
+    }
     let purgees = sqlx::query(
         "DELETE FROM plan_achat
           WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
             AND code_reference_origine IS NULL
-            AND figee = 0",
+            AND figee = 0
+            AND ($1::text IS NULL OR code_reference = $1)",
     )
+    .bind(reference)
     .execute(&mut *tx)
     .await?
     .rows_affected();
-    sqlx::query("SELECT set_config('gestionfil.purge_plan', '', true)")
-        .execute(&mut *tx)
-        .await?;
-    if purgees > 0 {
-        sqlx::query(
-            "INSERT INTO audit_log (table_concernee, operation, id_enregistrement, anciennes_valeurs,
-                                    id_utilisateur, adresse_ip, session_id)
-             VALUES ('plan_achat', 'DELETE', 'RECALCUL',
-                     jsonb_build_object('propositions_remplacees', $1::bigint)::text,
-                     current_setting('gestionfil.id_utilisateur', true),
-                     current_setting('gestionfil.adresse_ip', true),
-                     current_setting('gestionfil.session_id', true))",
-        )
-        .bind(purgees as i64)
-        .execute(&mut *tx)
-        .await?;
+    if reference.is_none() {
+        sqlx::query("SELECT set_config('gestionfil.purge_plan', '', true)")
+            .execute(&mut *tx)
+            .await?;
+        if purgees > 0 {
+            sqlx::query(
+                "INSERT INTO audit_log (table_concernee, operation, id_enregistrement, anciennes_valeurs,
+                                        id_utilisateur, adresse_ip, session_id)
+                 VALUES ('plan_achat', 'DELETE', 'RECALCUL',
+                         jsonb_build_object('propositions_remplacees', $1::bigint)::text,
+                         current_setting('gestionfil.id_utilisateur', true),
+                         current_setting('gestionfil.adresse_ip', true),
+                         current_setting('gestionfil.session_id', true))",
+            )
+            .bind(purgees as i64)
+            .execute(&mut *tx)
+            .await?;
+        }
     }
 
     let horodatage = maintenant();
 
-    // La vue exclut deja les quantites nulles. On ecarte en plus les references
-    // dont une proposition est deja engagee, pour ne pas commander deux fois.
-    let res = sqlx::query(
-        "INSERT INTO plan_achat
+    // Ce que le moteur propose mais qui ne peut pas devenir une proposition : dit.
+    let references_non_proposees: Vec<String> = sqlx::query_scalar(&format!(
+        "{}
+         SELECT code_reference || CASE WHEN code_fournisseur IS NULL THEN ' (sans fournisseur sur la fiche)'
+                                       ELSE ' (sans prix : ni dernier achat, ni catalogue, ni CMUP)' END
+           FROM src
+          WHERE code_fournisseur IS NULL OR COALESCE(prix_mad, 0) <= 0
+          ORDER BY 1",
+        source_moteur(1)
+    ))
+    .bind(&codes)
+    .bind(&quantites)
+    .bind(&dates_d)
+    .bind(&limites)
+    .bind(&complements)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    // L'URGENCE SE DEDUIT DE LA DATE LIMITE DE COMMANDE (27/10/2026) : depassee ou
+    // aujourd'hui = TIER 1 (commander immediatement) ; sous 7 jours = TIER 2 ;
+    // sous 30 jours = TIER 3 ; au-dela = TIER 4.
+    let res = sqlx::query(&format!(
+        "{}
+         INSERT INTO plan_achat
              (date_generation, id_plan, code_reference, quantite_suggeree_kg,
               unite_saisie, quantite_suggeree_unite, code_fournisseur,
               prix_estime_mad, source_prix, date_besoin_prevue, urgence,
@@ -127,35 +229,58 @@ pub async fn generer(
               -- avec elles — sans quoi le montant en MAD deviendrait
               -- irreproductible des que le taux bouge.
               code_devise, prix_devise, montant_devise, taux_devise,
-              palettes_a_commander, complement_palette_kg)
-         SELECT fn_instant($1), $2, pa.code_reference, pa.qte_a_commander_kg,
-                pa.unite_catalogue, pa.qte_a_commander_unite, pa.code_fournisseur,
-                pa.prix_estime_mad, pa.source_prix, pa.date_besoin_prevue::date, pa.tier,
-                pa.risque_sourcing,
-                CASE pa.statut
-                    WHEN 'RUPTURE'   THEN 'Commander immediatement'
-                    WHEN 'CRITIQUE'  THEN 'Commander sous 7 jours'
-                    WHEN 'ATTENTION' THEN 'Planifier la commande'
+              -- Les palettes ne sont qu'un equivalent (decision du 21/10/2026 :
+              -- jamais de palette pleine par defaut) : l'acheteur choisit kg ou
+              -- palettes dans « Commander ». Le complement est ce que l'arrondi au
+              -- multiple de la fiche a ajoute.
+              palettes_a_commander, complement_palette_kg, date_limite_commande)
+         SELECT fn_instant($1), $2, s.code_reference, s.qte_kg,
+                s.unite_catalogue,
+                CASE WHEN s.facteur_kg > 0 THEN round(s.qte_kg / s.facteur_kg, 4) END,
+                s.code_fournisseur,
+                s.prix_mad, s.source_prix, s.date_d, u.urgence,
+                CASE WHEN (SELECT COUNT(*)
+                             FROM reference_groupe_equiv rge1
+                             JOIN reference_groupe_equiv rge2 ON rge2.code_groupe_equiv = rge1.code_groupe_equiv
+                                                             AND rge2.code_reference <> rge1.code_reference
+                                                             AND rge2.actif = 1
+                             JOIN reference r2 ON r2.code_reference = rge2.code_reference AND r2.actif = 1
+                             JOIN reference r1 ON r1.code_reference = rge1.code_reference
+                            WHERE rge1.code_reference = s.code_reference AND rge1.actif = 1
+                              AND r2.code_fournisseur IS DISTINCT FROM r1.code_fournisseur) > 0
+                     THEN 'MULTI-SOURCE' ELSE 'MONO-SOURCE' END,
+                CASE u.urgence
+                    WHEN 'TIER 1' THEN 'Commander immediatement'
+                    WHEN 'TIER 2' THEN 'Commander sous 7 jours'
+                    WHEN 'TIER 3' THEN 'Planifier la commande'
                     ELSE 'Reapprovisionnement normal'
                 END,
                 'PROPOSE',
-                pa.devise, pa.prix_devise, pa.montant_devise, pa.taux_devise,
-                pa.palettes_a_commander, ROUND(pa.complement_palette_kg, 4)
-           FROM v_plan_achat pa
-          -- UNE REFERENCE COMMANDEE SE REPROPOSE (06/10/2026). Elle etait
-          -- ecartee a vie des sa premiere commande. Or un bon VALIDE, ENVOYE ou
-          -- LIVRE_PARTIEL est deja deduit par l'en-cours de la vue, et un bon
-          -- CLOTURE est en stock : ce qui reste a proposer est un vrai besoin.
-          -- Seul un bon pas encore valide (BROUILLON, au controle, en demande de prix, EN_ATTENTE_VALIDATION),
-          -- que l'en-cours ne compte pas, ecarte encore la reference.
+                s.devise, round(s.prix_catalogue_kg, 4), round(s.qte_kg * s.prix_catalogue_kg, 2),
+                round(COALESCE(s.taux, 1.0), 4),
+                NULL, round(s.complement_kg, 4), s.date_limite
+           FROM src s
+          CROSS JOIN LATERAL (
+                SELECT CASE WHEN s.date_limite <= $8::date      THEN 'TIER 1'
+                            WHEN s.date_limite <= $8::date + 7  THEN 'TIER 2'
+                            WHEN s.date_limite <= $8::date + 30 THEN 'TIER 3'
+                            ELSE 'TIER 4' END AS urgence) u
+          WHERE s.code_fournisseur IS NOT NULL AND COALESCE(s.prix_mad, 0) > 0
+          -- UNE REFERENCE COMMANDEE SE REPROPOSE (06/10/2026). Un bon VALIDE,
+          -- ENVOYE ou LIVRE_PARTIEL est un arrivage du moteur (compte a sa date,
+          -- ou montre a part s'il est en retard ou sans date), un bon CLOTURE est
+          -- en stock : ce qui reste a proposer est un vrai besoin. Seul un bon pas
+          -- encore valide (BROUILLON, au controle, en demande de prix,
+          -- EN_ATTENTE_VALIDATION), que le moteur ne compte pas, ecarte encore la
+          -- reference.
           --
           -- UNE PROPOSITION ECARTEE EXPIRE (regle 17, 08/10/2026). Ecartee, elle
           -- masquait la reference A VIE : le besoin ne revenait jamais. Au-dela
           -- de P_DureeEcartJours (90 j), elle cesse de masquer ; elle reste en
           -- base, jamais supprimee, marquee expiree.
-          WHERE NOT EXISTS (
+            AND NOT EXISTS (
                 SELECT 1 FROM plan_achat pa2
-                 WHERE pa2.code_reference = pa.code_reference
+                 WHERE pa2.code_reference = s.code_reference
                    AND ((pa2.statut = 'IGNORE'
                          AND substr(COALESCE(pa2.date_ecartee, pa2.date_generation), 1, 10)::date
                              > current_date - COALESCE((SELECT CAST(valeur_courante AS integer) FROM parametre
@@ -172,23 +297,51 @@ pub async fn generer(
                 SELECT 1 FROM plan_achat pa3
                  WHERE pa3.statut IN ('PROPOSE','EN_REVISION','VALIDE')
                    AND pa3.code_reference_origine IS NOT NULL
-                   AND (pa3.code_reference        = pa.code_reference
-                     OR pa3.code_reference_origine = pa.code_reference))
+                   AND (pa3.code_reference        = s.code_reference
+                     OR pa3.code_reference_origine = s.code_reference))
             -- Une reference deja couverte par une ligne FIGEE ne se repropose
             -- pas : l'index ux_plan_achat_ouvert refuserait le doublon, et la
             -- generation entiere echouerait sur une contrainte que l'acheteur
-            -- ne peut pas comprendre. Ce que le calcul a de nouveau a dire sur
-            -- cette reference se lit dans l'ecart affiche sur la ligne figee.
+            -- ne peut pas comprendre.
             AND NOT EXISTS (
                 SELECT 1 FROM plan_achat pa4
                  WHERE pa4.statut IN ('PROPOSE','EN_REVISION','VALIDE')
                    AND pa4.figee = 1
-                   AND pa4.code_reference = pa.code_reference)",
-    )
+                   AND pa4.code_reference = s.code_reference)",
+        source_moteur(3)
+    ))
     .bind(&horodatage)
     .bind(id_plan)
+    .bind(&codes)
+    .bind(&quantites)
+    .bind(&dates_d)
+    .bind(&limites)
+    .bind(&complements)
+    .bind(aujourdhui)
     .execute(&mut *tx)
     .await?;
+
+    // UNE SEULE REFERENCE : la proposition ouverte qui la porte, ou pourquoi il n'y
+    // en a pas — l'acheteur a clique « Commander », il doit savoir.
+    let id_proposition = match reference {
+        None => None,
+        Some(r) => {
+            let id: Option<String> = sqlx::query_scalar(
+                "SELECT id_proposition FROM plan_achat
+                  WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
+                    AND (code_reference = $1 OR code_reference_origine = $1)
+                  ORDER BY (code_reference = $1) DESC, date_generation DESC
+                  LIMIT 1",
+            )
+            .bind(r)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if id.is_none() {
+                return Err(AppError::RegleMetier(pourquoi_rien(&mut tx, r, moteur.is_empty(), &references_non_proposees).await?));
+            }
+            id
+        }
+    };
 
     let (budget, tier1): (Option<f64>, i64) = sqlx::query_as(
         // COUNT FILTER et non SUM(CASE) : sans proposition, une somme vaut NULL,
@@ -209,7 +362,54 @@ pub async fn generer(
         budget_total_mad: crate::db::arrondi_mad(budget.unwrap_or(0.0)),
         tier1,
         date_generation: horodatage,
+        references_non_proposees,
+        id_proposition,
     })
+}
+
+/// Pourquoi une reference n'a pas de proposition ouverte apres sa generation.
+async fn pourquoi_rien(
+    tx: &mut sqlx::PgConnection,
+    reference: &str,
+    moteur_vide: bool,
+    non_proposees: &[String],
+) -> AppResult<String> {
+    if moteur_vide {
+        return Ok(format!(
+            "Le moteur de couverture ne propose rien pour {reference} aujourd'hui (couverture suffisante, ou référence inactive). Rafraîchissez l'onglet À commander."
+        ));
+    }
+    if let Some(n) = non_proposees.first() {
+        return Ok(format!("Aucune proposition possible pour {n}."));
+    }
+    let bon: Option<(String, String)> = sqlx::query_as(
+        "SELECT bc.numero_bc, bc.statut FROM plan_achat pa JOIN bon_commande bc ON bc.id_bc = pa.id_bc_genere
+          WHERE pa.code_reference = $1 AND pa.statut = 'COMMANDE'
+            AND bc.statut IN ('BROUILLON','EN_CONTROLE','DEMANDE_PRIX','EN_ATTENTE_VALIDATION')
+          ORDER BY pa.date_generation DESC LIMIT 1",
+    )
+    .bind(reference)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some((numero, statut)) = bon {
+        return Ok(format!(
+            "{reference} est déjà sur le bon {numero} ({statut}), pas encore validé : complétez ce bon plutôt que d'en préparer un second."
+        ));
+    }
+    let ecartee: Option<String> = sqlx::query_scalar(
+        "SELECT to_char(COALESCE(date_ecartee, date_generation), 'DD/MM/YYYY') FROM plan_achat
+          WHERE code_reference = $1 AND statut = 'IGNORE'
+          ORDER BY COALESCE(date_ecartee, date_generation) DESC LIMIT 1",
+    )
+    .bind(reference)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(le) = ecartee {
+        return Ok(format!(
+            "La proposition de {reference} a été écartée le {le} : elle ne se repropose pas avant P_DureeEcartJours."
+        ));
+    }
+    Ok(format!("Aucune proposition ouverte pour {reference} après le calcul."))
 }
 
 #[derive(Debug, Serialize)]
@@ -268,7 +468,6 @@ pub async fn convertir(
     cibles: Option<&std::collections::HashMap<String, String>>,
     ajustements: Option<&std::collections::HashMap<String, AjustementLigne>>,
 ) -> AppResult<ResultatConversion> {
-    use crate::error::AppError;
 
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -570,7 +769,6 @@ async fn ouvrir_bon(
     fournisseur: &str,
     date_besoin: Option<&str>,
 ) -> AppResult<String> {
-    use crate::error::AppError;
 
     let (devise, conditions): (String, Option<String>) = sqlx::query_as(
         "SELECT COALESCE(code_devise, 'MAD'), conditions_paiement

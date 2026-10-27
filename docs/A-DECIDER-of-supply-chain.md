@@ -197,6 +197,26 @@ qu'elle accélérait va donc disparaître ; elle n'aurait été qu'une dépendan
 démarrage. On garde la réécriture de la requête des références commandables
 (`routes/bons_commande.rs` : une seule lecture de `v_equivalence`), indépendante de l'OF.
 
+## 6 sexies. 27/10 : l'OF sort du besoin MRP (migration `2026-10-27b`, exigée au démarrage)
+
+Décision de la direction du 26/10, réalisée le 27/10. **Le besoin d'achat est le plan de production
+seul** ; l'OF est du court terme (journalier, au plus une semaine) quand les délais d'achat se comptent
+en semaines ou en mois : à l'horizon d'achat, seul le plan existe. La règle du §6 quater
+(« besoin = OF retenus + plan non couvert », `2026-10-22c`) est **remplacée** :
+
+- `v_besoin_mois`, `v_besoin_12m`, `v_besoin_horizon` rendent le plan seul, sans changer de colonnes
+  (`besoin_plan_12m_kg` = total, `besoin_au_dela_12m_kg` = 0) ; `v_besoin_of_mois` et
+  `v_besoin_horizon_of` existent encore, vides ; `fn_besoin_of_mois()` est supprimée. Le stock projeté
+  et l'ancien `v_plan_achat` suivent d'eux-mêmes.
+- **L'axe production / statistiques reste intact** : `v_of_mois`, `v_besoin_of_qualite`, `v_besoin_of`
+  (prévu, consommé, reste d'un OF), `v_of_consommation`, `v_of_bilan`, `v_qualite_consommation`, et
+  **C64 signale toujours** un OF au-delà du plan du mois (simple signal, gardé par décision).
+- **Le fil sur machine compte au dernier constat, quel que soit son âge** : `v_stock_physique` ne
+  l'exclut plus après `P_JoursInventMachine` jours ; le paramètre ne sert plus que le signal C36.
+- Écrans : colonnes « dont plan » / « Au-delà du plan » retirées du stock projeté ; `GET /api/stock/besoin`
+  et `composants/BesoinOf.tsx` ne montrent plus que le plan (horizon, délai, mois par mois).
+- Le même jour, la proposition d'achat est passée au moteur de couverture (`2026-10-27c`, « Commander »).
+
 ## 7. Ce que les données existantes donnent déjà (preuves, base de saisie, 22/10/2026)
 
 | Fait | Preuve |

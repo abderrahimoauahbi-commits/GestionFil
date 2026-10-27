@@ -110,6 +110,36 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // « Commander » branche sur le moteur de couverture (27/10/2026) : la date
+        // limite de commande sur la proposition d'achat, les kilos hors
+        // couverture des bons non valides et apres l'horizon declares.
+        "2026-10-27c_commande_couverture.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'plan_achat' AND column_name = 'date_limite_commande')
+            AND (SELECT count(*) FROM champ_configurable
+                  WHERE module = 'PLAN_ACHAT' AND champ IN ('non_valide_kg', 'apres_horizon_kg')) = 2",
+    ),
+    (
+        // L'OF sort du besoin MRP (decision du 26/10/2026) : le besoin est le plan
+        // seul ; le fil sur machine compte au dernier constat quel que soit son age.
+        "2026-10-27b_besoin_plan_seul.sql",
+        "SELECT NOT EXISTS (SELECT 1 FROM pg_views
+                             WHERE viewname IN ('v_besoin_horizon', 'v_besoin_12m', 'v_besoin_mois')
+                               AND definition LIKE '%v_besoin_of_mois%')
+            AND NOT EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_stock_physique'
+                                                     AND definition LIKE '%P_JoursInventMachine%')
+            AND NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_besoin_of_mois')",
+    ),
+    (
+        // Les colonnes de l'onglet « À commander » (moteur de couverture, 26/10/2026) :
+        // sans elles, l'onglet s'affiche colonnes masquees, sans message.
+        "2026-10-27a_couverture_champs.sql",
+        "SELECT (SELECT count(*) FROM champ_configurable
+                  WHERE module = 'PLAN_ACHAT'
+                    AND champ IN ('disponible_kg', 'couvert_jusqu_au', 'premiere_rupture', 'plan_non_couvert_kg',
+                                  'date_limite_commande', 'transit_kg')) = 6",
+    ),
+    (
         // La ligne de facture d'import recue figee tout entiere (24/10/2026) :
         // lot, couleur, bobines, palettes et libelle refuses aussi (IMPORT-FIGEE).
         "2026-10-24c_import_ligne_recue_figee.sql",
@@ -184,18 +214,15 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
             AND to_regclass('public.v_ctl_c63') IS NOT NULL",
     ),
     (
-        // L'OF, lot B (22/10/2026) : le besoin au-dela du plan. Les OF retenus
-        // consomment le plan (v_besoin_of_mois, v_besoin_mois) ; besoin du plan /
-        // au-dela du plan sur v_besoin_12m, v_stock_projete, v_besoin_horizon_of ;
-        // l'ajustement dans v_besoin_horizon ; C64.
+        // L'OF, lot B (22/10/2026) : les vues du besoin par OF, les colonnes du
+        // besoin du plan / au-dela du plan, C64. L'ajustement des OF dans le besoin
+        // est retire par 2026-10-27b (le plan seul) : le temoin ne l'exige plus.
         "2026-10-22c_besoin_of.sql",
         "SELECT to_regclass('public.v_besoin_of_mois') IS NOT NULL
             AND to_regclass('public.v_besoin_horizon_of') IS NOT NULL
             AND to_regclass('public.v_ctl_c64') IS NOT NULL
             AND EXISTS (SELECT 1 FROM information_schema.columns
-                         WHERE table_name = 'v_stock_projete' AND column_name = 'besoin_au_dela_12m_kg')
-            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_besoin_horizon'
-                                                 AND definition LIKE '%v_besoin_of_mois%')",
+                         WHERE table_name = 'v_stock_projete' AND column_name = 'besoin_au_dela_12m_kg')",
     ),
     (
         // L'OF, lot A (22/10/2026) : cycle garde en base, consommation reelle

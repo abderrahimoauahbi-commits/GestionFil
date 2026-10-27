@@ -1,9 +1,17 @@
 /**
  * L'ONGLET « À COMMANDER » DU PLAN D'ACHAT (étape 2 du plan du 26/10/2026).
  *
- * Il LIT le moteur de couverture (`GET /api/couverture`, `GET /api/couverture/{ref}`)
- * et n'écrit rien : la proposition est calculée par le moteur, la décision reste
- * au directeur. La fenêtre « Commander » n'y est pas encore branchée (étape 4).
+ * Il LIT le moteur de couverture (`GET /api/couverture`, `GET /api/couverture/{ref}`) :
+ * la proposition est calculée par le moteur, la décision reste au directeur.
+ * « Commander » (27/10/2026) régénère la proposition d'achat de la référence
+ * depuis ce même moteur, puis l'ouvre dans les lignes à commander du plan
+ * d'achat, où l'acheteur choisit kg ou palettes — jamais de palette pleine par
+ * défaut.
+ *
+ * L'ordre (27/10/2026) : la première rupture la plus proche d'abord (une rupture
+ * aujourd'hui en tête, sans rupture en dernier), puis la date limite de commande.
+ * Une référence sans plan ni stock mais avec un arrivage, même hors couverture,
+ * est listée, ses kilos hors couverture sur la ligne ↳.
  *
  * Vocabulaire tenu : un déficit est un « plan non couvert à partir du … », jamais
  * une dette ; il n'est ni reporté ni rattrapé — le solde projeté ne descend pas
@@ -17,11 +25,11 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, CornerDownRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, CornerDownRight, ShoppingCart } from 'lucide-react'
 import { api } from '../api/client'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { BarreFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
-import { Alerte, Badge, Chargement } from '../composants/ui/base'
+import { Alerte, Badge, Bouton, Chargement } from '../composants/ui/base'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'PLAN_ACHAT'
@@ -67,6 +75,9 @@ interface LigneCouverture extends Record<string, unknown> {
   en_retard_kg?: number
   sans_date_kg?: number
   transit_kg?: number
+  /** Bons non validés et bons livrés après l'horizon : non comptés, montrés (27/10/2026). */
+  non_valide_kg?: number
+  apres_horizon_kg?: number
 }
 
 interface EnteteCouverture {
@@ -325,6 +336,8 @@ function partsInformation(l: LigneCouverture) {
     positif(l.en_retard_kg) && `en retard ${kg(l.en_retard_kg)} kg`,
     positif(l.sans_date_kg) && `sans date ${kg(l.sans_date_kg)} kg`,
     positif(l.transit_kg) && `en route ${kg(l.transit_kg)} kg`,
+    positif(l.non_valide_kg) && `bons non validés ${kg(l.non_valide_kg)} kg`,
+    positif(l.apres_horizon_kg) && `après l’horizon ${kg(l.apres_horizon_kg)} kg`,
   ].filter(Boolean) as string[]
   const vide = !dont.length && !nonComptes.length && !horsCouverture.length
   return { dont, nonComptes, horsCouverture, vide }
@@ -346,7 +359,15 @@ function LigneInformation({ l }: { l: LigneCouverture }) {
   )
 }
 
-export function ACommander() {
+export function ACommander({
+  commander,
+  enCommande,
+}: {
+  /** « Commander » : la proposition de la référence part dans les lignes à commander. Absent : lecture seule. */
+  commander?: (l: LigneCouverture) => void
+  /** La référence dont la commande se prépare (bouton en attente). */
+  enCommande?: string | null
+} = {}) {
   const q = useQuery({
     queryKey: ['couverture'],
     queryFn: ({ signal }) => api.get<ListeCouverture>('/api/couverture', { signal }),
@@ -596,7 +617,31 @@ export function ACommander() {
         placeholderRecherche="Référence, désignation, fournisseur..."
         tailleParDefaut={50}
         videTitre="Aucune référence"
-        videDescription="Aucune référence n’a de demande au plan en service ni de stock."
+        videDescription="Aucune référence n’a de demande au plan en service, de stock ni d’arrivage."
+        actions={
+          commander
+            ? (l) =>
+                positif(l.qte_a_commander_kg) ? (
+                  // Icône seule sous 1536 px : la ligne garde sa date limite à 1366 px.
+                  <Bouton
+                    taille="xs"
+                    variante="contour"
+                    className="px-1.5 2xl:px-2"
+                    chargement={enCommande === l.code_reference}
+                    disabled={!!enCommande && enCommande !== l.code_reference}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      commander(l)
+                    }}
+                    aria-label={`Commander ${l.code_reference}`}
+                    title="Préparer la commande : la proposition s’ouvre dans les lignes à commander, en kg ou en palettes"
+                  >
+                    <ShoppingCart />
+                    <span className="hidden 2xl:inline">Commander</span>
+                  </Bouton>
+                ) : null
+            : undefined
+        }
         detail={(l) => {
           const ouvert = !!ouverts[l.code_reference]
           const aInfo = !partsInformation(l).vide
@@ -617,7 +662,8 @@ export function ACommander() {
 // Le détail d'une référence
 // ============================================================================
 
-function DetailReference({ reference }: { reference: string }) {
+/** Le détail d'une référence : aussi déplié sous une proposition de l'onglet Besoins. */
+export function DetailReference({ reference }: { reference: string }) {
   const q = useQuery({
     queryKey: ['couverture', reference],
     queryFn: ({ signal }) =>

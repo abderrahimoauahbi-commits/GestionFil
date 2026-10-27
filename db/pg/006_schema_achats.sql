@@ -223,6 +223,9 @@ CREATE TABLE plan_achat (
     montant_total_mad   numeric(18,2)    GENERATED ALWAYS AS (quantite_suggeree_kg * prix_estime_mad) STORED,
 
     date_besoin_prevue  text    NOT NULL,
+    -- La date limite de commande de la proposition du moteur de couverture (D
+    -- moins le delai fournisseur) ; l'urgence s'en deduit (2026-10-27c).
+    date_limite_commande date,
     urgence             text    NOT NULL CHECK (urgence IN ('TIER 1','TIER 2','TIER 3','TIER 4')),
     risque_identifie    text,
     action_recommandee  text,

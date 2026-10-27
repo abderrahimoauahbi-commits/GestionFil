@@ -2,9 +2,10 @@
 //! `GET /api/couverture` (la liste) et `GET /api/couverture/{reference}` (le détail).
 //!
 //! Ce module LIT ; le calcul est dans `domain/couverture.rs` (pur, testé sans
-//! base). Il tourne en parallèle de `v_plan_achat` / `v_stock_projete`, qu'il ne
-//! touche pas. Une seule lecture sert les deux routes (toutes les références, ou
-//! une seule) : la liste et le détail ne peuvent pas diverger.
+//! base). Une seule lecture sert les deux routes (toutes les références, ou une
+//! seule) et la génération du plan d'achat (`premieres_propositions`, 27/10/2026 :
+//! « Commander » part de la première proposition du moteur) : la liste, le détail
+//! et la proposition enregistrée ne peuvent pas diverger.
 //!
 //! Ce qui est COMPTÉ aujourd'hui (décisions du 26/10/2026) :
 //!   * le stock des magasins comptés au plan (`inclure_mrp = 1`, hors
@@ -475,6 +476,17 @@ impl Analyse<'_> {
         self.magasin_compte_kg + self.machine_compte_kg + self.quarantaine_kg + self.bloque_kg + self.hors_plan_kg
             > 1e-9
     }
+    /// Un arrivage quel qu'il soit, compté ou non (en retard, sans date, import sans
+    /// bon, transfert en route, bon non validé, après l'horizon).
+    fn a_un_arrivage(&self) -> bool {
+        self.arrivages.iter().any(|a| a.kg > 1e-9)
+    }
+    /// LA LISTE (27/10/2026) : une demande au plan, du stock, OU un arrivage — même
+    /// hors couverture. Une référence sans plan ni stock mais avec 1 250 kg d'import
+    /// sans bon en route doit se voir, avec ses kilos hors couverture.
+    fn a_lister(&self) -> bool {
+        self.resultat.plan_horizon_kg > 0.0 || self.a_du_stock() || self.a_un_arrivage()
+    }
 }
 
 fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
@@ -698,6 +710,8 @@ fn ligne(a: &Analyse) -> Value {
         "en_retard_kg": a.somme("EN_RETARD"),
         "sans_date_kg": a.somme("SANS_DATE"),
         "transit_kg": a.somme("TRANSIT"),
+        "non_valide_kg": a.somme("NON_VALIDE"),
+        "apres_horizon_kg": a.somme("APRES_HORIZON"),
     })
 }
 
@@ -721,28 +735,64 @@ fn entete(d: &Donnees) -> Value {
 }
 
 // ============================================================================
+// Ce que le plan d'achat reprend (« Commander », 27/10/2026)
+// ============================================================================
+
+/// La PREMIÈRE proposition du moteur pour une référence, telle que la génération
+/// du plan d'achat (`domain/plan_achat.rs`) l'enregistre : quantité et dates
+/// viennent d'ici ; prix, devise, unité et fournisseur restent ceux d'avant.
+#[derive(Debug, Clone)]
+pub struct PremiereProposition {
+    pub code_reference: String,
+    pub quantite_kg: f64,
+    /// D, la date de disponibilité : elle devient la date de besoin de la
+    /// proposition, puis la date de livraison prévue de la ligne de bon.
+    pub date_disponibilite: NaiveDate,
+    pub date_limite_commande: NaiveDate,
+    /// Ce que l'arrondi au multiple (palette de la fiche, ou multiple d'achat) a
+    /// ajouté au besoin après le minimum de commande : jamais une palette imposée.
+    pub complement_multiple_kg: f64,
+}
+
+/// Les premières propositions du moteur, une par référence ACTIVE qui en a une
+/// (toutes, ou la seule référence demandée), avec la date du jour du calcul.
+pub async fn premieres_propositions(
+    db: &Db,
+    reference: Option<&str>,
+) -> AppResult<(NaiveDate, Vec<PremiereProposition>)> {
+    let d = charger(db, reference).await?;
+    let mut sortie = Vec::new();
+    for fiche in d.fiches.values().filter(|f| f.actif) {
+        let a = analyser(&d, fiche);
+        if let Some(p) = a.resultat.propositions.first().filter(|p| p.quantite_proposee_kg > 0.0) {
+            sortie.push(PremiereProposition {
+                code_reference: fiche.code_reference.clone(),
+                quantite_kg: arrondi_kg(p.quantite_proposee_kg),
+                date_disponibilite: p.date_disponibilite,
+                date_limite_commande: p.date_limite_commande,
+                complement_multiple_kg: arrondi_kg((p.quantite_proposee_kg - p.apres_minimum_kg).max(0.0)),
+            });
+        }
+    }
+    Ok((d.aujourdhui, sortie))
+}
+
+// ============================================================================
 // Les routes
 // ============================================================================
 
-/// `GET /api/couverture` — une ligne par référence qui a une demande au plan ou
-/// du stock (compté ou non), triée par date limite de commande puis rupture.
+/// `GET /api/couverture` — une ligne par référence qui a une demande au plan, du
+/// stock (compté ou non) ou un arrivage (compté ou non), triée par PREMIÈRE
+/// RUPTURE (la plus proche en tête, sans rupture en dernier) puis par date limite
+/// de commande (27/10/2026).
 pub async fn liste(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
     let d = charger(&state.db, None).await?;
-    let mut analyses: Vec<Analyse> = d
-        .fiches
-        .values()
-        .map(|f| analyser(&d, f))
-        .filter(|a| a.resultat.plan_horizon_kg > 0.0 || a.a_du_stock())
-        .collect();
+    let mut analyses: Vec<Analyse> = d.fiches.values().map(|f| analyser(&d, f)).filter(Analyse::a_lister).collect();
     analyses.sort_by(|x, y| {
-        let cle = |a: &Analyse| {
-            (
-                a.resultat.propositions.first().map(|p| p.date_limite_commande).unwrap_or(NaiveDate::MAX),
-                a.resultat.premiere_rupture.unwrap_or(NaiveDate::MAX),
-            )
-        };
-        cle(x).cmp(&cle(y)).then_with(|| x.fiche.code_reference.cmp(&y.fiche.code_reference))
+        couverture::cle_tri(&x.resultat)
+            .cmp(&couverture::cle_tri(&y.resultat))
+            .then_with(|| x.fiche.code_reference.cmp(&y.fiche.code_reference))
     });
     let mut v = entete(&d);
     v["lignes"] = Value::Array(analyses.iter().map(ligne).collect());

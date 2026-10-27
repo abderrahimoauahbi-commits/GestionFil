@@ -13,10 +13,14 @@
  * Regenerer efface celles qui n'engagent rien et refait la photo ; celles qui
  * ont produit un bon de commande, et celles qu'on a ecartees, survivent.
  *
- * La quantite proposee suit le plan de production, et lui seul (10/10/2026 : pas
- * de stock minimum) : sorties de la fenetre de commande + securite - stock
- * projete, puis le MOQ, la palette et l'en-cours fournisseur — ce dernier terme
- * evite de recommander ce qui est deja en route.
+ * LA PROPOSITION VIENT DU MOTEUR DE COUVERTURE (basculement du 27/10/2026) :
+ * la premiere proposition de chaque reference (plan seul, projection jour par
+ * jour, securite, minimum de commande, arrondi au multiple), D comme date de
+ * besoin, la date limite de commande, l'urgence qui s'en deduit. Prix, devise,
+ * unite et fournisseur : inchanges. L'onglet « À commander » montre le calcul ;
+ * son bouton « Commander » regenere la proposition de la reference et l'ouvre
+ * dans les lignes a commander. Les onglets Situation et Par fournisseur lisent
+ * encore l'ancien calcul (`v_plan_achat`), fige a la generation.
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -41,8 +45,7 @@ import {
 import { Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { depuisBobines, depuisKg, depuisPalettes, pourChamp, type Conditionnement } from '../lib/conditionnement'
-import { DetailCalcul } from './PlanAchatDetail'
-import { ACommander } from './PlanAchatCouverture'
+import { ACommander, DetailReference } from './PlanAchatCouverture'
 import { useParametreNombre } from '../lib/parametres'
 import { ChoixRecherche } from '../composants/ChoixRecherche'
 import { StatutBadge } from '../composants/StatutBadge'
@@ -85,6 +88,8 @@ interface Proposition extends Record<string, unknown> {
   /** Ce que l'arrondi a la palette pleine ajoute au besoin (kg). */
   complement_palette_kg?: number | null
   date_besoin_prevue: string
+  /** La date limite de commande du moteur de couverture (27/10/2026) ; vide avant. */
+  date_limite_commande?: string | null
   urgence: string
   risque_identifie: string | null
   classe_abc: string | null
@@ -197,6 +202,7 @@ export function PlanAchat() {
         tier1: number
         propositions_figees: number
         propositions_arbitrees: number
+        references_non_proposees?: string[]
       }>('/api/plan-achat/generer'),
     onSuccess: async (r) => {
       // Annoncer les lignes preservees evite de laisser croire que le calcul a
@@ -210,9 +216,16 @@ export function PlanAchat() {
               .filter(Boolean)
               .join(' et ') + ' conservees telles quelles.'
           : undefined
+      // Ce que le moteur propose sans pouvoir l'acheter (fiche sans fournisseur ou
+      // sans prix) : dit, jamais ecarte en silence (27/10/2026).
+      const sans = r.references_non_proposees ?? []
+      const nonProposees = sans.length
+        ? `${sans.length} référence(s) non proposée(s) : ${sans.slice(0, 3).join(' ; ')}${sans.length > 3 ? '…' : ''}`
+        : undefined
+      const description = [preservees, nonProposees].filter(Boolean).join(' ') || undefined
       toast.success(
         `${r.propositions_generees} proposition(s) · ${fmt.mad(r.budget_total_mad)} · ${r.tier1} en TIER 1.`,
-        { description: preservees, duration: preservees ? 9000 : 5000 },
+        { description, duration: description ? 9000 : 5000 },
       )
       setCoches({})
       await rafraichir()
@@ -244,6 +257,27 @@ export function PlanAchat() {
       await rafraichir()
     },
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Conversion impossible.'),
+  })
+
+  // « COMMANDER » DEPUIS L'ONGLET À COMMANDER (27/10/2026) : la proposition de la
+  // reference se regenere depuis le moteur (les figees et arbitrees restent
+  // telles quelles), puis s'ouvre, cochee, dans les lignes a commander.
+  const preparer = useMutation({
+    mutationFn: (reference: string) =>
+      api.post<{ id_proposition?: string }>(
+        `/api/plan-achat/generer?reference=${encodeURIComponent(reference)}`,
+      ),
+    onSuccess: async (r) => {
+      await qc.invalidateQueries({ queryKey: ['plan-achat-propositions'] })
+      const id = r.id_proposition
+      if (!id) {
+        toast.error('Aucune proposition ouverte pour cette référence.')
+        return
+      }
+      setCoches((c) => ({ ...c, [id]: true }))
+      setOnglet('lignes')
+    },
+    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Préparation de la commande impossible.'),
   })
 
   const ignorer = useMutation({
@@ -317,7 +351,7 @@ export function PlanAchat() {
             setDeplies((d) => ({ ...d, [p.id_proposition]: !d[p.id_proposition] }))
           }}
           aria-label="Voir le calcul"
-          title="D’où viennent ces kilos : stock, machine, en-cours, demande, sécurité"
+          title="D’où viennent ces kilos : le calcul du moteur de couverture (plan, stock, arrivages, sécurité)"
         >
           {deplies[p.id_proposition] ? <ChevronDown /> : <ChevronRight />}
         </Bouton>
@@ -534,12 +568,22 @@ export function PlanAchat() {
       entete: 'Palettes',
       numerique: true,
       largeur: '90px',
-      rendu: (p) =>
-        p.palettes_a_commander == null ? (
-          <span className="text-attenue-texte">—</span>
+      // Les palettes ne sont qu'un EQUIVALENT (21/10/2026 : jamais de palette
+      // pleine par defaut) : la proposition du moteur n'en porte pas, l'ecran
+      // les deduit du conditionnement de la fiche ; l'acheteur choisit kg ou
+      // palettes dans les lignes a commander.
+      rendu: (p) => {
+        if (p.palettes_a_commander != null)
+          return <span className="tabular-nums">{fmt.entier(p.palettes_a_commander)}</span>
+        const kgPalette = (p.poids_bobine_kg ?? 0) * (p.bobines_par_palette ?? 0)
+        return kgPalette > 0 ? (
+          <span className="tabular-nums text-attenue-texte" title="Équivalent en palettes ordinaires de la fiche, pour information">
+            ≈ {fmt.nombre(p.quantite_suggeree_kg / kgPalette, 1)}
+          </span>
         ) : (
-          <span className="tabular-nums">{fmt.entier(p.palettes_a_commander)}</span>
-        ),
+          <span className="text-attenue-texte">—</span>
+        )
+      },
     },
     {
       // LE COMPLEMENT DE PALETTE : ce qui est commande pour fermer la palette,
@@ -558,11 +602,19 @@ export function PlanAchat() {
         ),
     },
     {
+      // D, LA DATE DE DISPONIBILITE du moteur : elle devient la date de livraison
+      // prevue de la ligne de bon.
       champ: 'date_besoin_prevue',
       entete: 'Besoin le',
       largeur: '110px',
       secondaire: true,
       rendu: (p) => fmt.date(p.date_besoin_prevue),
+    },
+    {
+      champ: 'date_limite_commande',
+      entete: 'Commander avant le',
+      largeur: '120px',
+      rendu: (p) => (p.date_limite_commande ? fmt.date(p.date_limite_commande) : <span className="text-attenue-texte">—</span>),
     },
   ]
 
@@ -570,7 +622,7 @@ export function PlanAchat() {
     <div>
       <EnTetePage
         titre="Plan d'achat"
-        description="Propositions issues du MRP. Convertir ouvre un bon de commande en brouillon : rien n'est engagé avant sa validation."
+        description="Propositions du moteur de couverture (plan de production seul). Convertir ouvre un bon de commande en brouillon : rien n'est engagé avant sa validation."
       />
 
       {/* LES ONGLETS (demandes des 30/09 et 01/10/2026). Le travail se fait en
@@ -603,15 +655,18 @@ export function PlanAchat() {
             <Gauge className="size-3.5" />
             Situation
           </Onglet>
-          {/* LE MOTEUR DE COUVERTURE (26/10/2026), en parallèle de l'existant :
-              lecture seule, rien n'y est encore commandé (étape 4). */}
+          {/* LE MOTEUR DE COUVERTURE (26/10/2026) : son calcul, et « Commander »
+              (27/10/2026), qui ouvre la proposition dans les lignes à commander. */}
           <Onglet value="a-commander">
             <CalendarClock className="size-3.5" />
             À commander
           </Onglet>
         </OngletsListe>
         <OngletContenu value="a-commander">
-          <ACommander />
+          <ACommander
+            commander={droits.peutEcrire ? (l) => preparer.mutate(l.code_reference) : undefined}
+            enCommande={preparer.isPending ? (preparer.variables ?? null) : null}
+          />
         </OngletContenu>
         <OngletContenu value="situation">
       {/* ---- KPI : les trois blocs de la feuille Plan_Achat -------------------
@@ -858,7 +913,7 @@ export function PlanAchat() {
         chargement={q.isLoading}
         erreur={q.error}
         cle={(p) => p.id_proposition}
-        detail={(p) => (deplies[p.id_proposition] ? <DetailCalcul reference={p.code_reference} /> : null)}
+        detail={(p) => (deplies[p.id_proposition] ? <DetailReference reference={p.code_reference} /> : null)}
         titreCarte={(p) => p.code_reference}
         placeholderRecherche="Référence, fournisseur, urgence..."
         tailleParDefaut={50}
@@ -1255,6 +1310,11 @@ function LignesACommander({
                           <div className="font-medium">{p.code_reference}</div>
                           {p.designation && <div className="text-[11px] text-attenue-texte">{p.designation}</div>}
                           <StatutBadge entite="urgence_achat" code={p.urgence} />
+                          {/* Les dates du moteur : D devient la livraison prévue de la ligne. */}
+                          <div className="mt-0.5 text-[11px] text-attenue-texte">
+                            livraison prévue {fmt.date(p.date_besoin_prevue)}
+                            {p.date_limite_commande && <> · commander avant le {fmt.date(p.date_limite_commande)}</>}
+                          </div>
                         </td>
                         <td className="px-2 py-1.5">
                           <div className="flex items-center gap-1">

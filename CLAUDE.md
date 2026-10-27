@@ -218,8 +218,15 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
   (bobines = capacité de l'étage / largeur de la machine × voie, entier, au-delà un signal C63) ; **l'écart d'un constat
   appartient à l'OF sortant** (`machine_decision_ligne.id_of_periode`). Hors machine : `/fiche-hors-machine`,
   CONSO_DIRECTE sur l'OF puis RETOUR_CONSO du reste. Consommation par OF et par qualité : `v_of_consommation`,
-  `v_of_bilan`, `v_qualite_consommation`. Besoin = OF retenus (reste) + plan non couvert (`fn_besoin_of_mois`, en aval
-  du MRP, `mrp.rs` inchangé) : colonnes « au-delà du plan » du stock projeté et du plan d'achat, `GET /api/stock/besoin`.
+  `v_of_bilan`, `v_qualite_consommation`. Le besoin « OF retenus + plan non couvert » de `22c` est **remplacé par
+  le plan seul** (`2026-10-27b`, exigée au démarrage) : l'OF ne sert que l'axe production / statistiques (C64 signale
+  toujours un OF au-delà du plan) ; le fil sur machine compte au dernier constat, quel que soit son âge.
+- **Moteur de couverture et « Commander »** (26–27/10/2026) : `domain/couverture.rs` (calcul pur, testé),
+  `routes/couverture.rs` (`GET /api/couverture[/{ref}]`, onglet « À commander » de `PlanAchatCouverture.tsx`, trié par
+  1re rupture puis date limite de commande). **La génération du plan d'achat (`domain/plan_achat.rs`) prend la 1re
+  proposition du moteur** (quantité, D = date de besoin, date limite, urgence déduite) ; prix / devise / fournisseur
+  inchangés ; `POST /api/plan-achat/generer?reference=` = bouton « Commander » (une seule référence). `v_plan_achat`
+  ne sert plus qu'aux onglets Situation / Par fournisseur. Migrations `2026-10-27a` à `27c`, exigées au démarrage.
   Pas de fiche de production (abandonnée, viendra de l'ERP de production).
 - Décisions du 23/10/2026 : **le conditionnement est par lot** (`2026-10-23a` : `lot.poids_bobine_kg`,
   `lot.bobines_par_palette`, mesurés à la réception, corrigés par `POST /api/lots/conditionnement` ; toute conversion sur

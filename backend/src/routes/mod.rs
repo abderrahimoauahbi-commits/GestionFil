@@ -11,7 +11,7 @@ mod briefing;
 mod completion;
 pub(crate) mod auth_routes;
 mod consultation;
-mod couverture;
+pub(crate) mod couverture;
 mod devalidation;
 mod entites;
 mod factures;

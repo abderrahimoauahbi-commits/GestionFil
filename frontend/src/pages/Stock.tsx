@@ -56,10 +56,8 @@ interface LigneProjete {
   kg_sur_machine?: number
   /** Ce que le calcul compte du fil sur machine (constat recent, lot non bloque, reglage). */
   stock_machine_kg?: number
+  /** Le besoin du plan seul (27/10/2026 : les OF n'y entrent plus). */
   besoin_12m_kg: number
-  /** Le besoin se decompose (22/10/2026) : la part du plan, la part des OF au-dela du plan. */
-  besoin_plan_12m_kg?: number
-  besoin_au_dela_12m_kg?: number
   stock_projete_kg: number
   jours_couverture: number | null
   /** Bornes de l'echelle logique, servies par la vue : la jauge s'y gradue. */
@@ -464,9 +462,9 @@ export function Stock() {
     {
       /* LE FIL SUR MACHINE (regle 9, 08/10/2026) : hors du magasin — le
          « Physique » ne le contient pas. La colonne montre ce que le calcul des
-         besoins COMPTE (P_MrpInclureStockMachine, etage constate depuis moins de
-         P_JoursInventMachine jours, lot non bloque) ; le reste, s'il y en a, est
-         signale a cote (audit v5, F16). */
+         besoins COMPTE (P_MrpInclureStockMachine, lot non bloque ; au dernier
+         constat QUEL QUE SOIT SON AGE depuis le 27/10/2026) ; le reste, s'il y
+         en a, est signale a cote (audit v5, F16). */
       // Le champ declare dans la grille (kg_sur_machine) porte la colonne ; la
       // valeur affichee est celle que le calcul compte.
       champ: 'kg_sur_machine',
@@ -478,7 +476,7 @@ export function Stock() {
         const total = l.kg_sur_machine ?? 0
         if (!total) return '—'
         return (
-          <span title={total - compte > 0.05 ? `${fmt.nombre(total, 1)} kg sur machine, dont ${fmt.nombre(total - compte, 1)} non comptés (constat ancien ou lot bloqué)` : undefined}>
+          <span title={total - compte > 0.05 ? `${fmt.nombre(total, 1)} kg sur machine, dont ${fmt.nombre(total - compte, 1)} non comptés (lot bloqué)` : undefined}>
             {fmt.nombre(compte, 1)}
             {total - compte > 0.05 && <span className="text-attenue-texte"> / {fmt.nombre(total, 1)}</span>}
           </span>
@@ -549,27 +547,6 @@ export function Stock() {
       numerique: true,
       secondaire: true,
       rendu: (l) => (l.besoin_12m_kg == null ? '—' : fmt.nombre(l.besoin_12m_kg, 1)),
-    },
-    {
-      champ: 'besoin_plan_12m_kg',
-      entete: 'dont plan',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => (l.besoin_plan_12m_kg == null ? '—' : fmt.nombre(l.besoin_plan_12m_kg, 1)),
-    },
-    {
-      /* LES OF AU-DELA DU PLAN (22/10/2026) : ce que les ordres de fabrication
-         demandent en plus du plan du mois. Un clic sur la ligne dit lesquels. */
-      champ: 'besoin_au_dela_12m_kg',
-      entete: 'Au-delà du plan',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) =>
-        !l.besoin_au_dela_12m_kg ? (
-          <span className="text-attenue-texte">—</span>
-        ) : (
-          <span className="font-medium text-alerte">{fmt.nombre(l.besoin_au_dela_12m_kg, 1)}</span>
-        ),
     },
     {
       champ: 'delai_livraison_jours',

@@ -16,6 +16,11 @@ use serde_json::{json, Value};
 #[derive(Debug, Deserialize)]
 pub struct ParamsPlanAchat {
     pub id_plan: Option<String>,
+    /// UNE SEULE REFERENCE (27/10/2026) : le bouton « Commander » de l'onglet
+    /// À commander regenere sa proposition depuis le moteur, puis l'ouvre dans
+    /// les lignes a commander. Absent : tout le plan d'achat.
+    #[serde(default)]
+    pub reference: Option<String>,
 }
 
 pub async fn figer_recettes(
@@ -54,10 +59,15 @@ pub async fn generer_plan_achat(
     Query(p): Query<ParamsPlanAchat>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Ecrire).await?;
-    let r = plan_achat::generer(&state.db, &user, p.id_plan.as_deref()).await?;
+    let reference = p.reference.as_deref().map(str::trim).filter(|r| !r.is_empty());
+    let r = plan_achat::generer(&state.db, &user, p.id_plan.as_deref(), reference).await?;
     // Les indicateurs se calculent ICI, une fois, et l'ecran les lit ensuite
-    // (21/10/2026 : 4 a 7 s a chaque ouverture quand il les recalculait).
-    crate::routes::consultation::figer_kpi_plan_achat(&state.db, &user).await?;
+    // (21/10/2026 : 4 a 7 s a chaque ouverture quand il les recalculait). Une
+    // seule reference regeneree ne les refait pas : ils restent ceux du dernier
+    // calcul complet, dates.
+    if reference.is_none() {
+        crate::routes::consultation::figer_kpi_plan_achat(&state.db, &user).await?;
+    }
     // Le budget total se masque comme les montants estimes (audit du 13/10/2026).
     let mut v = serde_json::to_value(r)?;
     user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;

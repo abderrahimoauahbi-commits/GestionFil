@@ -1,12 +1,16 @@
 /**
- * LE CALCUL D'UNE PROPOSITION, PAS A PAS (audit v5, F16). Deplie sous la ligne
- * du plan d'achat : l'acheteur voit d'ou viennent les kilos avant de commander.
+ * L'ANCIEN CALCUL D'UNE PROPOSITION, PAS A PAS (audit v5, F16 ; `v_plan_achat`).
+ *
+ * PLUS MONTE DEPUIS LE 27/10/2026 : les propositions viennent du moteur de
+ * couverture, et la ligne du plan d'achat deplie son detail a lui
+ * (`DetailReference` de PlanAchatCouverture). Garde au depot, l'utilisateur
+ * decidera de son sort.
  *
  *   magasin net + machine comptee + en-cours − demande pendant le delai
  *     = stock projete (residuel : jamais sous zero)
  *   besoin = sorties de la couverture + securite − residuel
- *            (le plan de production et les OF : pas de stock minimum, 10/10/2026 ;
- *             les OF consomment le plan, ce qui le depasse se montre, 22/10/2026)
+ *            (le plan de production seul : pas de stock minimum, 10/10/2026 ;
+ *             les OF n'entrent plus dans le besoin, 27/10/2026)
  *   puis le MOQ du fournisseur, puis la palette complete.
  *
  * Le calcul est celui d'aujourd'hui : une proposition generee hier peut en
@@ -31,9 +35,6 @@ interface Calcul {
   nb_lignes_retardees: number
   demande_delai_kg: number
   demande_delai_prolongee_kg: number
-  /** La part de la demande que les OF ajoutent au plan (22/10/2026). */
-  demande_delai_au_dela_kg?: number
-  sorties_au_dela_kg?: number
   residuel_kg: number
   sorties_fenetre_kg: number
   sorties_prolongees_kg: number
@@ -57,7 +58,7 @@ interface Detail {
             tier: string | null; budget_annuel_mad: number | null } | null
   bons: { numero_bc: string; date_livraison_prevue: string | null; reste_kg: number; en_retard: boolean }[]
   port: { numero_dossier: string; numero_facture: string; reste_kg: number }[]
-  machine: { code_emplacement: string; lot_fournisseur: string | null; kg: number; date_constat: string | null; lot_bloque: boolean; constat_ancien: boolean }[]
+  machine: { code_emplacement: string; lot_fournisseur: string | null; kg: number; date_constat: string | null; lot_bloque: boolean }[]
 }
 
 const kg = (v: number | null | undefined) => fmt.nombre(v ?? 0, 0)
@@ -106,18 +107,12 @@ export function DetailCalcul({ reference }: { reference: string }) {
             )}
             {c.encours_port_kg > 0 && <Ligne signe="+" libelle="Marchandise au port" valeur={c.encours_port_kg} />}
             <Ligne signe="−" libelle="Demande pendant le délai" valeur={c.demande_delai_kg}
-              note={[
-                c.demande_delai_prolongee_kg > 0 ? `dont ${kg(c.demande_delai_prolongee_kg)} kg au-delà de la fin du plan` : '',
-                (c.demande_delai_au_dela_kg ?? 0) > 0.5 ? `dont ${kg(c.demande_delai_au_dela_kg)} kg d’OF au-delà du plan` : '',
-              ].filter(Boolean).join(' ; ') || undefined} />
+              note={c.demande_delai_prolongee_kg > 0 ? `dont ${kg(c.demande_delai_prolongee_kg)} kg au-delà de la fin du plan` : undefined} />
             <Ligne signe="=" libelle="Stock projeté à l’arrivée" valeur={projete} fort
               note={projete < 0 ? 'rupture avant l’arrivée : compté zéro' : undefined} />
             <tr><td colSpan={4} className="h-2" /></tr>
             <Ligne libelle="Sorties de la couverture" valeur={c.sorties_fenetre_kg}
-              note={[
-                c.sorties_prolongees_kg > 0 ? `dont ${kg(c.sorties_prolongees_kg)} kg prolongés` : '',
-                (c.sorties_au_dela_kg ?? 0) > 0.5 ? `dont ${kg(c.sorties_au_dela_kg)} kg d’OF au-delà du plan` : '',
-              ].filter(Boolean).join(' ; ') || undefined} />
+              note={c.sorties_prolongees_kg > 0 ? `dont ${kg(c.sorties_prolongees_kg)} kg prolongés` : undefined} />
             <Ligne signe="+" libelle="Sécurité" valeur={c.securite_kg} />
             <Ligne signe="−" libelle="Stock projeté retenu" valeur={c.residuel_kg} />
             {(c.moq_kg ?? 0) > 0 && <Ligne libelle="Minimum de commande (MOQ)" valeur={c.moq_kg ?? 0} />}
@@ -190,9 +185,9 @@ export function DetailCalcul({ reference }: { reference: string }) {
                 <li key={i} className="flex gap-3">
                   <span className="font-medium">{m.code_emplacement}</span>
                   <span className="text-attenue-texte">{m.lot_fournisseur ?? ''}</span>
-                  <span className={cn('tabular-nums', (m.constat_ancien || m.lot_bloque) && 'text-alerte')}>
+                  <span className={cn('tabular-nums', m.lot_bloque && 'text-alerte')}>
                     {m.date_constat ? `constaté le ${fmt.date(m.date_constat)}` : 'jamais constaté'}
-                    {m.lot_bloque ? ' — lot bloqué, non compté' : m.constat_ancien ? ' — trop ancien, non compté' : ''}
+                    {m.lot_bloque ? ' — lot bloqué, non compté' : ''}
                   </span>
                   <span className="ml-auto tabular-nums">{kg(m.kg)} kg</span>
                 </li>

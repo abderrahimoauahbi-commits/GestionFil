@@ -1,9 +1,10 @@
 //! LE MOTEUR DE COUVERTURE (étape 1 du plan validé le 26/10/2026).
 //!
 //! Calcul PUR, sur des structures en mémoire : il ne lit ni n'écrit la base
-//! (la lecture est dans `routes/couverture.rs`). Il tourne EN PARALLÈLE de
-//! l'existant (`v_plan_achat`, `v_stock_projete`, `domain/plan_achat.rs`), qu'il
-//! ne remplace pas encore.
+//! (la lecture est dans `routes/couverture.rs`). Depuis le basculement du
+//! 27/10/2026, sa première proposition par référence est celle que la génération
+//! du plan d'achat enregistre (`domain/plan_achat.rs`) et que « Commander » envoie
+//! au bon ; `v_plan_achat` ne sert plus qu'aux indicateurs de l'onglet Situation.
 //!
 //! Les règles, décidées par la direction (mémoire « restes-informatifs-projection ») :
 //!
@@ -133,7 +134,9 @@ pub struct Proposition {
     pub date_au_plus_tot: NaiveDate,
     /// D : date de disponibilité de la commande.
     pub date_disponibilite: NaiveDate,
-    /// « délai » si D = aujourd'hui + délai, « sécurité » si D = le passage sous la sécurité.
+    /// « délai » si D = aujourd'hui + délai (le délai impose la date, même quand la
+    /// sécurité est franchie ce jour-là ou avant) ; « sécurité » si le passage sous
+    /// la sécurité tombe APRÈS aujourd'hui + délai et fixe D.
     pub motif_date: &'static str,
     /// F : fin de la fenêtre, EXCLUE (la fenêtre est [D, F[).
     pub date_fin_fenetre: NaiveDate,
@@ -179,6 +182,29 @@ pub struct Couverture {
 fn r4(v: f64) -> f64 {
     // « + 0.0 » efface le zéro négatif (−0,00001 arrondi s'afficherait « -0 »).
     (v * 10_000.0).round() / 10_000.0 + 0.0
+}
+
+/// Le motif de la date D (indices de jours, 0 = aujourd'hui) : D = MAX(délai,
+/// passage sous la sécurité). Quand D tombe sur aujourd'hui + délai, c'est le délai
+/// qui l'impose — même si la sécurité est franchie ce jour-là ou avant (27/10/2026).
+fn motif_date(d: usize, delai: usize) -> &'static str {
+    if d == delai {
+        "délai"
+    } else {
+        "sécurité"
+    }
+}
+
+/// L'ORDRE DE LA LISTE « À COMMANDER » (27/10/2026) : d'abord la première rupture
+/// la plus proche (une rupture aujourd'hui en tête, une référence sans rupture en
+/// dernier), puis la date limite de commande de la première proposition (sans
+/// proposition : après). Une référence en rupture aujourd'hui ne descend jamais en
+/// bas de liste parce que sa proposition est lointaine.
+pub fn cle_tri(c: &Couverture) -> (NaiveDate, NaiveDate) {
+    (
+        c.premiere_rupture.unwrap_or(NaiveDate::MAX),
+        c.propositions.first().map(|p| p.date_limite_commande).unwrap_or(NaiveDate::MAX),
+    )
 }
 
 /// Nombre de jours réels d'un mois.
@@ -392,7 +418,7 @@ pub fn calculer(stock_initial: f64, plan: &[MoisPlan], arrivees: &[Arrivee], r: 
             date_sous_securite: date(t),
             date_au_plus_tot: date(delai.min(n - 1)),
             date_disponibilite: date(d),
-            motif_date: if d > t { "délai" } else { "sécurité" },
+            motif_date: motif_date(d, delai),
             date_fin_fenetre: date(f),
             dernier_jour_couvert: date(f - 1),
             fenetre_bornee_horizon: d + couv > n,
@@ -669,6 +695,67 @@ mod tests {
         let non_couvert: f64 = c.jours.iter().map(|x| x.plan_non_couvert_kg).sum();
         assert!(proche(non_couvert, 1600.0), "J4 à J19 : {non_couvert}");
         assert!(proche(c.plan_non_couvert_kg, 1600.0));
+    }
+
+    #[test]
+    fn motif_delai_quand_la_securite_tombe_pile_a_aujourdhui_plus_delai() {
+        // 1 550 kg pour 100 kg/j, sécurité 500 : sous la sécurité en fin de J11 (indice 10),
+        // c'est-à-dire pile à aujourd'hui + délai (10 j). Le délai impose la date : « délai ».
+        let c = calculer(1550.0, &plan_100(), &[], &reglages());
+        let p = &c.propositions[0];
+        assert_eq!(p.date_sous_securite, j(11));
+        assert_eq!(p.date_disponibilite, j(11));
+        assert_eq!(p.motif_date, "délai");
+    }
+
+    #[test]
+    fn motif_delai_quand_la_securite_est_franchie_avant() {
+        // Sous la sécurité dès aujourd'hui : D = aujourd'hui + délai, motif « délai ».
+        let c = calculer(400.0, &plan_100(), &[], &reglages());
+        assert_eq!(c.propositions[0].motif_date, "délai");
+        // Délai nul et sécurité franchie aujourd'hui : D = aujourd'hui = aujourd'hui + 0, « délai ».
+        let mut r = reglages();
+        r.delai_j = 0;
+        let c = calculer(400.0, &plan_100(), &[], &r);
+        assert_eq!(c.propositions[0].date_disponibilite, j(1));
+        assert_eq!(c.propositions[0].motif_date, "délai");
+    }
+
+    #[test]
+    fn motif_securite_seulement_apres_aujourdhui_plus_delai() {
+        // 1 650 kg : sous la sécurité en fin de J12, un jour après aujourd'hui + délai.
+        let c = calculer(1650.0, &plan_100(), &[], &reglages());
+        let p = &c.propositions[0];
+        assert_eq!(p.date_sous_securite, j(12));
+        assert_eq!(p.date_disponibilite, j(12));
+        assert_eq!(p.motif_date, "sécurité");
+        // Les propositions suivantes tombent au-delà du délai : « sécurité ».
+        assert!(c.propositions[1..].iter().all(|p| p.motif_date == "sécurité"));
+    }
+
+    #[test]
+    fn tri_rupture_la_plus_proche_puis_date_limite() {
+        // A : rupture aujourd'hui (stock nul) ; B : rupture lointaine mais commande à passer
+        // aujourd'hui ; C : aucune rupture, aucune proposition.
+        let a = calculer(0.0, &plan_100(), &[Arrivee { date: j(5), kg: 100_000.0 }], &reglages());
+        let b = calculer(1550.0, &plan_100(), &[], &reglages());
+        let c = calculer(100_000.0, &plan_100(), &[], &reglages());
+        assert_eq!(a.premiere_rupture, Some(j(1)));
+        assert!(a.propositions.is_empty() || a.propositions[0].date_limite_commande > b.propositions[0].date_limite_commande);
+        let mut v = [(&c, "C"), (&b, "B"), (&a, "A")];
+        v.sort_by_key(|(x, _)| cle_tri(x));
+        assert_eq!(v.map(|(_, n)| n), ["A", "B", "C"], "rupture d'aujourd'hui en tête, sans rupture en dernier");
+        // La rupture la plus proche passe devant, quelle que soit la date limite.
+        let d = calculer(1650.0, &plan_100(), &[], &reglages());
+        assert_eq!(b.premiere_rupture, d.premiere_rupture.map(|x| x - Duration::days(1)));
+        assert!(cle_tri(&b) < cle_tri(&d));
+        // À rupture égale, la date limite de commande départage : délai 5 j, commander le J6.
+        let mut r5 = reglages();
+        r5.delai_j = 5;
+        let e = calculer(1550.0, &plan_100(), &[], &r5);
+        assert_eq!(e.premiere_rupture, b.premiere_rupture);
+        assert_eq!(e.propositions[0].date_limite_commande, j(6));
+        assert!(cle_tri(&b) < cle_tri(&e));
     }
 
     #[test]

@@ -4230,7 +4230,11 @@ def scenario_migrations_rejouables(c, infra):
     # livre de la consommation, 27/10/2026) : passee 27g, elle ne se rejoue plus, par decision (27g la
     # remplace pour ces vues) ; 27g se rejoue et remet l'etat final.
     for nom in ("2026-10-27c_commande_couverture.sql", "2026-10-27d_transit_date_disponibilite.sql",
-                "2026-10-27f_proposition_bon_annule.sql", "2026-10-27g_grand_livre_consommation.sql"):
+                "2026-10-27f_proposition_bon_annule.sql", "2026-10-27g_grand_livre_consommation.sql",
+                # 27i redefinit v_consommation_fait apres 27g (RETOUR_PROD au reel) : rejouee apres elle,
+                # elle remet l'etat final ; 27h, 27j et 27k se rejouent comme les autres.
+                "2026-10-27h_stock_projete_colonnes.sql", "2026-10-27i_retour_prod_grand_livre.sql",
+                "2026-10-27j_parametres_mrp_orphelins.sql", "2026-10-27k_import_taux_dossier_facultatif.sql"):
         try:
             infra.psql(infra.base, "-q", "-f", str(dossier / nom))
         except RuntimeError as e:

@@ -10,6 +10,13 @@
  */
 import { fmt } from '../../lib/utils'
 
+/** Un signal du moteur (§ 15.4) : indépendant de l'état, il ne bloque jamais. */
+export interface SignalCouverture {
+  code: string
+  date: string | null
+  message: string
+}
+
 export interface LigneCouverture extends Record<string, unknown> {
   code_reference: string
   designation?: string | null
@@ -52,8 +59,23 @@ export interface LigneCouverture extends Record<string, unknown> {
   /** Bons non validés et bons livrés après l'horizon : non comptés, montrés (27/10/2026). */
   non_valide_kg?: number
   apres_horizon_kg?: number
-  /** L'état au moteur : PLAN_NON_COUVERT, SOUS_SECURITE, COUVERT (27/10/2026). */
+  /** L'état au moteur v2 : RUPTURE_INEVITABLE, SOUS_SECURITE, SOUS_CIBLE, COUVERT (§ 15.4). */
   statut?: string
+  /** Les signaux, à part de l'état : CIBLE_NON_DEFINIE, SOUS_MINIMUM, RETARD_CIBLE, HORIZON_COURT, DEFAUT_DONNEES. */
+  signaux?: SignalCouverture[]
+  /** C, la couverture cible (jours = 30 × mois de la fiche), sa valeur en mois et sa source. */
+  couverture_cible_j?: number | null
+  couverture_cible_mois?: number | null
+  source_cible?: string | null
+  /** Couverture actuelle − C (jours). */
+  ecart_cible_j?: number | null
+  /** D* = R − C, la date de besoin. */
+  date_besoin?: string | null
+  /** X, la sécurité appliquée à la 1re proposition. */
+  securite_x_kg?: number
+  /** Le stock minimum de la fiche (garde-fou) et le jour où il est franchi. */
+  stock_min_kg?: number | null
+  sous_minimum_le?: string | null
   a_commander_aujourdhui?: boolean
   arrivages_comptes_kg?: number
   /** Jours couverts depuis aujourd'hui jusqu'à la veille de la 1re rupture ; null : tout l'horizon. */
@@ -73,8 +95,10 @@ export interface LigneCouverture extends Record<string, unknown> {
   stock_total_projete_kg?: number
   /** Le plan de [aujourd'hui, aujourd'hui + délai[. */
   besoin_jusqu_livraison_kg?: number
-  /** La ligne de sécurité du moteur aujourd'hui. */
+  /** NS(aujourd'hui) : le plan des S jours suivants. */
   securite_aujourdhui_kg?: number
+  /** La raison de l'état, en une phrase chiffrée. */
+  raison_etat?: string
 }
 
 export interface EnteteCouverture {
@@ -104,7 +128,11 @@ export interface Jour {
   date: string
   conso_prevue_kg: number
   arrivee_kg: number
+  /** B(t), le solde au soir du jour, sans plafond à zéro. */
   solde_kg: number
+  /** b(t), le point bas du jour, avant ses arrivages. */
+  point_bas_kg?: number
+  /** NS(t), le seuil de sécurité : le plan des S jours suivants. */
   securite_kg: number
   plan_non_couvert_kg: number
 }
@@ -119,31 +147,87 @@ export interface Evenement {
   plan_non_couvert_kg: number
 }
 
+/** Une fenêtre de commande : la rupture R, sa date de besoin D*, sa réception D, son besoin net Q0. */
+export interface Fenetre {
+  date_rupture: string
+  date_besoin: string
+  date_disponibilite: string
+  date_limite_commande: string
+  en_retard: boolean
+  rupture_inevitable: boolean
+  manque_inevitable_kg: number
+  debut: string
+  /** Exclue : la fenêtre est [debut, fin[. */
+  fin: string
+  dernier_jour_couvert: string
+  jours: number
+  bornee_horizon: boolean
+  plan_kg: number
+  reste_kg: number
+  arrivages_kg: number
+  /** Q0 — masqué avec la quantité à commander. */
+  besoin_net_kg?: number
+}
+
+/** Une proposition : Q0 (besoin net) + X (sécurité) + arrondi = Q (§ 15.5). */
 export interface Proposition {
   rang: number
-  date_sous_securite: string
-  date_au_plus_tot?: string
+  /** Plusieurs fenêtres reçues le même jour (cible déjà en retard, § 15.9 bis-2). */
+  consolidee: boolean
+  date_rupture: string
+  date_besoin: string
   date_disponibilite: string
-  motif_date: string
+  date_limite_commande: string
+  en_retard: boolean
+  rupture_inevitable: boolean
+  manque_inevitable_kg: number
+  date_debut_fenetre: string
   date_fin_fenetre: string
   dernier_jour_couvert: string
-  fenetre_bornee_horizon?: boolean
   jours_fenetre: number
+  fenetre_bornee_horizon?: boolean
   plan_fenetre_kg: number
-  conso_moyenne_kg_j: number
-  jours_securite?: number
-  securite_kg: number
-  solde_debut_d_kg: number
+  reste_kg: number
   arrivages_fenetre_kg: number
-  /** Masqués avec la quantité à commander. */
-  besoin_theorique_kg?: number
-  jour_determinant: string
   moq_kg: number | null
-  apres_minimum_kg?: number
   multiple_kg: number | null
+  /** Masqués avec la quantité à commander. */
+  besoin_net_kg?: number
+  securite_kg?: number
+  apres_minimum_kg?: number
+  arrondi_kg?: number
   quantite_proposee_kg?: number
   palettes_equivalentes?: number | null
-  date_limite_commande: string
+  stock_apres_reception_kg?: number
+  stock_fin_fenetre_kg?: number
+  fenetres: Fenetre[]
+}
+
+/** La situation d'une référence (§ 15.5). */
+export interface Situation {
+  etat: string
+  signaux: SignalCouverture[]
+  couverture_actuelle_j: number | null
+  premiere_rupture: string | null
+  reste_rupture_kg: number | null
+  couverture_cible_j: number | null
+  ecart_cible_j: number | null
+  date_besoin: string | null
+  date_limite_commande: string | null
+  securite: {
+    jours: number
+    appliquee: boolean
+    x_kg: number
+    premier_franchissement: string | null
+    point_bas_franchissement_kg: number | null
+    seuil_franchissement_kg: number | null
+    jour_creux: string | null
+    point_bas_creux_kg: number | null
+    seuil_creux_kg: number | null
+  }
+  stock_minimum: { kg: number | null; franchi_le: string | null; point_bas_kg: number | null }
+  plan_mois_kg: number
+  source: string
 }
 
 export interface Arrivage {
@@ -185,11 +269,16 @@ export interface Reglages {
   source_multiple: string
   kg_palette: number | null
   defaut_donnees?: string | null
+  couverture_cible_j?: number | null
+  couverture_cible_mois?: number | null
+  source_cible?: string | null
+  stock_min_kg?: number | null
 }
 
 /** Ce que le détail et la simulation rendent pareil (`vue_analyse`). */
 export interface VueAnalyse {
   reglages: Reglages
+  situation?: Situation
   synthese: LigneCouverture
   arrivages: Arrivage[]
   evenements: Evenement[]
@@ -259,21 +348,108 @@ export interface DetailCouverture extends EnteteCouverture, VueAnalyse {
     kg_jour: number
     jours_dans_horizon: number
     kg_dans_horizon: number
-    qualites: { code_qualite: string; kg: number }[]
+    qualites: { code_qualite: string; kg_m2?: number | null; kg: number }[]
     kg_qualites: number
   }[]
-  /** Le prix du plan d'achat et le montant de la 1re proposition (masqués selon les droits). */
-  achat?: { prix_estime_mad?: number | null; source_prix?: string; montant_estime_mad?: number | null } | null
-  /** Les réglages de la fiche qui ne sont que des ALERTES, et le réel du grand livre. */
+  /** Le prix du plan d'achat et le montant de la 1re proposition (masqués selon les droits), et en devise. */
+  achat?: {
+    prix_estime_mad?: number | null
+    source_prix?: string
+    montant_estime_mad?: number | null
+    code_devise?: string | null
+    prix_devise?: number | null
+    montant_devise?: number | null
+  } | null
+  /** La fenêtre du stock projeté (27/10/2026). */
+  stock_projete?: StockProjeteDetail
+  /** Les réglages de la fiche (couverture cible, stock minimum = garde-fou), et le réel du grand livre. */
   approvisionnement?: {
     stock_min_fiche_kg?: number | null
-    couverture_min_fiche_mois?: number | null
-    couverture_min_parametre_mois?: number | null
-    marge_securite_fiche_pct?: number | null
+    couverture_cible_fiche_mois?: number | null
     seuil_alerte_j?: number | null
     unite_catalogue?: string | null
     reel_mois_kg?: number | null
   } | null
+}
+
+/** LA FENÊTRE DU STOCK PROJETÉ (27/10/2026) : ce qu'elle montre en plus du détail commun. */
+export interface StockProjeteDetail {
+  tuiles: {
+    stock_total_kg: number
+    sur_metiers_kg: number
+    disponible_kg: number
+    date_reception: string | null
+    reception_en_retard: boolean | null
+    besoin_jusqu_reception_kg: number | null
+    plan_commande_kg: number | null
+    couverture_commande_j: number
+    stock_a_la_reception_kg: number | null
+    couverture_actuelle_j: number | null
+    couverture_cible_j: number | null
+    ecart_cible_j: number | null
+    horizon_j: number
+    qte_a_commander_kg?: number | null
+    palettes_equivalentes?: number | null
+    date_limite_commande: string | null
+    raison_etat: string
+  }
+  cascade: {
+    magasins: { code_magasin: string; nom: string | null; kg: number }[]
+    sur_metiers_kg: number
+    restes_kg: number
+    disponible_kg: number
+    date_reception: string | null
+    arrivages_avant_reception_kg: number | null
+    besoin_jusqu_reception_kg: number | null
+    stock_a_la_reception_kg: number | null
+    arrivages_apres: Arrivage[]
+    arrivages_non_comptes: Arrivage[]
+    quarantaine_kg: number
+    bloque_kg: number
+    hors_plan_kg: number
+  }
+  classement: {
+    classe_abc?: string | null
+    rang?: number | null
+    pct_cumule?: number | null
+    valeur_conso_annuelle_mad?: number | null
+    classe_xyz?: string | null
+    politique?: string | null
+    nb_sources?: number | null
+    risque_source?: string | null
+    code_groupe_equiv?: string | null
+    groupe_libelle?: string | null
+    nb_fournisseurs_groupe?: number | null
+    derniere_sortie?: string | null
+    jours_sans_mouvement?: number | null
+    dormant?: boolean
+  } | null
+  lots: {
+    code_magasin: string
+    magasin_nom: string | null
+    lot_fournisseur: string
+    kg: number
+    nb_bobines: number | null
+    statut_lot: string | null
+    categorie: string | null
+    date_premiere_entree: string | null
+    date_peremption: string | null
+    quarantaine: boolean
+    inclure_mrp: boolean
+  }[]
+  /** Null : pas le droit de lire les mouvements. */
+  historique:
+    | {
+        numero_mouvement: string | null
+        date_mouvement: string | null
+        code_type_mvt: string | null
+        type_libelle: string | null
+        signe: number | null
+        code_magasin: string | null
+        lot_fournisseur: string | null
+        kg: number
+      }[]
+    | null
 }
 
 /** La réponse de la simulation : le réel et le simulé, côte à côte. */
@@ -324,9 +500,9 @@ export function dateListe(iso: string | null | undefined) {
 export const NATURES: Record<string, string> = {
   AUJOURDHUI: 'Aujourd’hui',
   ARRIVAGE: 'Arrivage',
-  RUPTURE: 'Plan non couvert à partir de ce jour',
+  RUPTURE: 'Rupture : plan non couvert à partir de ce jour',
   REPRISE: 'Couverture reprise',
-  SOUS_SECURITE: 'Passage sous la sécurité',
+  SOUS_SECURITE: 'Point bas sous le seuil de sécurité',
   FIN_DE_MOIS: 'Fin de mois',
   AUJOURDHUI_PLUS_DELAI: 'Aujourd’hui + délai : première arrivée possible',
   FIN_HORIZON: 'Fin de l’horizon du plan',

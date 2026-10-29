@@ -3,7 +3,7 @@
  *
  * Deux choses distinctes cohabitent ici, et il faut les garder separees.
  *
- *   Le CALCUL — le moteur de couverture (onglet « À commander ») — se refait a
+ *   Le CALCUL — le moteur de couverture (/stock › Surveillance) — se refait a
  *   chaque lecture et ne garde aucune trace. Il repond a « que faudrait-il
  *   commander aujourd'hui ? ».
  *
@@ -18,19 +18,22 @@
  * la premiere proposition de chaque reference (plan seul, projection jour par
  * jour, securite, minimum de commande, arrondi au multiple), D comme date de
  * besoin, la date limite de commande, l'urgence qui s'en deduit. Prix, devise,
- * unite et fournisseur : inchanges. L'onglet « À commander » montre le calcul ;
- * son bouton « Commander » regenere la proposition de la reference et l'ouvre
- * dans les lignes a commander.
+ * unite et fournisseur : inchanges. Le calcul se lit dans /stock › Surveillance
+ * (decision du 27/10/2026 : l'onglet « À commander » y est deplace, sans bouton
+ * « Commander » pour l'instant ; la route POST /api/plan-achat/generer?reference=
+ * reste en place). Un clic sur une ligne ouvre la fenetre de surveillance de la
+ * reference (la meme modale), au lieu d'un detail deplie sous la ligne.
  *
  * UNE SEULE SOURCE DE VERITE (27/10/2026) : l'ancien calcul (`v_plan_achat`,
  * `v_stock_projete`) est retire. L'onglet Situation compte les references avec
- * les NOTIONS DU MOTEUR (plan non couvert, sous la securite, couvert, a commander
- * aujourd'hui, classe A au plan non couvert) ; Par fournisseur compte ses
- * references au plan non couvert. Les deux sont figes a la generation du plan.
+ * les NOTIONS DU MOTEUR v2 (rupture inevitable, sous securite, sous cible,
+ * couvert, a commander aujourd'hui, classe A en rupture inevitable) ; Par
+ * fournisseur compte ses references en
+ * rupture inevitable. Les deux sont figes a la generation du plan.
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, Ban, CalendarClock, ChevronDown, ChevronRight, FileCheck2, Gauge, Link2, ListChecks, RefreshCw, Repeat, ShoppingCart, Truck, Unlink2, X } from 'lucide-react'
+import { ArrowRight, Ban, FileCheck2, Gauge, Link2, ListChecks, RefreshCw, Repeat, ShoppingCart, Truck, Unlink2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -51,7 +54,8 @@ import {
 import { Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { depuisBobines, depuisKg, depuisPalettes, pourChamp, type Conditionnement } from '../lib/conditionnement'
-import { ACommander, DetailReference } from './PlanAchatCouverture'
+import { ModaleReference } from '../composants/couverture/ModaleCouverture'
+import { libelleStatut } from '../lib/statuts'
 import { useParametreNombre } from '../lib/parametres'
 import { ChoixRecherche } from '../composants/ChoixRecherche'
 import { StatutBadge } from '../composants/StatutBadge'
@@ -61,7 +65,7 @@ const MODULE = 'PLAN_ACHAT'
 /** Entetes de la repartition par fournisseur, dans l'ordre de la feuille. */
 const ENTETES_FRS = [
   'Fournisseur', 'Pays', 'Devise', 'Délai', 'Refs',
-  'Quantité', 'Montant MAD', '% budget', 'TIER 1', 'Plan non couvert', 'Contact',
+  'Quantité', 'Montant MAD', '% budget', 'TIER 1', 'Rupture inévitable', 'Contact',
 ]
 
 interface Proposition extends Record<string, unknown> {
@@ -149,9 +153,12 @@ interface Kpi {
   globaux: {
     /** Les references suivies par le moteur (actives, avec plan, stock ou arrivage). */
     references: number
-    plan_non_couvert: number
+    rupture_inevitable: number
     sous_securite: number
+    sous_cible: number
     couvert: number
+    cible_non_definie: number
+    sous_minimum: number
     a_commander_aujourdhui: number
     classe_a_en_rupture: number
     budget_mad: number
@@ -172,8 +179,8 @@ interface Kpi {
     quantite_kg: number
     montant_mad: number
     nb_tier1: number
-    /** Ses references au plan non couvert, au sens du moteur. */
-    nb_plan_non_couvert: number
+    /** Ses references en rupture inevitable, au sens du moteur v2. */
+    nb_rupture_inevitable: number
   }[]
 }
 
@@ -270,27 +277,6 @@ export function PlanAchat() {
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Conversion impossible.'),
   })
 
-  // « COMMANDER » DEPUIS L'ONGLET À COMMANDER (27/10/2026) : la proposition de la
-  // reference se regenere depuis le moteur (les figees et arbitrees restent
-  // telles quelles), puis s'ouvre, cochee, dans les lignes a commander.
-  const preparer = useMutation({
-    mutationFn: (reference: string) =>
-      api.post<{ id_proposition?: string }>(
-        `/api/plan-achat/generer?reference=${encodeURIComponent(reference)}`,
-      ),
-    onSuccess: async (r) => {
-      await qc.invalidateQueries({ queryKey: ['plan-achat-propositions'] })
-      const id = r.id_proposition
-      if (!id) {
-        toast.error('Aucune proposition ouverte pour cette référence.')
-        return
-      }
-      setCoches((c) => ({ ...c, [id]: true }))
-      setOnglet('lignes')
-    },
-    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Préparation de la commande impossible.'),
-  })
-
   const ignorer = useMutation({
     mutationFn: (id: string) => api.post(`/api/plan-achat/propositions/${id}/ignorer`),
     onSuccess: async () => {
@@ -321,8 +307,10 @@ export function PlanAchat() {
 
   // La proposition dont on examine les equivalents. Null : aucun panneau.
   const [arbitrage, setArbitrage] = useState<Proposition | null>(null)
-  // Les propositions dont le calcul est deplie sous la ligne.
-  const [deplies, setDeplies] = useState<Record<string, boolean>>({})
+  // LA FENETRE DE SURVEILLANCE (27/10/2026) : un clic sur une ligne ouvre le
+  // detail de la reference au moteur de couverture (la meme fenetre que /stock ›
+  // Surveillance) ; plus rien ne se deplie sous la ligne.
+  const [ouverte, setOuverte] = useState<{ code: string; designation?: string | null } | null>(null)
   const dureeEcart = useParametreNombre('P_DureeEcartJours', 90)
 
   const substituer = useMutation({
@@ -347,27 +335,6 @@ export function PlanAchat() {
   })
 
   const colonnes: ColonneDT<Proposition>[] = [
-    {
-      champ: 'calcul',
-      entete: '',
-      largeur: '30px',
-      triable: false,
-      rendu: (p) => (
-        <Bouton
-          variante="discret"
-          taille="icone-xs"
-          className="text-attenue-texte hover:bg-attenue"
-          onClick={(e) => {
-            e.stopPropagation()
-            setDeplies((d) => ({ ...d, [p.id_proposition]: !d[p.id_proposition] }))
-          }}
-          aria-label="Voir le calcul"
-          title="D’où viennent ces kilos : le calcul du moteur de couverture (plan, stock, arrivages, sécurité)"
-        >
-          {deplies[p.id_proposition] ? <ChevronDown /> : <ChevronRight />}
-        </Bouton>
-      ),
-    },
     {
       champ: 'selection',
       entete: '',
@@ -666,23 +633,13 @@ export function PlanAchat() {
             <Gauge className="size-3.5" />
             Situation
           </Onglet>
-          {/* LE MOTEUR DE COUVERTURE (26/10/2026) : son calcul, et « Commander »
-              (27/10/2026), qui ouvre la proposition dans les lignes à commander. */}
-          <Onglet value="a-commander">
-            <CalendarClock className="size-3.5" />
-            À commander
-          </Onglet>
+          {/* L'onglet « À commander » est parti dans /stock › Surveillance (decision
+              du 27/10/2026) ; aucun bouton « Commander » pour l'instant. */}
         </OngletsListe>
-        <OngletContenu value="a-commander">
-          <ACommander
-            commander={droits.peutEcrire ? (l) => preparer.mutate(l.code_reference) : undefined}
-            enCommande={preparer.isPending ? (preparer.variables ?? null) : null}
-          />
-        </OngletContenu>
         <OngletContenu value="situation">
       {/* ---- KPI : les trois blocs de la feuille Plan_Achat -------------------
            La situation est celle du MOTEUR DE COUVERTURE (27/10/2026) : les
-           memes notions que l'onglet « À commander ». ---- */}
+           memes notions que /stock › Surveillance. ---- */}
       {kpi && (
         <div className="mb-4 grid gap-3 lg:grid-cols-3">
           <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3">
@@ -697,15 +654,17 @@ export function PlanAchat() {
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
               <span className="text-attenue-texte">Références suivies</span>
               <span className="text-right font-semibold tabular-nums">{kpi.references ?? '—'}</span>
-              <span className="text-danger" title="Une rupture est prévue sur l’horizon du plan">Plan non couvert</span>
-              <span className="text-right font-semibold tabular-nums text-danger">{kpi.plan_non_couvert ?? '—'}</span>
-              <span className="text-alerte" title="Le solde passe sous la sécurité, sans rupture">Sous la sécurité</span>
+              <span className="text-danger" title="La 1re rupture tombe avant aujourd’hui + délai">{libelleStatut('statut_stock', 'RUPTURE_INEVITABLE')}</span>
+              <span className="text-right font-semibold tabular-nums text-danger">{kpi.rupture_inevitable ?? '—'}</span>
+              <span className="text-alerte" title="Un creux sous le seuil de sécurité dans le délai">{libelleStatut('statut_stock', 'SOUS_SECURITE')}</span>
               <span className="text-right tabular-nums">{kpi.sous_securite ?? '—'}</span>
-              <span className="text-succes" title="Ni rupture ni passage sous la sécurité">Couvert</span>
+              <span className="text-info" title="La couverture actuelle est sous la couverture cible">{libelleStatut('statut_stock', 'SOUS_CIBLE')}</span>
+              <span className="text-right tabular-nums">{kpi.sous_cible ?? '—'}</span>
+              <span className="text-succes" title="La couverture atteint la cible">{libelleStatut('statut_stock', 'COUVERT')}</span>
               <span className="text-right tabular-nums">{kpi.couvert ?? '—'}</span>
               <span className="text-danger" title="Date limite de commande atteinte ou dépassée">À commander aujourd’hui</span>
               <span className="text-right font-semibold tabular-nums">{kpi.a_commander_aujourdhui ?? '—'}</span>
-              <span className="text-attenue-texte">Classe A au plan non couvert</span>
+              <span className="text-attenue-texte">Classe A en rupture inévitable</span>
               <span className="text-right font-semibold tabular-nums">{kpi.classe_a_en_rupture ?? '—'}</span>
             </div>
           </div>
@@ -810,8 +769,8 @@ export function PlanAchat() {
                           {f.nb_tier1 > 0 ? <Badge ton="danger">{f.nb_tier1}</Badge> : <span className="text-attenue-texte">—</span>}
                         </td>
                         <td className="px-2.5 py-1.5 text-right">
-                          {(f.nb_plan_non_couvert ?? 0) > 0 ? (
-                            <Badge ton="danger">{f.nb_plan_non_couvert}</Badge>
+                          {(f.nb_rupture_inevitable ?? 0) > 0 ? (
+                            <Badge ton="danger">{f.nb_rupture_inevitable}</Badge>
                           ) : (
                             <span className="text-attenue-texte">—</span>
                           )}
@@ -850,6 +809,7 @@ export function PlanAchat() {
             ecrire={droits.peutEcrire}
             envoyer={(cibles, ajustements) => commander.mutate({ propositions: selection, cibles, ajustements })}
             revenir={() => setOnglet('besoins')}
+            ouvrir={(p) => setOuverte({ code: p.code_reference, designation: p.designation })}
           />
         </OngletContenu>
         <OngletContenu value="besoins">
@@ -931,7 +891,7 @@ export function PlanAchat() {
         chargement={q.isLoading}
         erreur={q.error}
         cle={(p) => p.id_proposition}
-        detail={(p) => (deplies[p.id_proposition] ? <DetailReference reference={p.code_reference} /> : null)}
+        surClic={(p) => setOuverte({ code: p.code_reference, designation: p.designation })}
         titreCarte={(p) => p.code_reference}
         placeholderRecherche="Référence, fournisseur, urgence..."
         tailleParDefaut={50}
@@ -989,6 +949,9 @@ export function PlanAchat() {
       />
         </OngletContenu>
       </Onglets>
+
+      {/* La fenêtre de surveillance d'une référence (27/10/2026), au clic sur une ligne. */}
+      <ModaleReference reference={ouverte?.code ?? null} designation={ouverte?.designation} surFermer={() => setOuverte(null)} />
 
       {arbitrage && (
         <PanneauEquivalent
@@ -1194,7 +1157,7 @@ interface Saisie {
 }
 
 function LignesACommander({
-  lignes, retirer, enCours, ecrire, envoyer, revenir,
+  lignes, retirer, enCours, ecrire, envoyer, revenir, ouvrir,
 }: {
   lignes: Proposition[]
   retirer: (id: string) => void
@@ -1205,6 +1168,8 @@ function LignesACommander({
     ajustements: Record<string, { quantite_kg?: number; prix_mad?: number; prix_devise?: number; nb_palettes?: number; nb_bobines?: number }>,
   ) => void
   revenir: () => void
+  /** Le clic sur une ligne (hors champs et boutons) ouvre la fenêtre de surveillance. */
+  ouvrir: (p: Proposition) => void
 }) {
   const [cibles, setCibles] = useState<Record<string, string>>({})
   // L'ACHETEUR AJUSTE SUR LA COMMANDE (14/10/2026), pas dans le plan : quantite,
@@ -1323,7 +1288,15 @@ function LignesACommander({
                     {ls.map((p) => {
                       const c = courant(p)
                       return (
-                      <tr key={p.id_proposition} className="border-b border-bordure/60 align-top">
+                      <tr
+                        key={p.id_proposition}
+                        className="cursor-pointer border-b border-bordure/60 align-top hover:bg-primaire/5"
+                        onClick={(e) => {
+                          // Les champs, cases et boutons de la ligne gardent leur geste.
+                          if ((e.target as HTMLElement).closest('input, select, textarea, button, a, label')) return
+                          ouvrir(p)
+                        }}
+                      >
                         <td className="px-2 py-1.5">
                           <div className="font-medium">{p.code_reference}</div>
                           {p.designation && <div className="text-[11px] text-attenue-texte">{p.designation}</div>}

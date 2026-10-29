@@ -284,8 +284,8 @@ export function Etats() {
   const comptes: Comptes = {
     inventairesOuverts: 0,
     propositions: k.nb_propositions_a_traiter ?? 0,
-    // L'état au moteur de couverture (27/10/2026) : tout sauf « couvert ».
-    refsEnAlerte: (k.nb_plan_non_couvert ?? 0) + (k.nb_sous_securite ?? 0),
+    // L'état au moteur de couverture v2 (27/10/2026) : tout sauf « couvert ».
+    refsEnAlerte: (k.nb_rupture_inevitable ?? 0) + (k.nb_sous_securite ?? 0) + (k.nb_sous_cible ?? 0),
     receptionsEnCours: (k.nb_receptions_en_saisie ?? 0) + (k.nb_receptions_a_controler ?? 0),
     lotsDormants: kl.lots_dormants ?? 0,
     lotsABasculer: kl.lots_a_basculer ?? 0,

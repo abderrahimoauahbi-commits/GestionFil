@@ -382,11 +382,23 @@ faits, pas d'une théorie.
 > **La consommation réelle par qualité est la somme des écarts constatés, attribués à l'OF qui
 > occupait la portion pendant la période — jamais une estimation théorique.**
 
-## 15. Moteur de couverture v2 : la couverture cible (spécification du 27/10/2026, À VALIDER)
+## 15. Moteur de couverture v2 : la couverture cible (spécification du 27/10/2026, validée)
 
-> **Statut : rien n'est codé.** Cette section fixe les décisions prises dans la discussion du
-> 27/10/2026. Le code ne commence qu'après la validation de ce texte. **La logique de Q0 est
-> validée** et ne se rediscute plus. Seuls les points du § 15.9 restent ouverts.
+> **Statut : livré le 27/10/2026 au soir (non publié).** `domain/couverture.rs` porte les cas
+> 1, 2, 3, 4a et 4b du § 15.6 comme tests unitaires aux chiffres exacts, le bilan, l'équivalence
+> classique, une propriété sur plans et arrivages pseudo-aléatoires, le stock minimum sans effet
+> sur Q, l'article sans cible et la consolidation du cas 4a (1 215 kg à J+30, puis J+61) ; le banc
+> rejoue le cas 1 aux chiffres exacts et le cas 3 transposé au mois (la photo MRP est mensuelle)
+> par l'API (`scenario_couverture_cible`). Migrations `2026-10-27l` (exigée) et `2026-10-27m`.
+> Écrans : /stock › Stock projeté (21 colonnes), Simulation, Surveillance (l'ancien onglet
+> « À commander », sans bouton « Commander » pour l'instant) ; contrôles C05, C25, C68, C69 servis
+> par le moteur. **Interprétations à confirmer** : (1) quand la rupture est inévitable (D > R),
+> le stock au début de D est compté à zéro au plus bas — le manque d'avant D (−B(D − 1), soit
+> P(R, D) − reste(R) sans arrivage) est affiché, pas commandé ; (2) un article SANS cible et avec
+> une rupture sur l'horizon (ni inévitable ni sous sécurité) est SOUS_CIBLE (« la rupture reste
+> visible dans l'état ») ; (3) la frise mensuelle (mur de risques, photo du plan) garde ses codes
+> de mois PLAN_NON_COUVERT / SOUS_SECURITE / COUVERT ; (4) « Avant le » = D* − L même quand la
+> réception est en retard (elle est alors dépassée, en rouge).
 
 ### 15.1 Notations et formules
 

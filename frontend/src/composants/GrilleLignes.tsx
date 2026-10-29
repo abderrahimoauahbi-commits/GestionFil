@@ -49,7 +49,7 @@ import {
 } from '../lib/conditionnement'
 
 /** Les états d'une référence au moteur de couverture (27/10/2026). */
-const ETATS_MOTEUR = ['PLAN_NON_COUVERT', 'SOUS_SECURITE', 'COUVERT']
+const ETATS_MOTEUR = ['RUPTURE_INEVITABLE', 'SOUS_SECURITE', 'SOUS_CIBLE', 'COUVERT']
 
 /**
  * LA NATURE D'UNE LIGNE, et ce qu'elle implique jusqu'au quai.
@@ -1027,7 +1027,7 @@ function GrilleLignesBureau(props: ProprietesGrille) {
       ton:
         suggere > 0
           ? 'primaire'
-          : r.statut_stock === 'PLAN_NON_COUVERT' || r.statut_stock === 'RUPTURE'
+          : r.statut_stock === 'RUPTURE_INEVITABLE' || r.statut_stock === 'RUPTURE'
             ? 'alerte'
             : 'neutre',
       desactivee: prises.has(r.code_reference),

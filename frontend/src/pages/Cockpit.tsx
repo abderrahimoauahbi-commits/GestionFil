@@ -849,19 +849,19 @@ function phraseDuJour(
     )
   }
 
-  // LE MOTEUR DE COUVERTURE (27/10/2026) : une rupture prevue sur l'horizon du
-  // plan, et ce qu'il faut commander aujourd'hui pour la couvrir.
-  const alerte = n('nb_plan_non_couvert')
+  // LE MOTEUR DE COUVERTURE v2 (27/10/2026) : une rupture qu'aucune commande
+  // passee aujourd'hui ne peut eviter, et ce qu'il faut commander aujourd'hui.
+  const alerte = n('nb_rupture_inevitable')
   if (alerte > 0) {
     bouts.push(
-      `${alerte} référence(s) sur ${n('nb_references')} ont un plan non couvert sur l'horizon` +
+      `${alerte} référence(s) sur ${n('nb_references')} sont en rupture inévitable (avant aujourd'hui + délai)` +
         (n('nb_a_commander_aujourdhui') > 0 ? `, ${n('nb_a_commander_aujourdhui')} à commander aujourd'hui` : '') +
         (n('budget_a_engager_mad') > 0
           ? ` ; ${fmt.compact(n('budget_a_engager_mad'))} MAD de propositions à engager.`
           : '.'),
     )
   } else {
-    bouts.push(`Aucune rupture prévue sur les ${n('nb_references')} références suivies.`)
+    bouts.push(`Aucune rupture inévitable sur les ${n('nb_references')} références suivies.`)
   }
 
   if (economiesMad > 0) {
@@ -1260,10 +1260,11 @@ function ChiffresCles() {
   if (!k) return null
 
   const n = (c: string) => Number(k[c] ?? 0)
-  // L'ETAT DES REFERENCES AU MOTEUR DE COUVERTURE (27/10/2026).
+  // L'ETAT DES REFERENCES AU MOTEUR DE COUVERTURE v2 (27/10/2026, § 15.4).
   const couvert = n('nb_couvert')
   const sousSecurite = n('nb_sous_securite')
-  const planNonCouvert = n('nb_plan_non_couvert')
+  const sousCible = n('nb_sous_cible')
+  const inevitable = n('nb_rupture_inevitable')
   const aujourdhui = n('nb_a_commander_aujourdhui')
   const bloquants = n('nb_controles_bloquants') + n('nb_controles_critiques')
 
@@ -1315,17 +1316,17 @@ function ChiffresCles() {
           ton="primaire"
           surClic={() => naviguer('/plan-achat')}
         />
-        {/* LE PLAN NON COUVERT AU MOTEUR DE COUVERTURE (27/10/2026) : une rupture
-            prevue sur l'horizon du plan ; la precision dit ce qui est a commander
-            aujourd'hui et ce qui passe sous la securite sans rupture. */}
+        {/* LA RUPTURE INEVITABLE AU MOTEUR DE COUVERTURE v2 (27/10/2026) : la 1re
+            rupture tombe avant aujourd'hui + delai ; la precision dit ce qui est a
+            commander aujourd'hui, ce qui est sous la securite et sous la cible. */}
         <CarteStat
           Icone={TrendingDown}
-          libelle="Plan non couvert"
-          valeur={fmt.nombre(planNonCouvert, 0)}
-          precision={`${aujourdhui} à commander aujourd’hui · ${sousSecurite} sous la sécurité`}
-          ton={planNonCouvert > 0 ? 'danger' : sousSecurite > 0 ? 'alerte' : 'succes'}
+          libelle="Rupture inévitable"
+          valeur={fmt.nombre(inevitable, 0)}
+          precision={`${aujourdhui} à commander aujourd’hui · ${sousSecurite} sous la sécurité · ${sousCible} sous la cible`}
+          ton={inevitable > 0 ? 'danger' : sousSecurite > 0 ? 'alerte' : 'succes'}
           surClic={() => naviguer('/plan-achat')}
-          aide="Moteur de couverture : le plan projeté jour par jour, stock compté et arrivages à leur date ; une rupture prévue sur l’horizon du plan."
+          aide="Moteur de couverture : le plan daté projeté jour par jour, stock compté et arrivages à leur date ; une rupture qu’aucune commande passée aujourd’hui ne peut éviter."
         />
         <CarteStat
           Icone={Sparkles}
@@ -1359,12 +1360,12 @@ function ChiffresCles() {
             className="inline-flex items-center gap-1.5 font-medium text-danger hover:text-texte"
           >
             <Layers className="size-3.5" />
-            {n('nb_classe_a_en_rupture')} référence(s) de classe A au plan non couvert
+            {n('nb_classe_a_en_rupture')} référence(s) de classe A en rupture inévitable
           </button>
         )}
       </div>
 
-      {couvert + sousSecurite + planNonCouvert > 0 && (
+      {couvert + sousSecurite + sousCible + inevitable > 0 && (
         <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3">
           <p className="mb-2 text-[11px] uppercase tracking-wide text-attenue-texte">
             État du catalogue suivi
@@ -1372,8 +1373,9 @@ function ChiffresCles() {
           <BarreRepartition
             parts={[
               { libelle: 'Couvert', valeur: couvert, ton: 'succes' },
+              { libelle: 'Sous la cible', valeur: sousCible, ton: 'neutre' },
               { libelle: 'Sous la sécurité', valeur: sousSecurite, ton: 'alerte' },
-              { libelle: 'Plan non couvert', valeur: planNonCouvert, ton: 'danger' },
+              { libelle: 'Rupture inévitable', valeur: inevitable, ton: 'danger' },
             ]}
           />
         </div>

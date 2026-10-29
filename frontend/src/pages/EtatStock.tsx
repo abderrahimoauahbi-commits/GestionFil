@@ -59,7 +59,7 @@ interface LigneStock extends Record<string, unknown> {
   /* L'ETAT DE COUVERTURE VIENT DU MOTEUR (27/10/2026, une seule source) : plus
      d'en-cours « fiable », de besoin 12 mois ni de stock projeté de l'ancien
      calcul ; les arrivages comptés à leur date, le plan sur l'horizon, le plan non
-     couvert, l'état (PLAN_NON_COUVERT, SOUS_SECURITE, COUVERT) et les jours
+     couvert, l'état (moteur v2 : RUPTURE_INEVITABLE, SOUS_SECURITE, SOUS_CIBLE, COUVERT) et les jours
      couverts jusqu'à la première rupture (null : tout l'horizon). */
   arrivages_comptes_kg: number | null
   plan_horizon_kg: number | null
@@ -191,7 +191,7 @@ export function EtatStock() {
       machines: s((l) => l.machines_kg),
       valeur: s((l) => l.valeur_mad),
       commander: s((l) => l.qte_a_commander_kg),
-      ruptures: filtrees.filter((l) => l.statut === 'PLAN_NON_COUVERT').length,
+      ruptures: filtrees.filter((l) => l.statut === 'RUPTURE_INEVITABLE').length,
       sousMin: filtrees.filter((l) => l.sous_minimum).length,
     }
   }, [filtrees])
@@ -376,7 +376,7 @@ export function EtatStock() {
           )}
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {['', 'PLAN_NON_COUVERT', 'SOUS_SECURITE', 'COUVERT'].map((s) => (
+          {['', 'RUPTURE_INEVITABLE', 'SOUS_SECURITE', 'SOUS_CIBLE', 'COUVERT'].map((s) => (
             <button
               key={s || 'tous'}
               type="button"

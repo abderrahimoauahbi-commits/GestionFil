@@ -1,16 +1,19 @@
 /**
  * LE STOCK PROJETÉ — TROIS ONGLETS SUR LE MÊME MOTEUR (décisions du 27/10/2026).
  *
- *   * STOCK PROJETÉ : toutes les matières suivies, une ligne par référence —
- *     disponible (hors quarantaine, hors restes), sur machine, restant (les
- *     restes comptés), arrivages comptés, stock total projeté (la somme, sans
- *     recouvrement), besoin jusqu'à livraison, couverture planifiée, à commander
- *     et son montant (le prix du plan d'achat). Le clic ouvre la grande fenêtre
- *     du détail, ENRICHIE (situation, approvisionnement, projection, résultat MRP).
+ *   * STOCK PROJETÉ : toutes les matières suivies, une ligne par référence, en
+ *     21 colonnes (moteur v2, décision du 27/10/2026) — stock disponible, sur
+ *     machines, restant constaté, arrivages, stock projeté, besoin jusqu'à
+ *     réception, couverture actuelle, cible, écart, à commander, montant, avant
+ *     le, état ; sur la ligne ↳ désignation, fournisseur, ABC / XYZ, 1re rupture,
+ *     délai, réception proposée, palettes. Le clic sur la ligne ouvre la fenêtre
+ *     du détail ENRICHIE (tuiles, approvisionnement, calcul, classement, où se
+ *     trouve la matière, onglets).
  *   * SIMULATION : « et si ? » sur une référence, recalculé par le même moteur ;
  *     rien n'est jamais enregistré.
- *   * SURVEILLANCE / ALERTES : EXACTEMENT le tableau « À commander » du plan
- *     d'achat, et la même fenêtre de détail (composants partagés).
+ *   * SURVEILLANCE : le tableau « À commander », déplacé du plan d'achat
+ *     (27/10/2026), sans bouton « Commander » pour l'instant ; le clic ouvre la
+ *     fenêtre de détail du plan d'achat (non enrichie).
  *
  * Chaque chiffre vient de `routes/couverture.rs` (une seule source de vérité) :
  * aucune formule de besoin n'est refaite ici. Le filtrage du premier onglet passe
@@ -32,6 +35,7 @@ import {
   ShoppingCart,
   Siren,
   FlaskConical,
+  Target,
   Warehouse,
 } from 'lucide-react'
 import { api } from '../api/client'
@@ -54,7 +58,8 @@ import { useDroits } from '../auth/AuthContext'
 import { ListeCouverture } from '../composants/couverture/ListeCouverture'
 import { ModaleReference } from '../composants/couverture/ModaleCouverture'
 import { SimulationCouverture } from '../composants/couverture/Simulation'
-import { dateListe } from '../composants/couverture/types'
+import { dateListe, type SignalCouverture } from '../composants/couverture/types'
+import { StatutBadge } from '../composants/StatutBadge'
 
 const MODULE = 'STOCK'
 
@@ -66,8 +71,26 @@ interface LigneProjete {
   classe_abc: string | null
   classe_xyz: string | null
   unite_catalogue: string | null
-  /** PLAN_NON_COUVERT | SOUS_SECURITE | COUVERT */
+  /** L'état au moteur v2 : RUPTURE_INEVITABLE | SOUS_SECURITE | SOUS_CIBLE | COUVERT (§ 15.4). */
   statut: string
+  /** Les signaux, à part de l'état (§ 15.4) : lus dans la fenêtre de détail seulement. */
+  signaux?: SignalCouverture[]
+  /** La raison de l'état, en une phrase chiffrée (infobulle de l'état). */
+  raison_etat?: string | null
+  /** La réception proposée D (1re proposition), « en retard » quand la cible l'est. */
+  date_disponibilite?: string | null
+  reception_en_retard?: boolean | null
+  /** Le plan daté de [aujourd'hui, D[ ; null sans réception proposée. */
+  besoin_jusqu_reception_kg?: number | null
+  /** La quantité à commander en palettes, quand le conditionnement est connu. */
+  palettes_equivalentes?: number | null
+  /** L'horizon du plan en jours (« > N j » sans rupture). */
+  horizon_j?: number | null
+  source_delai?: string | null
+  /** C, la couverture cible (jours), sa source, et l'écart couverture − C. */
+  couverture_cible_j?: number | null
+  source_cible?: string | null
+  ecart_cible_j?: number | null
   /** Jours couverts depuis aujourd'hui jusqu'à la veille de la 1re rupture ; null : tout l'horizon. */
   jours_couverture: number | null
   disponible_kg: number
@@ -113,39 +136,29 @@ interface LigneProjete {
 
 const kg = (v: number | null | undefined, d = 0) => fmt.nombre(v ?? 0, d)
 
-/**
- * Pourquoi cet état ? Le moteur le dit en une date : la rupture, le passage sous
- * la sécurité. Le statut seul obligerait à rouvrir le calcul de tête.
- */
-function motif(l: LigneProjete): string | null {
-  if (l.statut === 'PLAN_NON_COUVERT') {
-    return l.premiere_rupture
-      ? `rupture le ${fmt.date(l.premiere_rupture)}${l.plan_non_couvert_kg > 0.05 ? `, ${kg(l.plan_non_couvert_kg)} kg non couverts` : ''}`
-      : null
-  }
-  if (l.statut === 'SOUS_SECURITE') {
-    return l.premier_passage_securite ? `sous la sécurité le ${fmt.date(l.premier_passage_securite)}` : null
-  }
-  return null
-}
-
-/** Les états du moteur, ce qu'ils veulent dire, et la couleur de leur compteur. */
+/** Les états du moteur v2 (§ 15.4), ce qu'ils veulent dire, et la couleur de leur compteur. */
 const ETATS = [
   {
-    cle: 'PLAN_NON_COUVERT',
-    resume: 'Une rupture est prévue sur l’horizon du plan',
+    cle: 'RUPTURE_INEVITABLE',
+    resume: 'La 1re rupture tombe avant aujourd’hui + délai',
     Icone: PackageX,
     ton: 'danger' as const,
   },
   {
     cle: 'SOUS_SECURITE',
-    resume: 'Le solde passe sous la sécurité, sans rupture',
+    resume: 'Un creux sous le seuil de sécurité dans le délai',
     Icone: AlertTriangle,
     ton: 'alerte' as const,
   },
   {
+    cle: 'SOUS_CIBLE',
+    resume: 'La couverture actuelle est sous la couverture cible',
+    Icone: Target,
+    ton: 'info' as const,
+  },
+  {
     cle: 'COUVERT',
-    resume: 'Ni rupture ni passage sous la sécurité',
+    resume: 'La couverture atteint la cible',
     Icone: CheckCircle2,
     ton: 'succes' as const,
   },
@@ -244,7 +257,7 @@ export function Stock() {
           </Onglet>
           <Onglet value="surveillance" disabled={!lirePlan}>
             <Siren className="size-3.5" />
-            Surveillance / Alertes
+            Surveillance
           </Onglet>
         </OngletsListe>
         <OngletContenu value="projete">
@@ -369,12 +382,16 @@ function StockProjete({ lirePlan, surSimuler }: { lirePlan: boolean; surSimuler?
     })
   }
 
+  /* LES 21 COLONNES DU STOCK PROJETÉ (décision du 27/10/2026, soir), dans
+     l'ordre validé. Ligne principale : 1, 5 à 13, 17, 19, 20, 21 ; ligne ↳
+     (`complement`) : 2, 3, 4, 14, 15, 16, 18. Les signaux ne sont QUE dans la
+     fenêtre de détail. Tout vient du moteur de couverture. */
   const colonnes: Colonne<LigneProjete>[] = [
     {
       champ: 'code_reference',
       entete: 'Référence',
       rendu: (l) => (
-        <span className="block max-w-[11rem] truncate font-medium text-texte" title={l.code_reference}>
+        <span className="block max-w-[6.5rem] truncate font-medium text-texte" title={l.code_reference}>
           {l.code_reference}
         </span>
       ),
@@ -382,122 +399,154 @@ function StockProjete({ lirePlan, surSimuler }: { lirePlan: boolean; surSimuler?
     {
       champ: 'designation',
       entete: 'Désignation',
-      // Souvent la répétition du code : elle part la première sur la ligne ↳.
-      secondaire: true,
-      rendu: (l) => (
-        <span className="block max-w-[12rem] truncate text-attenue-texte" title={l.designation ?? undefined}>
-          {l.designation && l.designation !== l.code_reference ? l.designation : '—'}
-        </span>
-      ),
+      complement: true,
+      rendu: (l) => (l.designation && l.designation !== l.code_reference ? l.designation : '—'),
+    },
+    {
+      champ: 'fournisseur_nom',
+      entete: 'Fournisseur',
+      complement: true,
+      rendu: (l) => fmt.texte(l.fournisseur_nom),
+    },
+    {
+      champ: 'classe_abc',
+      entete: 'ABC / XYZ',
+      complement: true,
+      rendu: (l) => (l.classe_abc ? `${l.classe_abc}${l.classe_xyz ?? ''}` : '—'),
     },
     {
       champ: 'magasin_hors_restes_kg',
-      entete: 'Disponible',
+      entete: 'Stock disponible',
       numerique: true,
-      largeur: '84px',
+      largeur: '66px',
       rendu: (l) => kgCellule(l.magasin_hors_restes_kg),
     },
     {
       champ: 'machine_hors_restes_kg',
-      entete: 'Sur machine',
+      entete: 'Sur machines',
       numerique: true,
-      largeur: '84px',
+      largeur: '60px',
       rendu: (l) => kgCellule(l.machine_hors_restes_kg),
     },
     {
       champ: 'restant_kg',
-      entete: 'Restant',
+      entete: 'Restant constaté',
       numerique: true,
-      largeur: '76px',
+      largeur: '62px',
       rendu: (l) => kgCellule(l.restant_kg),
     },
     {
       champ: 'arrivages_comptes_kg',
       entete: 'Arrivages',
       numerique: true,
-      largeur: '84px',
-      rendu: (l) =>
-        l.arrivages_comptes_kg > 0.05 ? (
-          <span
-            title={
-              l.prochain_arrivage_date
-                ? `prochain : ${kg(l.prochain_arrivage_kg ?? 0)} kg le ${fmt.date(l.prochain_arrivage_date)}`
-                : undefined
-            }
-          >
-            {kg(l.arrivages_comptes_kg)}
-          </span>
-        ) : (
-          <span className="text-attenue-texte">—</span>
-        ),
+      largeur: '64px',
+      rendu: (l) => kgCellule(l.arrivages_comptes_kg),
     },
     {
       champ: 'stock_total_projete_kg',
-      entete: 'Stock total projeté',
+      entete: 'Stock projeté',
       numerique: true,
-      largeur: '96px',
+      largeur: '66px',
       rendu: (l) => <span className="font-medium">{kg(l.stock_total_projete_kg)}</span>,
     },
     {
-      champ: 'besoin_jusqu_livraison_kg',
-      entete: 'Besoin jusqu’à livraison',
+      champ: 'besoin_jusqu_reception_kg',
+      entete: 'Besoin jusqu’à réception',
       numerique: true,
-      largeur: '104px',
-      rendu: (l) => (
-        <span
-          className={cn(l.besoin_jusqu_livraison_kg > l.magasin_hors_restes_kg + l.machine_hors_restes_kg + l.restant_kg + 0.05 && 'text-alerte')}
-          title={`Le plan des ${l.delai_j} prochains jours (délai fournisseur)`}
-        >
-          {kgCellule(l.besoin_jusqu_livraison_kg)}
-        </span>
-      ),
+      largeur: '70px',
+      rendu: (l) => (l.besoin_jusqu_reception_kg == null ? <span className="text-attenue-texte">—</span> : kg(l.besoin_jusqu_reception_kg)),
     },
     {
       champ: 'jours_couverture',
-      entete: 'Couverture planifiée',
+      entete: 'Couverture actuelle',
       numerique: true,
-      largeur: '96px',
+      largeur: '68px',
       valeurTri: (l) => (l.jours_couverture == null ? 1e9 : l.jours_couverture),
-      rendu: (l) => {
-        const m = motif(l)
-        return l.couvert_tout_horizon ? (
-          <span className="text-succes" title={`Couvert jusqu’au ${fmt.date(l.couvert_jusqu_au)}, fin de l’horizon`}>
-            horizon
+      rendu: (l) =>
+        l.jours_couverture == null ? (
+          <span className="text-succes">{`> ${l.horizon_j ?? '?'} j`}</span>
+        ) : (
+          <span className="tabular-nums">{l.jours_couverture} j</span>
+        ),
+    },
+    {
+      champ: 'couverture_cible_j',
+      entete: 'Cible',
+      numerique: true,
+      largeur: '54px',
+      rendu: (l) =>
+        l.couverture_cible_j == null ? (
+          <span className="text-alerte">non définie</span>
+        ) : (
+          <span className="tabular-nums">{l.couverture_cible_j} j</span>
+        ),
+    },
+    {
+      champ: 'ecart_cible_j',
+      entete: 'Écart cible',
+      numerique: true,
+      largeur: '56px',
+      valeurTri: (l) => (l.ecart_cible_j == null ? 1e9 : l.ecart_cible_j),
+      rendu: (l) =>
+        l.ecart_cible_j == null ? (
+          <span className="text-attenue-texte">—</span>
+        ) : (
+          <span className={cn('tabular-nums', l.ecart_cible_j < 0 && 'font-medium text-danger')}>
+            {l.ecart_cible_j > 0 ? '+' : l.ecart_cible_j < 0 ? '−' : ''}
+            {Math.abs(l.ecart_cible_j)} j
           </span>
-        ) : l.jours_couverture != null ? (
-          <span
-            className={cn('tabular-nums', l.statut === 'PLAN_NON_COUVERT' ? 'font-medium text-danger' : l.statut === 'SOUS_SECURITE' ? 'text-alerte' : '')}
-            title={m ?? undefined}
-          >
-            {l.jours_couverture} j
+        ),
+    },
+    {
+      champ: 'premiere_rupture',
+      entete: '1re rupture projetée',
+      complement: true,
+      rendu: (l) => (l.premiere_rupture ? <span className="tabular-nums">{dateListe(l.premiere_rupture)}</span> : 'aucune sur l’horizon'),
+    },
+    {
+      champ: 'delai_j',
+      entete: 'Délai',
+      numerique: true,
+      complement: true,
+      rendu: (l) => <span title={l.source_delai ? `source : ${l.source_delai}` : undefined}>{l.delai_j ?? '—'} j</span>,
+    },
+    {
+      champ: 'date_disponibilite',
+      entete: 'Date réception proposée',
+      complement: true,
+      rendu: (l) =>
+        l.date_disponibilite ? (
+          <span className="tabular-nums">
+            {dateListe(l.date_disponibilite)}
+            {l.reception_en_retard && <span className="ml-1 font-medium text-danger">en retard</span>}
           </span>
         ) : (
-          <span className="text-attenue-texte">—</span>
-        )
-      },
+          '—'
+        ),
     },
     {
       champ: 'qte_a_commander_kg',
       entete: 'À commander',
       numerique: true,
-      largeur: '92px',
+      largeur: '68px',
       rendu: (l) =>
         l.qte_a_commander_kg ? (
-          <span
-            className={cn('tabular-nums', l.a_commander_aujourdhui && 'font-semibold text-danger')}
-            title={l.a_commander_aujourdhui ? 'Date limite de commande atteinte ou dépassée' : undefined}
-          >
-            {kg(l.qte_a_commander_kg)}
-          </span>
+          <span className="font-medium tabular-nums">{kg(l.qte_a_commander_kg)}</span>
         ) : (
           <span className="text-attenue-texte">—</span>
         ),
     },
     {
+      champ: 'palettes_equivalentes',
+      entete: 'Unité / palette',
+      complement: true,
+      rendu: (l) => (typeof l.palettes_equivalentes === 'number' ? `${fmt.nombre(l.palettes_equivalentes, 2)} pal.` : '—'),
+    },
+    {
       champ: 'montant_estime_mad',
       entete: 'Montant commande',
       numerique: true,
-      largeur: '104px',
+      largeur: '72px',
       rendu: (l) =>
         typeof l.montant_estime_mad === 'number' ? (
           <span className="tabular-nums" title={l.source_prix ? `Prix : ${l.source_prix}` : undefined}>
@@ -508,33 +557,9 @@ function StockProjete({ lirePlan, surSimuler }: { lirePlan: boolean; surSimuler?
         ),
     },
     {
-      champ: 'fournisseur_nom',
-      entete: 'Fournisseur',
-      secondaire: true,
-      rendu: (l) => <span className="whitespace-nowrap">{fmt.texte(l.fournisseur_nom)}</span>,
-    },
-    {
-      champ: 'delai_j',
-      entete: 'Délai (j)',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => l.delai_j ?? '—',
-    },
-    {
-      champ: 'premiere_rupture',
-      entete: '1re rupture',
-      secondaire: true,
-      rendu: (l) =>
-        l.premiere_rupture ? (
-          <span className="tabular-nums text-danger">{dateListe(l.premiere_rupture)}</span>
-        ) : (
-          <span className="text-attenue-texte">—</span>
-        ),
-    },
-    {
       champ: 'date_limite_commande',
-      entete: 'Date limite de commande',
-      secondaire: true,
+      entete: 'Avant le',
+      largeur: '64px',
       rendu: (l) =>
         l.date_limite_commande ? (
           <span className={cn('tabular-nums', l.a_commander_aujourdhui && 'font-medium text-danger')}>
@@ -545,24 +570,11 @@ function StockProjete({ lirePlan, surSimuler }: { lirePlan: boolean; surSimuler?
         ),
     },
     {
-      champ: 'classe_abc',
-      entete: 'ABC / XYZ',
-      largeur: '78px',
-      secondaire: true,
-      rendu: (l) =>
-        !l.classe_abc ? (
-          <span className="text-attenue-texte">—</span>
-        ) : (
-          <span
-            className={cn(
-              'inline-block rounded-[3px] px-1.5 py-px font-medium',
-              l.classe_abc === 'A' ? 'bg-primaire/15 text-primaire' : 'text-attenue-texte',
-            )}
-          >
-            {l.classe_abc}
-            {l.classe_xyz ?? ''}
-          </span>
-        ),
+      champ: 'statut',
+      entete: 'État',
+      largeur: '136px',
+      valeurTri: (l) => `${{ RUPTURE_INEVITABLE: 0, SOUS_SECURITE: 1, SOUS_CIBLE: 2 }[l.statut] ?? 3}`,
+      rendu: (l) => <StatutBadge entite="statut_stock" code={l.statut} title={l.raison_etat ?? undefined} />,
     },
   ]
 
@@ -599,6 +611,7 @@ function StockProjete({ lirePlan, surSimuler }: { lirePlan: boolean; surSimuler?
         module={MODULE}
         recherche={false}
         entetesRepliables
+        serre
         menuContextuel={(l) => <ActionsLigne ligne={l} ouvrir={ouvrir} />}
         surClic={lirePlan ? (l) => setOuverte(l) : undefined}
         colonnes={colonnes}

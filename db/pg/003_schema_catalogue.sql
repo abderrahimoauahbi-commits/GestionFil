@@ -178,9 +178,11 @@ CREATE TABLE reference (
                             END) STORED,
 
     -- Politique de reapprovisionnement (parametres LOCAUX, cf. B3/R09)
+    -- Stock minimum : garde-fou, signal seulement, jamais une quantite de commande.
     stock_min_kg        numeric(18,4)    CHECK (stock_min_kg IS NULL OR stock_min_kg >= 0),
-    couverture_min_mois numeric(12,4)    CHECK (couverture_min_mois IS NULL OR couverture_min_mois >= 0),
-    marge_securite_pct  numeric(9,4)    CHECK (marge_securite_pct IS NULL OR marge_securite_pct >= 0),
+    -- Couverture cible (mois) du MRP, moteur v2 (2026-10-27l, ancienne
+    -- couverture_min_mois) ; la marge de securite de l'article est retiree.
+    couverture_cible_mois numeric(12,4)  CHECK (couverture_cible_mois IS NULL OR couverture_cible_mois >= 0),
     moq_kg              numeric(18,4)    CHECK (moq_kg IS NULL OR moq_kg > 0),
     multiple_achat_kg   numeric(18,4)    CHECK (multiple_achat_kg IS NULL OR multiple_achat_kg > 0),
 
@@ -212,6 +214,9 @@ CREATE TABLE reference (
     -- Un multiple d'achat doit etre coherent avec le MOQ
     CHECK (moq_kg IS NULL OR multiple_achat_kg IS NULL OR moq_kg >= multiple_achat_kg)
 );
+
+COMMENT ON COLUMN reference.couverture_cible_mois IS 'Couverture cible (mois) : couverture souhaitée au moment de la réception ; cible MRP, obligatoire pour un article soumis au MRP ; jamais une quantité';
+COMMENT ON COLUMN reference.stock_min_kg IS 'Stock minimum : garde-fou, signal seulement, jamais une quantité de commande';
 
 CREATE INDEX ix_ref_categorie   ON reference(code_categorie);
 CREATE INDEX ix_ref_fournisseur ON reference(code_fournisseur);

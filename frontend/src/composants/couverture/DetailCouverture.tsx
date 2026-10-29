@@ -3,31 +3,35 @@
  * fenêtre (27/10/2026), partagé par le plan d'achat (onglet « À commander ») et
  * le stock projeté (/stock).
  *
- * Au plan d'achat, TOUT le détail d'avant, rien de retiré : réglages et leur
- * source, courbe du solde, calcul de la première proposition, propositions
- * suivantes, ressources et arrivages, chronologie, plan mois par mois.
+ * MOTEUR v2, LA COUVERTURE CIBLE (§ 15.5, 27/10/2026) : en tête, la COUVERTURE
+ * de la référence — couverture actuelle et date de rupture, cible C et sa
+ * source, écart, date de besoin D*, date limite de commande, sécurité X (creux
+ * tS, point bas b sous le seuil NS) ou « non appliquée », stock minimum
+ * respecté ou franchi, l'état et ses signaux en pastilles à part. Puis la
+ * proposition décomposée : Q0 (besoin net de la fenêtre) + X (sécurité) +
+ * arrondi = Q, la fenêtre couverte et le stock projeté après réception.
  *
- * Au stock projeté (`enrichi`), le même détail ENRICHI : la situation d'un coup
- * d'œil (stocks, arrivages, besoin jusqu'à livraison, couverture, sécurité, à
- * commander, montant), l'approvisionnement (les réglages qui entrent dans le
- * calcul, avec leur source, et ceux de la fiche qui ne sont que des ALERTES),
- * la projection chronologique en tableau (par événements ou jour par jour), et
- * le résultat MRP qui permet de RECONSTITUER la proposition.
+ * Au plan d'achat : réglages et leur source, courbe du solde, calcul de la
+ * première proposition, propositions suivantes, ressources et arrivages,
+ * chronologie, plan mois par mois. Au stock projeté (`enrichi`), en plus : la
+ * situation des stocks, l'approvisionnement (L, N, S, C chacun avec sa source),
+ * la projection chronologique en tableau et le résultat MRP.
  *
  * Rien ne se recalcule ici : chaque chiffre vient du moteur (`GET
- * /api/couverture/{ref}`), au plus additionné ou soustrait pour l'affichage
- * (écart à la sécurité, somme du plan entre deux jours du moteur).
+ * /api/couverture/{ref}`), au plus additionné ou soustrait pour l'affichage.
  */
 import { useState, type ReactNode } from 'react'
 import { FlaskConical } from 'lucide-react'
 import { useDetailCouverture } from './lecture'
 import { Alerte, Badge, Bouton, Chargement } from '../ui/base'
 import { cn, fmt } from '../../lib/utils'
+import { libelleStatut } from '../../lib/statuts'
+import { StatutBadge } from '../StatutBadge'
 import { CourbeSolde } from './CourbeSolde'
+import { FenetreStockProjete } from './FenetreStockProjete'
 import {
   CATEGORIES,
   NATURES,
-  SOURCES_PRIX,
   dateCourte,
   kg,
   libelleArrivage,
@@ -37,6 +41,7 @@ import {
   type Evenement,
   type Jour,
   type Proposition,
+  type SignalCouverture,
   type VueAnalyse,
 } from './types'
 
@@ -68,6 +73,8 @@ export function DetailReference({
       </p>
     )
   const d = q.data
+  // LE STOCK PROJETÉ (27/10/2026, soir) : sa propre fenêtre, validée avec l'utilisateur.
+  if (enrichi) return <FenetreStockProjete d={d} surSimuler={surSimuler} />
   const premiere = d.propositions?.[0]
   return (
     <div className="min-w-0 space-y-5 text-[12.5px] whitespace-normal" onClick={(e) => e.stopPropagation()}>
@@ -78,11 +85,8 @@ export function DetailReference({
           </Bouton>
         </div>
       )}
-      {enrichi && <Situation d={d} />}
-      {enrichi ? <Approvisionnement d={d} /> : <LigneReglages d={d} />}
-      {!enrichi && d.reglages?.defaut_donnees && (
-        <p className="text-alerte">Défaut de données, signalé (jamais bloquant) : {d.reglages.defaut_donnees}.</p>
-      )}
+      <Couverture d={d} />
+      <LigneReglages d={d} />
 
       {(d.jours?.length ?? 0) > 1 && (
         <section>
@@ -90,15 +94,6 @@ export function DetailReference({
           <CourbeSolde jours={d.jours} propositions={d.propositions ?? []} />
         </section>
       )}
-
-      {enrichi && (
-        <section>
-          <Titre>Projection chronologique</Titre>
-          <Projection d={d} />
-        </section>
-      )}
-
-      {enrichi && <ResultatMrp d={d} />}
 
       <div className="grid gap-4 xl:grid-cols-2">
         <section className="min-w-0">
@@ -117,14 +112,12 @@ export function DetailReference({
         </section>
       </div>
 
-      {!enrichi && (
-        <section>
-          <Titre>Chronologie</Titre>
-          <Chronologie evenements={d.evenements ?? []} />
-        </section>
-      )}
+      <section>
+        <Titre>Chronologie</Titre>
+        <Chronologie evenements={d.evenements ?? []} />
+      </section>
 
-      {(d.plan_mois?.length ?? 0) > 0 && <PlanParMois d={d} ouvert={enrichi} />}
+      {(d.plan_mois?.length ?? 0) > 0 && <PlanParMois d={d} />}
     </div>
   )
 }
@@ -135,7 +128,12 @@ export function LigneReglages({ d }: { d: Pick<VueAnalyse, 'reglages'> }) {
   if (!r) return null
   return (
     <p className="text-attenue-texte">
-      Délai fournisseur <b className="text-texte">{r.delai_j} j</b>
+      Couverture cible{' '}
+      <b className="text-texte">
+        {r.couverture_cible_j != null ? `${r.couverture_cible_j} j` : 'non définie'}
+      </b>
+      {r.couverture_cible_mois != null && ` (${fmt.nombre(r.couverture_cible_mois, 1)} mois)`}
+      {source(r.source_cible)} · délai fournisseur <b className="text-texte">{r.delai_j} j</b>
       {source(r.source_delai)} · couverture d’une commande <b className="text-texte">{r.couverture_commande_j} j</b>
       {source(r.source_couverture)} · sécurité <b className="text-texte">{fmt.nombre(r.jours_securite, 0)} j</b>
       {source(r.source_securite)} · minimum de commande{' '}
@@ -144,6 +142,111 @@ export function LigneReglages({ d }: { d: Pick<VueAnalyse, 'reglages'> }) {
       {r.source_multiple}
       {r.kg_palette ? ` · palette ordinaire ${kg(r.kg_palette)} kg (fiche)` : ''}
     </p>
+  )
+}
+
+/** Les signaux du moteur, en pastilles distinctes de l'état ; le message en infobulle. */
+export function PastillesSignaux({ signaux, compact = false }: { signaux?: SignalCouverture[] | null; compact?: boolean }) {
+  if (!signaux?.length) return null
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {signaux.map((sg) => (
+        <StatutBadge
+          key={sg.code}
+          entite="signal_couverture"
+          code={sg.code}
+          title={sg.message}
+          className={cn('border-dashed', compact && 'px-1 text-[10.5px]')}
+        />
+      ))}
+    </span>
+  )
+}
+
+/**
+ * LA COUVERTURE (§ 15.5) : couverture actuelle, cible, écart, rupture, D*, date
+ * limite, sécurité, stock minimum ; l'état et les signaux à part.
+ */
+function Couverture({ d }: { d: DetailCouverture }) {
+  const c = d.situation
+  if (!c) return null
+  const r = d.reglages
+  const sec = c.securite
+  const ecart = c.ecart_cible_j
+  return (
+    <section>
+      <div className="mb-1.5 flex flex-wrap items-center gap-2">
+        <Titre>Couverture — {c.source}</Titre>
+        <StatutBadge entite="statut_stock" code={c.etat} title="L’état, calculé sans proposition ; le plus grave l’emporte" />
+        {d.synthese?.raison_etat && <span className="text-[12.5px]">{d.synthese.raison_etat}</span>}
+        <PastillesSignaux signaux={c.signaux} />
+      </div>
+      <dl className="grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-4">
+        <Paire libelle="Couverture actuelle" note={c.premiere_rupture ? `rupture le ${dateCourte(c.premiere_rupture)}` : undefined}>
+          {c.couverture_actuelle_j != null ? `${c.couverture_actuelle_j} j` : 'aucune rupture sur l’horizon'}
+        </Paire>
+        <Paire
+          libelle="Couverture cible"
+          note={r?.source_cible ? `${r.couverture_cible_mois != null ? `${fmt.nombre(r.couverture_cible_mois, 1)} mois, ` : ''}${r.source_cible}` : undefined}
+        >
+          {c.couverture_cible_j != null ? `${c.couverture_cible_j} j` : <span className="text-alerte">non définie</span>}
+        </Paire>
+        <Paire libelle="Écart" note="couverture − cible">
+          {ecart != null ? (
+            <span className={cn(ecart < 0 && 'font-medium text-alerte')}>
+              {ecart > 0 ? '+ ' : ecart < 0 ? '− ' : ''}
+              {Math.abs(ecart)} j
+            </span>
+          ) : (
+            '—'
+          )}
+        </Paire>
+        <Paire libelle="Rupture projetée" note={c.reste_rupture_kg != null ? `reste ${kg(c.reste_rupture_kg)} kg ce jour-là` : undefined}>
+          {c.premiere_rupture ? dateCourte(c.premiere_rupture) : 'aucune sur l’horizon'}
+        </Paire>
+        <Paire libelle="Date de besoin (D*)" note="rupture − cible : la réception normale">
+          {dateCourte(c.date_besoin)}
+        </Paire>
+        <Paire libelle="Date limite de commande" note={r ? `D* − délai de ${r.delai_j} j` : undefined}>
+          <span className={cn(c.date_limite_commande && d.aujourdhui && c.date_limite_commande < d.aujourdhui && 'font-medium text-danger')}>
+            {dateCourte(c.date_limite_commande)}
+          </span>
+        </Paire>
+        <Paire
+          libelle="Sécurité"
+          note={`${fmt.nombre(sec.jours, 0)} j de plan${source(r?.source_securite)}, sur [aujourd’hui, aujourd’hui + délai]`}
+        >
+          {sec.appliquee ? (
+            <span>
+              appliquée : <b>{kg(sec.x_kg)} kg</b>, creux le {dateCourte(sec.premier_franchissement)} (b ={' '}
+              {kg(sec.point_bas_creux_kg)} kg sous NS = {kg(sec.seuil_creux_kg)} kg le {dateCourte(sec.jour_creux)})
+            </span>
+          ) : (
+            'non appliquée'
+          )}
+        </Paire>
+        <Paire libelle="Stock minimum" note={c.stock_minimum.kg != null ? `${kg(c.stock_minimum.kg)} kg, garde-fou : un signal, jamais une quantité` : 'aucun sur la fiche'}>
+          {c.stock_minimum.kg == null ? (
+            '—'
+          ) : c.stock_minimum.franchi_le ? (
+            <span className="text-alerte">
+              franchi le {dateCourte(c.stock_minimum.franchi_le)} ({kg(c.stock_minimum.point_bas_kg)} kg) — vérifier le plan
+            </span>
+          ) : (
+            'respecté'
+          )}
+        </Paire>
+      </dl>
+      {c.signaux.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-[11.5px] text-attenue-texte">
+          {c.signaux.map((sg) => (
+            <li key={sg.code}>
+              <span className="font-medium text-texte">{libelleStatut('signal_couverture', sg.code)}</span> : {sg.message}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
@@ -164,134 +267,6 @@ function Paire({ libelle, children, note }: { libelle: string; children: ReactNo
   )
 }
 
-const kgOuTiret = (v: unknown) => (typeof v === 'number' ? `${kg(v)} kg` : '—')
-
-function Situation({ d }: { d: DetailCouverture }) {
-  const s = d.synthese
-  const achat = d.achat ?? {}
-  const couverture = s.couvert_tout_horizon
-    ? `tout l’horizon (jusqu’au ${dateCourte(s.couvert_jusqu_au)})`
-    : s.jours_couverture != null
-      ? `${s.jours_couverture} j${s.couvert_jusqu_au ? ` — jusqu’au ${dateCourte(s.couvert_jusqu_au)}` : ' — rupture aujourd’hui'}`
-      : '—'
-  return (
-    <section>
-      <Titre>Situation</Titre>
-      <dl className="grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-4">
-        <Paire libelle="Référence">{d.reference.code_reference}</Paire>
-        <Paire libelle="Désignation">{d.reference.designation ?? '—'}</Paire>
-        <Paire libelle="Fournisseur">{d.reference.fournisseur_nom ?? '—'}</Paire>
-        <Paire libelle="Délai fournisseur" note={source(s.source_delai)}>
-          {typeof s.delai_j === 'number' ? `${s.delai_j} j` : '—'}
-        </Paire>
-        {'prix_estime_mad' in achat && (
-          <Paire libelle="Prix d’achat" note={achat.source_prix ? SOURCES_PRIX[achat.source_prix] ?? achat.source_prix : undefined}>
-            {typeof achat.prix_estime_mad === 'number' ? `${fmt.nombre(achat.prix_estime_mad, 4)} MAD/kg` : '—'}
-          </Paire>
-        )}
-        <Paire libelle="Stock total" note="physique, compté ou non">
-          {kgOuTiret(d.ressources?.stock_physique_kg)}
-        </Paire>
-        <Paire libelle="Disponible (compté)">{kgOuTiret(s.disponible_kg)}</Paire>
-        <Paire libelle="Sur machine">{kgOuTiret(s.machine_kg)}</Paire>
-        <Paire libelle="Disponible hors quarantaine" note="magasins comptés">
-          {kgOuTiret(s.magasin_kg)}
-        </Paire>
-        <Paire libelle="Arrivages prévus" note="comptés à leur date">
-          {kgOuTiret(s.arrivages_comptes_kg)}
-        </Paire>
-        <Paire libelle="Besoin jusqu’à livraison">{kgOuTiret(s.besoin_jusqu_livraison_kg)}</Paire>
-        <Paire libelle="Stock y compris arrivages">{kgOuTiret(s.stock_total_projete_kg)}</Paire>
-        <Paire libelle="Couverture planifiée">{couverture}</Paire>
-        <Paire libelle="Seuil de sécurité" note={typeof s.jours_securite === 'number' ? `${fmt.nombre(s.jours_securite, 0)} j de plan` : undefined}>
-          {kgOuTiret(s.securite_aujourdhui_kg)}
-        </Paire>
-        <Paire libelle="Plan / mois">{kgOuTiret(s.plan_mois_kg)}</Paire>
-        <Paire libelle="Réel / mois" note="12 mois pleins">
-          {kgOuTiret(d.approvisionnement?.reel_mois_kg)}
-        </Paire>
-        <Paire libelle="À commander">
-          {positif(s.qte_a_commander_kg) ? (
-            <b>{kg(s.qte_a_commander_kg)} kg</b>
-          ) : 'qte_a_commander_kg' in s ? (
-            'rien'
-          ) : (
-            '—'
-          )}
-        </Paire>
-        {'montant_estime_mad' in achat && (
-          <Paire libelle="Montant de la commande">
-            {typeof achat.montant_estime_mad === 'number' ? fmt.mad(achat.montant_estime_mad) : '—'}
-          </Paire>
-        )}
-      </dl>
-    </section>
-  )
-}
-
-function Approvisionnement({ d }: { d: DetailCouverture }) {
-  const r = d.reglages
-  const a = d.approvisionnement ?? {}
-  const ref = d.reference
-  const palette =
-    r?.kg_palette != null
-      ? `${kg(r.kg_palette)} kg${ref.poids_bobine_kg && ref.bobines_par_palette ? ` (${ref.bobines_par_palette} bobines × ${fmt.nombre(ref.poids_bobine_kg, 2)} kg)` : ''}`
-      : 'inconnue de la fiche'
-  return (
-    <section className="grid gap-4 lg:grid-cols-2">
-      <div className="min-w-0">
-        <Titre>Approvisionnement — ce que le calcul utilise</Titre>
-        <dl className="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
-          <Paire libelle="Délai fournisseur" note={source(r?.source_delai)}>
-            {r ? `${r.delai_j} j` : '—'}
-          </Paire>
-          <Paire libelle="Couverture d’une commande" note={source(r?.source_couverture)}>
-            {r ? `${r.couverture_commande_j} j` : '—'}
-          </Paire>
-          <Paire libelle="Jours de sécurité" note={source(r?.source_securite)}>
-            {r ? `${fmt.nombre(r.jours_securite, 0)} j` : '—'}
-          </Paire>
-          <Paire libelle="Horizon du plan" note={d.plan?.libelle ?? undefined}>
-            {d.fin_horizon ? `jusqu’au ${dateCourte(d.fin_horizon)}` : 'aucun plan en service'}
-          </Paire>
-          <Paire libelle="Minimum de commande">{r?.moq_kg ? `${kg(r.moq_kg)} kg` : 'aucun'}</Paire>
-          <Paire libelle="Règle d’arrondi">
-            {r?.multiple_kg ? `${kg(r.multiple_kg)} kg — ` : ''}
-            {r?.source_multiple ?? '—'}
-          </Paire>
-          <Paire libelle="Unité / palette" note={a.unite_catalogue ? `unité du catalogue : ${a.unite_catalogue}` : undefined}>
-            {palette}
-          </Paire>
-        </dl>
-        {r?.defaut_donnees && (
-          <p className="mt-1 text-alerte">Défaut de données, signalé (jamais bloquant) : {r.defaut_donnees}.</p>
-        )}
-      </div>
-      <div className="min-w-0">
-        <Titre>Fiche article — des alertes, pas des termes du calcul</Titre>
-        <dl className="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
-          <Paire libelle="Stock minimum (fiche)">{kgOuTiret(a.stock_min_fiche_kg)}</Paire>
-          <Paire
-            libelle="Couverture minimale"
-            note={a.couverture_min_fiche_mois == null && a.couverture_min_parametre_mois != null ? '(P_CouvMinMois)' : '(fiche)'}
-          >
-            {(a.couverture_min_fiche_mois ?? a.couverture_min_parametre_mois) != null
-              ? `${fmt.nombre(a.couverture_min_fiche_mois ?? a.couverture_min_parametre_mois, 1)} mois`
-              : '—'}
-          </Paire>
-          <Paire libelle="Seuil d’alerte" note="(P_SeuilAlerte)">
-            {a.seuil_alerte_j != null ? `${fmt.nombre(a.seuil_alerte_j, 0)} j` : '—'}
-          </Paire>
-        </dl>
-        <p className="mt-1 text-[11.5px] text-attenue-texte">
-          Décision du 10/10/2026 : le plan d’achat suit le plan de production seul. Le stock minimum, la couverture
-          minimale et le seuil d’alerte de la fiche peuvent alerter ; le moteur ne les lit pas. La sécurité du calcul
-          vient des jours de sécurité de la classe ABC.
-        </p>
-      </div>
-    </section>
-  )
-}
 
 /** Une rangée de la projection : ce qu'elle couvre, depuis la rangée précédente. */
 interface RangeeProjection {
@@ -430,95 +405,6 @@ export function Projection({ d }: { d: Pick<VueAnalyse, 'evenements' | 'jours' |
   )
 }
 
-/**
- * LE RÉSULTAT MRP : les dates et les quantités que le moteur a trouvées, puis
- * la RECONSTITUTION de la proposition au jour déterminant t*, à partir des seuls
- * jours du moteur : plan de D à t* + sécurité − S(D) − arrivages de ]D, t*] =
- * besoin de réapprovisionnement ; + minimum ; + arrondi = quantité proposée.
- */
-function ResultatMrp({ d }: { d: DetailCouverture }) {
-  const s = d.synthese
-  const p = d.propositions?.[0]
-  const suivante = d.propositions?.[1]
-  const achat = d.achat ?? {}
-  const jours = d.jours ?? []
-  const iD = p ? jours.findIndex((j) => j.date === p.date_disponibilite) : -1
-  const iT = p ? jours.findIndex((j) => j.date === p.jour_determinant) : -1
-  const reconstitution =
-    p && iD >= 0 && iT >= iD
-      ? {
-          planDT: jours.slice(iD, iT + 1).reduce((t, j) => t + j.conso_prevue_kg, 0),
-          arrDT: jours.slice(iD + 1, iT + 1).reduce((t, j) => t + j.arrivee_kg, 0),
-        }
-      : null
-  return (
-    <section>
-      <Titre>Résultat MRP</Titre>
-      <dl className="grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-4">
-        <Paire libelle="1re date sous la sécurité">{dateCourte(s.premier_passage_securite)}</Paire>
-        <Paire libelle="1re rupture">{s.premiere_rupture ? dateCourte(s.premiere_rupture) : 'aucune sur l’horizon'}</Paire>
-        <Paire libelle="Besoin non couvert">{kgOuTiret(s.plan_non_couvert_kg)}</Paire>
-        <Paire libelle="Quantité proposée">
-          {p && typeof p.quantite_proposee_kg === 'number' ? `${kg(p.quantite_proposee_kg)} kg` : p ? '—' : 'rien'}
-        </Paire>
-        <Paire libelle="Date limite de commande">{p ? dateCourte(p.date_limite_commande) : '—'}</Paire>
-        <Paire libelle="Disponible le (D)">{p ? dateCourte(p.date_disponibilite) : '—'}</Paire>
-        <Paire libelle="Prochaine proposition">
-          {suivante
-            ? `${typeof suivante.quantite_proposee_kg === 'number' ? `${kg(suivante.quantite_proposee_kg)} kg ` : ''}le ${dateCourte(suivante.date_disponibilite)}`
-            : 'aucune'}
-        </Paire>
-        {'montant_estime_mad' in achat && (
-          <Paire libelle="Montant">
-            {typeof achat.montant_estime_mad === 'number' ? fmt.mad(achat.montant_estime_mad) : '—'}
-          </Paire>
-        )}
-      </dl>
-      {p && reconstitution && typeof p.besoin_theorique_kg === 'number' && (
-        <div className="mt-2">
-          <p className="mb-1 text-[11.5px] text-attenue-texte">
-            La proposition se reconstitue au jour déterminant ({dateCourte(p.jour_determinant)}), le jour de la fenêtre
-            [D, F[ — D inclus, F exclu — où le besoin est le plus fort :
-          </p>
-          <table className="w-full max-w-xl">
-            <tbody>
-              <Etape
-                libelle="Plan de D au jour déterminant"
-                valeur={`${kg(reconstitution.planDT)} kg`}
-                note={`du ${dateCourte(p.date_disponibilite)} au ${dateCourte(p.jour_determinant)} inclus`}
-              />
-              <Etape signe="+" libelle="Sécurité" valeur={`${kg(p.securite_kg)} kg`} />
-              <Etape signe="−" libelle="S(D)" valeur={`${kg(p.solde_debut_d_kg)} kg`} note="solde au début de D, arrivages du jour D compris" />
-              <Etape signe="−" libelle="Arrivages après D" valeur={`${kg(reconstitution.arrDT)} kg`} note="jusqu’au jour déterminant" />
-              <Etape
-                signe="="
-                libelle="Besoin de réapprovisionnement"
-                valeur={`${kg(p.besoin_theorique_kg)} kg`}
-                note={`besoin théorique du moteur ; le besoin de couverture (plan sur la fenêtre) est de ${kg(p.plan_fenetre_kg)} kg`}
-                fort
-              />
-              {typeof p.apres_minimum_kg === 'number' && (
-                <Etape signe="+" libelle="Minimum" valeur={`${kg(p.apres_minimum_kg)} kg`} note={p.moq_kg ? `minimum ${kg(p.moq_kg)} kg` : 'aucun minimum'} />
-              )}
-              {typeof p.quantite_proposee_kg === 'number' && (
-                <Etape
-                  signe="+"
-                  libelle="Arrondi"
-                  valeur={`${kg(p.quantite_proposee_kg)} kg`}
-                  note={p.multiple_kg ? `au multiple de ${kg(p.multiple_kg)} kg` : 'aucun multiple'}
-                />
-              )}
-              {typeof p.quantite_proposee_kg === 'number' && (
-                <Etape signe="=" libelle="Quantité proposée" valeur={`${kg(p.quantite_proposee_kg)} kg`} fort />
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  )
-}
-
 // ============================================================================
 // Le détail d'avant (plan d'achat), gardé tel quel
 // ============================================================================
@@ -549,68 +435,70 @@ function Etape({
 
 export function CalculProposition({ p, d }: { p: Proposition; d: Pick<VueAnalyse, 'reglages'> }) {
   const r = d.reglages
-  const pourquoiD =
-    p.motif_date === 'délai'
-      ? `aujourd’hui + délai de ${r?.delai_j ?? '?'} j${source(r?.source_delai)} : une commande ne peut pas arriver avant ; le solde passe sous la sécurité dès le ${dateCourte(p.date_sous_securite)}`
-      : `premier jour où le solde projeté passe sous la sécurité${
-          p.date_au_plus_tot ? ` (aujourd’hui + délai, le ${dateCourte(p.date_au_plus_tot)}, tombe avant)` : ''
-        }`
+  const w = p.fenetres?.[0]
+  const pourquoiD = p.en_retard
+    ? `la date de besoin (${dateCourte(p.date_besoin)}) tombe avant aujourd’hui + délai de ${r?.delai_j ?? '?'} j${source(r?.source_delai)} : réception au plus tôt, en retard sur la cible`
+    : `rupture du ${dateCourte(p.date_rupture)} − cible de ${r?.couverture_cible_j ?? '?'} j${source(r?.source_cible)}`
   return (
     <table className="w-full">
       <tbody>
-        <Etape libelle="D — disponibilité de la commande" valeur={dateCourte(p.date_disponibilite)} note={pourquoiD} />
         <Etape
-          libelle="F — fin de la fenêtre (exclue)"
-          valeur={dateCourte(p.date_fin_fenetre)}
-          note={`D + couverture de ${r?.couverture_commande_j ?? p.jours_fenetre} j${source(r?.source_couverture)} : couvre jusqu’au ${dateCourte(p.dernier_jour_couvert)} inclus, ${p.jours_fenetre} j${p.fenetre_bornee_horizon ? ', bornée à la fin de l’horizon du plan' : ''}`}
+          libelle="R — rupture"
+          valeur={dateCourte(p.date_rupture)}
+          note={w && !p.rupture_inevitable ? `reste ${kg(w.reste_kg)} kg au début de ce jour` : undefined}
         />
+        <Etape libelle="D — réception" valeur={dateCourte(p.date_disponibilite)} note={pourquoiD} />
         <Etape
-          libelle="Plan sur la fenêtre"
-          valeur={`${kg(p.plan_fenetre_kg)} kg`}
-          note={`le besoin de couverture, soit ${fmt.nombre(p.conso_moyenne_kg_j, 1)} kg/j en moyenne au plan`}
+          libelle="Fenêtre couverte"
+          valeur={`${dateCourte(p.date_debut_fenetre)} → ${dateCourte(p.dernier_jour_couvert)}`}
+          note={`${p.jours_fenetre} j : [${p.rupture_inevitable ? 'D' : 'R'}, ${p.rupture_inevitable ? 'D' : 'R'} + N[, N = ${r?.couverture_commande_j ?? '?'} j${source(r?.source_couverture)}${p.fenetre_bornee_horizon ? ', bornée à la fin de l’horizon' : ''}${p.consolidee ? ` ; ${p.fenetres.length} fenêtres reçues ensemble` : ''}`}
         />
-        <Etape
-          signe="+"
-          libelle="Sécurité"
-          valeur={`${kg(p.securite_kg)} kg`}
-          note={`${fmt.nombre(p.jours_securite ?? r?.jours_securite ?? 0, 0)} j × ${fmt.nombre(p.conso_moyenne_kg_j, 1)} kg/j${source(r?.source_securite)}`}
-        />
-        <Etape
-          signe="−"
-          libelle="S(D) — solde au début de D"
-          valeur={`${kg(p.solde_debut_d_kg)} kg`}
-          note="arrivages du jour D compris, sans la commande ; jamais négatif : le plan non couvert avant D n’est pas reporté"
-        />
-        <Etape signe="−" libelle="Arrivages dans la fenêtre, après D" valeur={`${kg(p.arrivages_fenetre_kg)} kg`} />
-        {typeof p.besoin_theorique_kg === 'number' && (
+        <Etape libelle="Plan de la fenêtre" valeur={`${kg(p.plan_fenetre_kg)} kg`} note="le plan daté, jour par jour" />
+        <Etape signe="−" libelle="Reste au début" valeur={`${kg(p.reste_kg)} kg`} note={p.rupture_inevitable ? 'le stock au début de D, à zéro au plus bas' : 'reste(R)'} />
+        <Etape signe="−" libelle="Arrivages datés dans la fenêtre" valeur={`${kg(p.arrivages_fenetre_kg)} kg`} />
+        {typeof p.besoin_net_kg === 'number' && (
           <Etape
             signe="="
-            libelle="Besoin théorique"
-            valeur={`${kg(p.besoin_theorique_kg)} kg`}
-            note={`le besoin de réapprovisionnement, contrôlé chaque jour t de la fenêtre : sécurité + plan de D à t − arrivages après D jusqu’à t − S(D) ; le plus fort le ${dateCourte(p.jour_determinant)} (jour déterminant)`}
+            libelle="Q0 — besoin net"
+            valeur={`${kg(p.besoin_net_kg)} kg`}
+            note={
+              p.consolidee
+                ? p.fenetres.map((f) => `${dateCourte(f.debut)} → ${dateCourte(f.dernier_jour_couvert)} : ${kg(f.besoin_net_kg)} kg`).join(' ; ')
+                : 'le moins qu’il faut recevoir en D pour qu’aucune rupture ne tombe avant la fin de la fenêtre'
+            }
             fort
           />
         )}
-        {typeof p.apres_minimum_kg === 'number' && (
+        {positif(p.manque_inevitable_kg) && (
           <Etape
-            signe="+"
-            libelle="Minimum de commande"
-            valeur={`${kg(p.apres_minimum_kg)} kg`}
-            note={p.moq_kg ? `minimum : ${kg(p.moq_kg)} kg` : 'aucun minimum'}
+            libelle="Manque avant la réception"
+            valeur={<span className="text-danger">{kg(p.manque_inevitable_kg)} kg</span>}
+            note="rupture inévitable : affiché, pas commandé"
           />
         )}
-        {typeof p.quantite_proposee_kg === 'number' && (
+        {typeof p.securite_kg === 'number' && (
           <Etape
             signe="+"
-            libelle="Arrondi vers le haut"
-            valeur={`${kg(p.quantite_proposee_kg)} kg`}
-            note={p.multiple_kg ? `au multiple de ${kg(p.multiple_kg)} kg — ${r?.source_multiple ?? ''}` : r?.source_multiple ?? 'aucun multiple : kg'}
+            libelle="X — sécurité"
+            valeur={`${kg(p.securite_kg)} kg`}
+            note={positif(p.securite_kg) ? 'le creux sous le seuil dans le délai ; 1re proposition seulement' : 'non appliquée'}
+          />
+        )}
+        {typeof p.arrondi_kg === 'number' && (
+          <Etape
+            signe="+"
+            libelle="Arrondi"
+            valeur={`${kg(p.arrondi_kg)} kg`}
+            note={[
+              p.moq_kg ? `minimum ${kg(p.moq_kg)} kg` : 'aucun minimum',
+              p.multiple_kg ? `multiple de ${kg(p.multiple_kg)} kg — ${r?.source_multiple ?? ''}` : r?.source_multiple ?? 'aucun multiple : kg',
+            ].join(' ; ')}
           />
         )}
         {typeof p.quantite_proposee_kg === 'number' && (
           <Etape
             signe="="
-            libelle="Quantité proposée"
+            libelle="Q — quantité proposée"
             valeur={`${kg(p.quantite_proposee_kg)} kg`}
             note={
               p.palettes_equivalentes != null
@@ -620,7 +508,19 @@ export function CalculProposition({ p, d }: { p: Proposition; d: Pick<VueAnalyse
             fort
           />
         )}
-        <Etape libelle="À commander avant le" valeur={dateCourte(p.date_limite_commande)} note={`D − délai de ${r?.delai_j ?? '?'} j`} fort />
+        {typeof p.stock_apres_reception_kg === 'number' && (
+          <Etape
+            libelle="Stock après réception"
+            valeur={`${kg(p.stock_apres_reception_kg)} kg`}
+            note={typeof p.stock_fin_fenetre_kg === 'number' ? `le soir de D ; ${kg(p.stock_fin_fenetre_kg)} kg à la fin de la fenêtre` : 'le soir de D'}
+          />
+        )}
+        <Etape
+          libelle="À commander avant le"
+          valeur={<span className={cn(p.en_retard && 'text-danger')}>{dateCourte(p.date_limite_commande)}</span>}
+          note={`D* − délai de ${r?.delai_j ?? '?'} j${p.en_retard ? ' : date dépassée' : ''}`}
+          fort
+        />
       </tbody>
     </table>
   )
@@ -828,9 +728,9 @@ export function Chronologie({ evenements }: { evenements: Evenement[] }) {
   )
 }
 
-function PlanParMois({ d, ouvert }: { d: DetailCouverture; ouvert?: boolean }) {
+function PlanParMois({ d }: { d: DetailCouverture }) {
   return (
-    <details className="rounded-[var(--radius)] border border-bordure px-3 py-1.5" open={ouvert}>
+    <details className="rounded-[var(--radius)] border border-bordure px-3 py-1.5">
       <summary className="cursor-pointer select-none font-medium">Besoins du plan mois par mois, par qualité</summary>
       <p className="mt-1 text-[11.5px] text-attenue-texte">
         Les kilos du mois viennent de la photo du besoin du plan ; la part par qualité, des recettes actuelles. Le plan

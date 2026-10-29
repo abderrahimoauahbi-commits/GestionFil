@@ -2194,8 +2194,10 @@ def scenario_controles_finaux(c, infra):
     # UNE SEULE SOURCE DE VERITE (27/10/2026) : C05 et C25 dependent du moteur de couverture (Rust) et
     # quittent v_controles pour /api/controles ; C27 et C49 n'ont plus de sens (ni seuils de jours ni
     # prolongation du plan) et sont retires.
-    dernier = 67
-    moteur, retires = ("C05", "C25"), ("C27", "C49")
+    # Moteur v2 (27/10/2026, soir) : C68 (stock minimum franchi) et C69 (article au plan sans cible)
+    # sont servis par le moteur, comme C05 (rupture inevitable) et C25.
+    dernier = 69
+    moteur, retires = ("C05", "C25", "C68", "C69"), ("C27", "C49")
     hors_sql = "', '".join(moteur + retires)
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
                              f"FROM generate_series(1, {dernier}) g EXCEPT SELECT code FROM v_controles "
@@ -2217,7 +2219,8 @@ def scenario_controles_finaux(c, infra):
                             "(SELECT code, count(*) AS n FROM v_controles GROUP BY code HAVING count(*) > 1) d")
     verifier(not doublons, f"v_controles porte des doublons : {doublons}")
     total = int(infra.valeur("SELECT count(*) FROM v_controles"))
-    verifier(total == dernier - 4, f"v_controles compte {total} controles, {dernier - 4} attendus : relever `dernier` ?")
+    attendus_sql = dernier - len(moteur) - len(retires)
+    verifier(total == attendus_sql, f"v_controles compte {total} controles, {attendus_sql} attendus : relever `dernier` ?")
 
 
 def scenario_import(c, infra):
@@ -3876,11 +3879,17 @@ def scenario_plan_detail(c, infra):
     ref_detail = max(lignes_moteur, key=lambda x: x["qte_a_commander_kg"])["code_reference"]
     d = c.ok("Choukri", "GET", f"/api/couverture/{quote(ref_detail, safe='')}")
     p0 = d["propositions"][0]
-    besoin = max(0.0, p0["securite_kg"] + p0["plan_fenetre_kg"] - p0["arrivages_fenetre_kg"] - p0["solde_debut_d_kg"])
-    # Le besoin est le PLUS FORT sur la fenetre : au moins sa valeur au dernier jour (F - 1).
-    verifier(p0["besoin_theorique_kg"] + 0.05 >= besoin and p0["quantite_proposee_kg"] + 1e-6 >= p0["besoin_theorique_kg"],
-             f"le calcul pas a pas ne tient pas : besoin {p0['besoin_theorique_kg']}, au dernier jour {besoin:.2f}, "
-             f"propose {p0['quantite_proposee_kg']}")
+    # MOTEUR v2 : Q0 est le plus grand manque de la fenetre, au moins celui de son dernier jour (plan de la
+    # fenetre - reste au debut - arrivages dates de la fenetre) ; Q = arrondi(Q0 + X), jamais moins.
+    w0 = p0["fenetres"][0]
+    besoin = max(0.0, w0["plan_kg"] - w0["reste_kg"] - w0["arrivages_kg"])
+    verifier(w0["besoin_net_kg"] + 0.05 >= besoin
+             and p0["quantite_proposee_kg"] + 1e-6 >= p0["besoin_net_kg"] + p0["securite_kg"],
+             f"le calcul pas a pas ne tient pas : Q0 {w0['besoin_net_kg']}, au dernier jour {besoin:.2f}, "
+             f"X {p0['securite_kg']}, propose {p0['quantite_proposee_kg']}")
+    verifier(abs(p0["besoin_net_kg"] + p0["securite_kg"] + p0["arrondi_kg"] - p0["quantite_proposee_kg"]) < 0.01,
+             f"Q0 + X + arrondi != Q : {p0['besoin_net_kg']} + {p0['securite_kg']} + {p0['arrondi_kg']} "
+             f"!= {p0['quantite_proposee_kg']}")
     verifier(d["synthese"]["qte_a_commander_kg"] == p0["quantite_proposee_kg"], "la synthese ne rend pas la proposition")
     # L'ancien detail est retire : plus de route.
     c.refus("Choukri", "GET", f"/api/plan-achat/detail?reference={quote(ref_detail)}", codes=(404, 405))
@@ -4234,7 +4243,8 @@ def scenario_migrations_rejouables(c, infra):
                 # 27i redefinit v_consommation_fait apres 27g (RETOUR_PROD au reel) : rejouee apres elle,
                 # elle remet l'etat final ; 27h, 27j et 27k se rejouent comme les autres.
                 "2026-10-27h_stock_projete_colonnes.sql", "2026-10-27i_retour_prod_grand_livre.sql",
-                "2026-10-27j_parametres_mrp_orphelins.sql", "2026-10-27k_import_taux_dossier_facultatif.sql"):
+                "2026-10-27j_parametres_mrp_orphelins.sql", "2026-10-27k_import_taux_dossier_facultatif.sql",
+                "2026-10-27l_couverture_cible.sql", "2026-10-27m_stock_projete_colonnes_v2.sql"):
         try:
             infra.psql(infra.base, "-q", "-f", str(dossier / nom))
         except RuntimeError as e:
@@ -4268,14 +4278,15 @@ def scenario_gardes_p1(c, infra):
     bon_envoye(c, [(REF, 100, 20.0)])
     dernier = infra.valeur(f"SELECT fn_dernier_prix_achat_mad('{REF}', '{FRS}')")
     verifier(dernier is not None and abs(float(dernier) - 20) < 0.001, f"dernier prix d'achat : {dernier} au lieu de 20")
-    # Regle 9 : la saison se regle (Direction), les stocks minimums a revoir se listent.
+    # Regle 9 : la saison se regle (Direction). Les stocks minimums a revoir (vue, route, ecran) sont
+    # retires le 27/10/2026 (2026-10-27l) : le stock minimum n'est plus qu'un signal.
     c.ok("Choukri", "PATCH", "/api/saisons/1", V(infra, "saison_mois", "mois", 1, {"coefficient": 0.7}))
     verifier(abs(float(infra.valeur("SELECT coefficient FROM saison_mois WHERE mois = 1")) - 0.7) < 1e-9,
              "le coefficient de janvier n'est pas enregistre")
     c.refus("Magasinie", "PATCH", "/api/saisons/1", V(infra, "saison_mois", "mois", 1, {"coefficient": 2}))
     c.refus("Choukri", "PATCH", "/api/saisons/1", V(infra, "saison_mois", "mois", 1, {"coefficient": 0}))
     c.ok("Choukri", "PATCH", "/api/saisons/1", V(infra, "saison_mois", "mois", 1, {"coefficient": 1}))
-    c.ok("Assistante", "GET", "/api/plan-achat/stocks-minimums")
+    c.refus("Assistante", "GET", "/api/plan-achat/stocks-minimums", codes=(404, 405))
     # C49 (proposition estimee sur la prolongation du plan) est retire le 27/10/2026 : le moteur de
     # couverture ne prolonge jamais le plan. C50 reste.
     verifier(int(infra.valeur("SELECT count(*) FROM v_controles WHERE code IN ('C49', 'C50')")) == 1,
@@ -5202,8 +5213,9 @@ def scenario_couverture_moteur(c, infra):
     verifier(lots.get("LOT-COUV-2", {}).get("compte") is True and lots.get("LOT-COUV-3", {}).get("compte") is False,
              f"reste compte / bloque exclu : {lots}")
 
-    # LA PROJECTION SE REFAIT JOUR PAR JOUR depuis les jours rendus (le solde jamais sous zero, le
-    # deficit jamais reporte), et les arrivages comptes y tombent a leur date.
+    # LA PROJECTION SE REFAIT JOUR PAR JOUR depuis les jours rendus (MOTEUR v2 : le solde SANS plafond a
+    # zero ; le plan non couvert d'un jour = min(plan du jour, manque) ; le point bas avant les arrivages),
+    # et les arrivages comptes y tombent a leur date.
     jours = d["jours"]
     verifier(jours[0]["date"] == jour(0), f"la projection ne commence pas aujourd'hui : {jours[0]['date']}")
     verifier(jours[-1]["date"] == tete["fin_horizon"], "la projection ne finit pas a la fin de l'horizon")
@@ -5212,9 +5224,12 @@ def scenario_couverture_moteur(c, infra):
              f"arrivages mal dates : J+20 {arr.get(jour(20))}, J+40 {arr.get(jour(40))}")
     solde = d["synthese"]["disponible_kg"]
     for j in jours:
-        brut = solde + j["arrivee_kg"] - j["conso_prevue_kg"]
-        verifier(abs(max(0.0, brut) - j["solde_kg"]) < 0.05 and abs(max(0.0, -brut) - j["plan_non_couvert_kg"]) < 0.05,
-                 f"{j['date']} : solde {j['solde_kg']} / non couvert {j['plan_non_couvert_kg']}, recalcule {brut:.4f}")
+        bas = solde - j["conso_prevue_kg"]
+        solde = solde + j["arrivee_kg"] - j["conso_prevue_kg"]
+        verifier(abs(solde - j["solde_kg"]) < 0.05 and abs(bas - j["point_bas_kg"]) < 0.05
+                 and abs(min(j["conso_prevue_kg"], max(0.0, -solde)) - j["plan_non_couvert_kg"]) < 0.05,
+                 f"{j['date']} : solde {j['solde_kg']} / point bas {j['point_bas_kg']} / non couvert "
+                 f"{j['plan_non_couvert_kg']}, recalcule {solde:.4f} / {bas:.4f}")
         solde = j["solde_kg"]
     total = sum(e["conso_prevue_kg"] for e in d["evenements"])
     verifier(abs(total - d["synthese"]["plan_horizon_kg"]) < 0.05,
@@ -5224,31 +5239,42 @@ def scenario_couverture_moteur(c, infra):
     verifier(abs(sum(j["plan_non_couvert_kg"] for j in jours) - d["synthese"]["plan_non_couvert_kg"]) < 0.05,
              "le plan non couvert total ne retombe pas sur les jours")
 
-    # LA PREMIERE PROPOSITION SE REFAIT : D, S(D), besoin, jour determinant, minimum, date limite.
+    # LA PREMIERE PROPOSITION SE REFAIT (moteur v2, § 15.1) : R, D* = R - C, D = max(D*, L), la date
+    # limite D* - L, la fenetre [R, R + N[ (ou [D, D + N[ si la rupture est inevitable), Q0 = le plus
+    # grand manque de la fenetre, X = le creux le plus bas sous NS dans [0, L], Q >= Q0 + X et >= minimum.
     p = d["propositions"][0] if d["propositions"] else None
     if p:
-        idx = {j["date"]: i for i, j in enumerate(jours)}
-        i_d, i_f = idx[p["date_disponibilite"]], idx.get(p["date_fin_fenetre"], len(jours))
+        n = len(jours)
         delai = d["reglages"]["delai_j"]
-        sous = next(i for i, j in enumerate(jours) if j["solde_kg"] < j["securite_kg"] - 1e-6)
-        verifier(i_d == max(delai, sous), f"D = {p['date_disponibilite']}, attendu MAX(aujourd'hui + {delai}, {jours[sous]['date']})")
-        s_d = (jours[i_d - 1]["solde_kg"] if i_d else d["synthese"]["disponible_kg"]) + jours[i_d]["arrivee_kg"]
-        verifier(abs(s_d - p["solde_debut_d_kg"]) < 0.05, f"S(D) {p['solde_debut_d_kg']}, recalcule {s_d:.4f}")
-        plan_f = sum(j["conso_prevue_kg"] for j in jours[i_d:i_f])
-        secu = d["reglages"]["jours_securite"] * plan_f / (i_f - i_d)
-        verifier(abs(secu - p["securite_kg"]) < 0.05, f"securite {p['securite_kg']}, recalculee {secu:.4f}")
-        net, meilleur, determinant = 0.0, float("-inf"), None
-        for k, j in enumerate(jours[i_d:i_f]):
-            net += j["conso_prevue_kg"] - (j["arrivee_kg"] if k else 0.0)
-            if secu + net - s_d > meilleur + 1e-6:
-                meilleur, determinant = secu + net - s_d, j["date"]
-        verifier(abs(max(0.0, meilleur) - p["besoin_theorique_kg"]) < 0.1 and determinant == p["jour_determinant"],
-                 f"besoin {p['besoin_theorique_kg']} au {p['jour_determinant']}, recalcule {meilleur:.4f} au {determinant}")
+        cible = d["reglages"]["couverture_cible_j"]
+        couv = d["reglages"]["couverture_commande_j"]
+        r = next(i for i, j in enumerate(jours) if j["solde_kg"] < -1e-6)
+        verifier(jours[r]["date"] == d["synthese"]["premiere_rupture"] == p["date_rupture"],
+                 f"R {p['date_rupture']} / synthese {d['synthese']['premiere_rupture']}, recalcule {jours[r]['date']}")
+        d_etoile = r - cible
+        i_d = max(d_etoile, delai)
+        verifier(p["date_disponibilite"] == jour(i_d) and p["date_besoin"] == jour(d_etoile)
+                 and p["date_limite_commande"] == jour(d_etoile - delai) and p["en_retard"] == (i_d > d_etoile),
+                 f"D {p['date_disponibilite']} D* {p['date_besoin']} limite {p['date_limite_commande']}, recalcules "
+                 f"{jour(i_d)} {jour(d_etoile)} {jour(d_etoile - delai)}")
+        w = p["fenetres"][0]
+        veille = lambda k: jours[k - 1]["solde_kg"] if k else d["synthese"]["disponible_kg"]
+        manque = max(0.0, -veille(i_d)) if i_d > r else 0.0
+        w0 = i_d if i_d > r else r
+        w1 = min(w0 + couv, n)
+        q0 = max([0.0] + [-(j["solde_kg"] + manque) for j in jours[w0:w1]])
+        verifier(abs(q0 - w["besoin_net_kg"]) < 0.1 and w["debut"] == jour(w0),
+                 f"Q0 {w['besoin_net_kg']} sur [{w['debut']}, {w['fin']}[, recalcule {q0:.4f} sur [{jour(w0)}, {jour(w1)}[")
+        x = max([0.0] + [max(0.0, min(j["securite_kg"], j["securite_kg"] - j["point_bas_kg"]))
+                         for j in jours[:min(delai, n - 1) + 1]])
+        verifier(abs(x - d["situation"]["securite"]["x_kg"]) < 0.1 and abs(x - p["securite_kg"]) < 0.1,
+                 f"X {p['securite_kg']} / {d['situation']['securite']['x_kg']}, recalcule {x:.4f}")
         moq = d["reglages"]["moq_kg"] or 0
-        verifier(p["quantite_proposee_kg"] >= max(p["besoin_theorique_kg"], moq) - 1e-6, f"quantite sous le besoin : {p}")
-        verifier(date.fromisoformat(p["date_limite_commande"]) == date.fromisoformat(p["date_disponibilite"]) - timedelta(days=delai),
-                 "date limite de commande differente de D - delai")
+        verifier(p["quantite_proposee_kg"] >= max(p["besoin_net_kg"] + p["securite_kg"], moq) - 1e-6,
+                 f"quantite sous Q0 + X : {p}")
         verifier(d["synthese"]["qte_a_commander_kg"] == p["quantite_proposee_kg"], "la liste ne rend pas la premiere proposition")
+        verifier(d["synthese"]["couverture_cible_j"] == cible and d["synthese"]["ecart_cible_j"] == r - cible,
+                 f"cible {d['synthese']['couverture_cible_j']}, ecart {d['synthese']['ecart_cible_j']} (R = J+{r})")
     else:
         verifier(d["motif_sans_proposition"], "ni proposition ni motif")
 
@@ -5265,12 +5291,12 @@ def scenario_couverture_moteur(c, infra):
                  f"un OF change la couverture : plan {apres['plan_horizon_kg']} -> {avec_of['plan_horizon_kg']}")
         infra.sql(f"UPDATE ordre_fabrication SET statut = 'ANNULE' WHERE id_of = '{id_of}'")
 
-    # LE MOTIF DE D (27/10/2026) : « delai » des que D = aujourd'hui + delai, meme si la securite est
-    # franchie ce jour-la ou avant ; « securite » seulement si le passage sous la securite vient apres.
+    # LA RECEPTION EN RETARD (moteur v2) : une proposition est « en retard » quand sa reception D tombe
+    # apres sa date de besoin D* ; elle tombe alors a aujourd'hui + delai.
     for q in d["propositions"]:
         i_q = (date.fromisoformat(q["date_disponibilite"]) - auj).days
-        verifier(q["motif_date"] == ("délai" if i_q == d["reglages"]["delai_j"] else "sécurité"),
-                 f"proposition {q['rang']} : D a J+{i_q}, delai {d['reglages']['delai_j']} j, motif {q['motif_date']}")
+        verifier(not q["en_retard"] or i_q == d["reglages"]["delai_j"],
+                 f"proposition {q['rang']} en retard a J+{i_q}, delai {d['reglages']['delai_j']} j")
 
     # L'ORDRE DE LA LISTE (27/10/2026) : la premiere rupture la plus proche (sans rupture : en dernier),
     # puis la date limite de commande (sans proposition : apres).
@@ -5392,14 +5418,15 @@ def scenario_couverture_simulation(c, infra):
         c.ok("Choukri", "POST", f"/api/plans/{id_plan}/mrp", {})
 
     tete = c.ok("Choukri", "GET", "/api/couverture")
-    # Une reference avec une premiere proposition dont la fenetre laisse un jour apres D.
+    # Une reference avec une premiere proposition d'une seule fenetre, qui laisse un jour apres son debut.
     choisie = None
     for ligne in tete["lignes"]:
         if not ligne.get("qte_a_commander_kg"):
             continue
         d = c.ok("Choukri", "GET", f"/api/couverture/{quote(ligne['code_reference'], safe='')}")
         p = d["propositions"][0]
-        if (date.fromisoformat(p["date_fin_fenetre"]) - date.fromisoformat(p["date_disponibilite"])).days >= 2:
+        if not p["consolidee"] and \
+                (date.fromisoformat(p["date_fin_fenetre"]) - date.fromisoformat(p["date_debut_fenetre"])).days >= 2:
             choisie = (ligne["code_reference"], d)
             break
     verifier(choisie, "aucune reference n'a de proposition : la simulation n'a rien a reduire")
@@ -5449,12 +5476,16 @@ def scenario_couverture_simulation(c, infra):
     i_d = idx[p1["date_disponibilite"]]
     verifier(s1["simulee"]["reglages"]["source_multiple"].startswith("simulation"),
              f"la source du multiple ne dit pas la simulation : {s1['simulee']['reglages']['source_multiple']}")
-    # La marge du jour D : le besoin ne se reduit d'autant que si le jour determinant reste apres D.
-    valeur_d = p1["securite_kg"] + jours[i_d]["conso_prevue_kg"] - p1["solde_debut_d_kg"]
-    marge = p1["besoin_theorique_kg"] - max(valeur_d, 0.0)
-    kg_arr = round(min(100.0, marge / 2, p1["besoin_theorique_kg"] / 2), 2)
-    verifier(kg_arr > 0.5, f"{ref} : pas de marge au jour D ({marge:.2f} kg) pour un arrivage dans la fenetre")
-    jour_arr = (date.fromisoformat(p1["date_disponibilite"]) + timedelta(days=1)).isoformat()
+    # MOTEUR v2 : Q0 est le plus grand manque de la fenetre ; un arrivage le lendemain de son debut le
+    # reduit d'autant tant que le manque du premier jour reste en dessous (la marge).
+    w = p1["fenetres"][0]
+    i_w = idx[w["debut"]]
+    manque = max(0.0, -(jours[i_d - 1]["solde_kg"] if i_d else s1["simulee"]["synthese"]["disponible_kg"])) \
+        if w["rupture_inevitable"] else 0.0
+    marge = w["besoin_net_kg"] - max(0.0, -(jours[i_w]["solde_kg"] + manque))
+    kg_arr = round(min(100.0, marge / 2, w["besoin_net_kg"] / 2), 2)
+    verifier(kg_arr > 0.5, f"{ref} : pas de marge au debut de la fenetre ({marge:.2f} kg) pour un arrivage")
+    jour_arr = (date.fromisoformat(w["debut"]) + timedelta(days=1)).isoformat()
     s2 = c.ok("Choukri", "POST", route, dict(neutre, arrivages_ajoutes=[{"date": jour_arr, "kg": kg_arr}]))
     p2 = s2["simulee"]["propositions"][0]
     verifier(p2["date_disponibilite"] == p1["date_disponibilite"], f"D a bouge : {p1['date_disponibilite']} -> {p2['date_disponibilite']}")
@@ -5676,7 +5707,7 @@ def scenario_source_unique(c, infra):
     (plan d'achat, cockpit, stock projete) sont ceux du moteur ; l'ancien calcul n'existe plus, ni en base
     ni en route ; la fenetre d'une commande est [D, F[ ; une reference sans classe ABC prend la plus longue
     des trois securites et le defaut de donnees se signale ; P_MrpInclureStockMachine est supprime."""
-    from datetime import date
+    from datetime import date, timedelta
     from urllib.parse import quote
 
     # L'ANCIEN CALCUL N'EXISTE PLUS : ni vue, ni colonne, ni parametre, ni definition qui le lise.
@@ -5702,21 +5733,33 @@ def scenario_source_unique(c, infra):
     # plutot que de regenerer tout le plan (voir le rapport : une regeneration complete apres
     # l'annulation d'un bon issu d'une proposition bute sur ligne_bc.id_proposition, defaut anterieur).
     infra.sql("DELETE FROM plan_achat_indicateurs")
-    lignes = [x for x in c.ok("Choukri", "GET", "/api/couverture")["lignes"] if x["actif"]]
+    tete_moteur = c.ok("Choukri", "GET", "/api/couverture")
+    lignes = [x for x in tete_moteur["lignes"] if x["actif"]]
+    auj_moteur = date.fromisoformat(tete_moteur["aujourdhui"])
     attendu = {
         "references": len(lignes),
-        "plan_non_couvert": sum(x["statut"] == "PLAN_NON_COUVERT" for x in lignes),
+        "rupture_inevitable": sum(x["statut"] == "RUPTURE_INEVITABLE" for x in lignes),
         "sous_securite": sum(x["statut"] == "SOUS_SECURITE" for x in lignes),
+        "sous_cible": sum(x["statut"] == "SOUS_CIBLE" for x in lignes),
         "couvert": sum(x["statut"] == "COUVERT" for x in lignes),
         "a_commander_aujourdhui": sum(bool(x["a_commander_aujourdhui"]) for x in lignes),
-        "classe_a_en_rupture": sum(x["statut"] == "PLAN_NON_COUVERT" and x["classe_abc"] == "A" for x in lignes),
+        "classe_a_en_rupture": sum(x["statut"] == "RUPTURE_INEVITABLE" and x["classe_abc"] == "A" for x in lignes),
     }
-    verifier(attendu["references"] == attendu["plan_non_couvert"] + attendu["sous_securite"] + attendu["couvert"],
-             f"les trois etats ne font pas le total : {attendu}")
+    verifier(attendu["references"] == attendu["rupture_inevitable"] + attendu["sous_securite"]
+             + attendu["sous_cible"] + attendu["couvert"], f"les quatre etats ne font pas le total : {attendu}")
+    # L'ETAT SE REFAIT DEPUIS LES CHAMPS DE LA LIGNE (§ 15.4, le plus grave l'emporte).
     for x in lignes:
-        etat = ("PLAN_NON_COUVERT" if x["premiere_rupture"] else "SOUS_SECURITE" if x["premier_passage_securite"]
-                else "COUVERT")
-        verifier(x["statut"] == etat, f"{x['code_reference']} : etat {x['statut']}, {etat} selon ses dates")
+        r = x["premiere_rupture"]
+        if r and date.fromisoformat(r) < auj_moteur + timedelta(days=x["delai_j"]):
+            etat = "RUPTURE_INEVITABLE"
+        elif x["securite_x_kg"] > 1e-6:
+            etat = "SOUS_SECURITE"
+        elif r and (x["couverture_cible_j"] is None or x["jours_couverture"] < x["couverture_cible_j"]):
+            etat = "SOUS_CIBLE"
+        else:
+            etat = "COUVERT"
+        verifier(x["statut"] == etat, f"{x['code_reference']} : etat {x['statut']}, {etat} selon ses champs")
+        verifier(x["raison_etat"], f"{x['code_reference']} : etat sans raison")
     kpi = c.ok("Choukri", "GET", "/api/plan-achat/kpi")["globaux"]
     verifier({k: kpi.get(k) for k in attendu} == attendu, f"Situation du plan d'achat {kpi}, moteur {attendu}")
     cockpit = c.ok("Choukri", "GET", "/api/cockpit")
@@ -5724,29 +5767,35 @@ def scenario_source_unique(c, infra):
              f"cockpit {[(k, cockpit.get('nb_' + k)) for k in attendu]}, moteur {attendu}")
     projete = c.ok("Choukri", "GET", "/api/stock/projete?limite=5000")
     verifier(len(projete) == attendu["references"]
-             and sum(x["statut"] == "PLAN_NON_COUVERT" for x in projete) == attendu["plan_non_couvert"],
+             and sum(x["statut"] == "RUPTURE_INEVITABLE" for x in projete) == attendu["rupture_inevitable"],
              f"le stock projete ({len(projete)} lignes) n'est pas la vue du moteur ({attendu})")
+    # Le stock projete se trie par gravite de l'etat, puis par « Avant le ».
+    rang = {"RUPTURE_INEVITABLE": 0, "SOUS_SECURITE": 1, "SOUS_CIBLE": 2}
+    cles = [(rang.get(x["statut"], 3), x["date_limite_commande"] or "9999") for x in projete]
+    verifier(cles == sorted(cles), "le stock projete n'est pas trie par gravite puis date limite")
     par_frs = c.ok("Choukri", "GET", "/api/plan-achat/kpi")["fournisseurs"]
     etat = {x["code_reference"]: x["statut"] for x in lignes}
     for f in par_frs:
         refs = infra.sql("SELECT code_reference FROM plan_achat WHERE statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE') "
                          f"AND code_fournisseur = '{f['code_fournisseur']}'")
-        n = sum(etat.get(r[0]) == "PLAN_NON_COUVERT" for r in refs)
-        verifier(f["nb_plan_non_couvert"] == n, f"{f['code_fournisseur']} : {f['nb_plan_non_couvert']} au plan non couvert, {n} au moteur")
+        n = sum(etat.get(r[0]) == "RUPTURE_INEVITABLE" for r in refs)
+        verifier(f["nb_rupture_inevitable"] == n,
+                 f"{f['code_fournisseur']} : {f['nb_rupture_inevitable']} en rupture inevitable, {n} au moteur")
 
-    # LA FENETRE [D, F[ : D inclus, F exclu, la couverture du fournisseur (30 jours par defaut).
+    # LES FENETRES : [debut, fin[, fin exclue, N jours (la couverture d'une commande), bornees a l'horizon.
     avec = next((x for x in lignes if x.get("qte_a_commander_kg")), None)
     if avec:
         d = c.ok("Choukri", "GET", f"/api/couverture/{quote(avec['code_reference'], safe='')}")
         for p in d["propositions"]:
-            debut, fin = date.fromisoformat(p["date_disponibilite"]), date.fromisoformat(p["date_fin_fenetre"])
-            verifier((fin - debut).days == p["jours_fenetre"]
-                     and (fin - date.fromisoformat(p["dernier_jour_couvert"])).days == 1,
-                     f"fenetre {p['date_disponibilite']} -> {p['date_fin_fenetre']} ({p['jours_fenetre']} j)")
-            verifier(p["fenetre_bornee_horizon"] or p["jours_fenetre"] == d["reglages"]["couverture_commande_j"],
-                     f"fenetre de {p['jours_fenetre']} j, couverture {d['reglages']['couverture_commande_j']} j")
-            plan = sum(j["conso_prevue_kg"] for j in d["jours"] if p["date_disponibilite"] <= j["date"] < p["date_fin_fenetre"])
-            verifier(abs(plan - p["plan_fenetre_kg"]) < 0.05, f"plan de la fenetre {p['plan_fenetre_kg']}, jours {plan:.4f}")
+            for w in p["fenetres"]:
+                debut, fin = date.fromisoformat(w["debut"]), date.fromisoformat(w["fin"])
+                verifier((fin - debut).days == w["jours"]
+                         and (fin - date.fromisoformat(w["dernier_jour_couvert"])).days == 1,
+                         f"fenetre {w['debut']} -> {w['fin']} ({w['jours']} j)")
+                verifier(w["bornee_horizon"] or w["jours"] == d["reglages"]["couverture_commande_j"],
+                         f"fenetre de {w['jours']} j, couverture {d['reglages']['couverture_commande_j']} j")
+                plan = sum(j["conso_prevue_kg"] for j in d["jours"] if w["debut"] <= j["date"] < w["fin"])
+                verifier(abs(plan - w["plan_kg"]) < 0.05, f"plan de la fenetre {w['plan_kg']}, jours {plan:.4f}")
 
     # « PLAN / MOIS » (27/10/2026) : les listes pilotees par le moteur montrent le plan qu'il consomme
     # (plan de l'horizon ramene a 30 jours), plus l'ancienne consommation retenue.
@@ -6115,6 +6164,208 @@ def scenario_import_taux_dossier_facultatif(c, infra):
              "le taux de l'EUR a suivi le dossier passe en USD")
 
 
+def scenario_couverture_cible_colonnes(c, infra):
+    """MOTEUR DE COUVERTURE V2 (decision du 27/10/2026 soir, 2026-10-27l) : la fiche article porte
+    couverture_cible_mois (l'ancienne couverture_min_mois, renommee), garde stock_min_kg (un signal) et
+    n'a plus de marge de securite (celle de la qualite reste) ; v_stocks_minimums_a_revoir et la route
+    /api/plan-achat/stocks-minimums sont retirees ; le champ configurable suit la colonne, droits gardes ;
+    les colonnes du moteur v2 sont declarees au niveau de jours_couverture de leur module."""
+    cols = infra.valeur(
+        "SELECT string_agg(column_name, ',' ORDER BY column_name) FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = 'reference' "
+        "AND column_name IN ('couverture_cible_mois', 'couverture_min_mois', 'marge_securite_pct', 'stock_min_kg')")
+    verifier(cols == "couverture_cible_mois,stock_min_kg",
+             f"colonnes de la fiche article : {cols} (attendu couverture_cible_mois et stock_min_kg seules)")
+    verifier(infra.valeur("SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' "
+                          "AND table_name = 'qualite' AND column_name = 'marge_securite_pct'") == "1",
+             "la marge de securite de la QUALITE a disparu")
+    verifier(infra.valeur("SELECT to_regclass('public.v_stocks_minimums_a_revoir') IS NULL") == "t",
+             "v_stocks_minimums_a_revoir existe encore")
+    # Le champ configurable suit la colonne ; la marge de l'article part, celle de la qualite reste.
+    verifier(infra.valeur("SELECT libelle FROM champ_configurable WHERE module = 'CATALOGUE' "
+                          "AND champ = 'couverture_cible_mois'") == "Couverture cible (mois)",
+             "le champ CATALOGUE couverture_cible_mois n'est pas declare sous son libelle")
+    verifier(infra.valeur("SELECT count(*) FROM champ_configurable WHERE module = 'CATALOGUE' "
+                          "AND champ IN ('couverture_min_mois', 'marge_securite_pct')") == "0",
+             "un ancien champ du catalogue est encore declare")
+    verifier(infra.valeur("SELECT count(*) FROM champ_configurable WHERE module = 'QUALITES' "
+                          "AND champ = 'marge_securite_pct'") == "1",
+             "le champ QUALITES marge_securite_pct a disparu")
+    v2 = [("PLAN_ACHAT", "couverture_cible_j"), ("PLAN_ACHAT", "ecart_cible_j"), ("PLAN_ACHAT", "signaux"),
+          ("STOCK", "couverture_cible_j"), ("STOCK", "ecart_cible_j"), ("STOCK", "signaux"),
+          ("COCKPIT", "nb_rupture_inevitable"), ("COCKPIT", "nb_sous_cible"), ("COCKPIT", "nb_cible_non_definie"),
+          ("COCKPIT", "nb_sous_minimum"), ("COCKPIT", "nb_retard_cible"), ("COCKPIT", "nb_plan_non_couvert")]
+    liste = ", ".join(f"('{m}', '{ch}')" for m, ch in v2)
+    n = int(infra.valeur(f"SELECT count(*) FROM champ_configurable WHERE (module, champ) IN ({liste})"))
+    verifier(n == len(v2), f"colonnes du moteur v2 declarees : {n} sur {len(v2)} (nb_plan_non_couvert compris)")
+    # Chaque role et chaque compte qui a un niveau sur jours_couverture a le meme sur les colonnes v2.
+    for table, qui in (("modele_droit_champ", "code_role_user"), ("droit_champ", "id_utilisateur")):
+        ecarts = int(infra.valeur(
+            f"SELECT count(*) FROM {table} j JOIN champ_configurable c ON c.module = j.module "
+            f"AND (c.module, c.champ) IN ({liste}) AND c.champ <> 'nb_plan_non_couvert' "
+            f"LEFT JOIN {table} n ON n.{qui} = j.{qui} AND n.module = c.module AND n.champ = c.champ "
+            f"WHERE j.champ = 'jours_couverture' AND n.niveau IS DISTINCT FROM j.niveau"))
+        verifier(ecarts == 0, f"{table} : {ecarts} droit(s) des colonnes v2 differents de jours_couverture")
+    # Le CRUD ecrit et relit la couverture cible ; la marge de l'article n'est plus servie.
+    ref = urllib.parse.quote(REF)
+    avant = infra.valeur(f"SELECT COALESCE(couverture_cible_mois::text, 'NULL') FROM reference WHERE code_reference = '{REF}'")
+    c.ok("Choukri", "PATCH", f"/api/catalogue/{ref}",
+         V(infra, "reference", "code_reference", REF, {"couverture_cible_mois": 1.75}))
+    verifier(float(infra.valeur(f"SELECT couverture_cible_mois FROM reference WHERE code_reference = '{REF}'")) == 1.75,
+             "la couverture cible n'est pas enregistree par le catalogue")
+    fiche = c.ok("Choukri", "GET", f"/api/catalogue/{ref}")
+    fiche = fiche.get("ligne", fiche) if isinstance(fiche, dict) else fiche
+    verifier(abs(float(fiche.get("couverture_cible_mois") or 0) - 1.75) < 1e-9,
+             f"la fiche relue ne rend pas la couverture cible : {fiche.get('couverture_cible_mois')}")
+    verifier("marge_securite_pct" not in fiche and "couverture_min_mois" not in fiche,
+             "la fiche relue rend encore un ancien champ")
+    c.ok("Choukri", "PATCH", f"/api/catalogue/{ref}",
+         V(infra, "reference", "code_reference", REF,
+           {"couverture_cible_mois": None if avant == "NULL" else float(avant)}))
+    # La route des stocks minimums a revoir n'existe plus.
+    r = c.refus("Assistante", "GET", "/api/plan-achat/stocks-minimums", codes=(404, 405))
+    verifier(r.get("code") in ("ROUTE_INCONNUE", "INTROUVABLE"),
+             f"la route retiree repond autre chose qu'une adresse inconnue : {r}")
+
+
+def scenario_couverture_cible(c, infra):
+    """LE MOTEUR DE COUVERTURE v2, DE BOUT EN BOUT (§ 15.6, 27/10/2026) : les cas 1 et 3 de la
+    specification sur une reference du banc, par l'API. La reference, sans plan, stock ni arrivage, recoit
+    une demande au plan en service (photo MRP : 15 kg par jour, mois par mois) et 1 800 kg en stock ; les
+    reglages du cas (C = 60 j, N = 30 j, L = 30 j, S = 30 j, ni minimum ni multiple) passent par les
+    hypotheses de la simulation, qui n'ecrit rien. CAS 1 aux chiffres exacts : R = J+120, D* = D = J+60,
+    date limite J+30, Q0 = 450, X = 0, Q = 450, stock a R + N = 0, etat COUVERT. CAS 3 (arrivage avant le
+    pic) TRANSPOSE AU MOIS : la photo du plan est mensuelle, le pic tombe donc sur des mois entiers et les
+    chiffres se recalculent ici depuis les jours rendus (R, D*, Q0 = plan de la fenetre - reste -
+    arrivages, bilan : stock + arrivages + Q0 = plan jusqu'a R + N, stock a R + N = 0, X = 0)."""
+    from calendar import monthrange
+    from datetime import date, timedelta
+    from urllib.parse import quote
+
+    id_plan = infra.valeur("SELECT id_plan FROM plan_production WHERE statut = 'EN_COURS'")
+    verifier(id_plan, "aucun plan en service : le scenario de la couverture cible n'a pas d'horizon")
+    ref = infra.valeur(
+        "SELECT r.code_reference FROM reference r WHERE r.actif = 1 AND r.code_fournisseur IS NOT NULL "
+        "AND NOT EXISTS (SELECT 1 FROM besoin_mrp b WHERE b.code_reference = r.code_reference) "
+        "AND NOT EXISTS (SELECT 1 FROM stock_magasin sm WHERE sm.code_reference = r.code_reference AND sm.quantite_kg <> 0) "
+        "AND NOT EXISTS (SELECT 1 FROM machine_etat e WHERE e.code_reference = r.code_reference AND e.kg > 0) "
+        "AND NOT EXISTS (SELECT 1 FROM ligne_bc lb JOIN bon_commande bc USING (id_bc) WHERE lb.code_reference = r.code_reference "
+        "AND bc.statut NOT IN ('CLOTURE', 'ANNULE')) "
+        "AND NOT EXISTS (SELECT 1 FROM import_facture_lignes fl WHERE fl.code_reference = r.code_reference AND fl.reste_kg > 0) "
+        "AND NOT EXISTS (SELECT 1 FROM ligne_transfert lt JOIN transfert t USING (id_transfert) "
+        "WHERE lt.code_reference = r.code_reference AND t.statut = 'VALIDE') "
+        "ORDER BY 1 LIMIT 1")
+    verifier(ref, "aucune reference libre (sans plan, stock ni arrivage) pour le scenario")
+    frs = infra.valeur(f"SELECT code_fournisseur FROM reference WHERE code_reference = '{ref}'")
+    q_ref = quote(ref, safe="")
+    tete = c.ok("Choukri", "GET", "/api/couverture")
+    auj = date.fromisoformat(tete["aujourdhui"])
+    jour = lambda k: (auj + timedelta(days=k)).isoformat()
+
+    def demande(par_mois):
+        """La photo MRP de la reference : kg par jour, mois par mois, sur neuf mois a partir du mois en cours."""
+        infra.sql(f"DELETE FROM besoin_mrp WHERE code_reference = '{ref}'")
+        a, m = auj.year, auj.month
+        for k in range(9):
+            kg = par_mois(k) * monthrange(a, m)[1]
+            infra.sql("INSERT INTO besoin_mrp (id_plan, mois, rang_mois, annee_mois, code_reference, quantite_brute_kg, "
+                      "quantite_kg, date_reference) VALUES "
+                      f"('{id_plan}', {m}, {900 + k}, '{a:04d}-{m:02d}', '{ref}', {kg}, {kg}, current_date)")
+            a, m = (a + 1, 1) if m == 12 else (a, m + 1)
+
+    reglages_cas = {"couverture_cible_mois": 2, "couverture_j": 30, "delai_j": 30, "jours_securite": 30,
+                    "moq_kg": 0, "multiple_kg": 0}
+    try:
+        taux_usd_du_jour(infra)
+        fin = date.fromisoformat(c.ok("Choukri", "GET", "/api/couverture")["fin_horizon"])
+        verifier((fin - auj).days >= 160, f"l'horizon s'arrete le {fin} : trop court pour les cas")
+
+        # CAS 3 — ARRIVAGE AVANT LE PIC, transpose au mois : 600 kg recus ; 5 kg/j, puis 30 kg/j les mois
+        # 3 et 4, puis 5 ; un arrivage de 1 000 kg le dernier jour du mois 2.
+        id_bc, lignes = bon_envoye(c, [(ref, 600, 2.0)], frs=frs)
+        reception_validee(c, id_bc, lignes, [600], lot_fournisseur="LOT-CIBLE-1", nb_bobines=120)
+        demande(lambda k: 30.0 if k in (3, 4) else 5.0)
+        a, m = auj.year, auj.month
+        for _ in range(2):
+            a, m = (a + 1, 1) if m == 12 else (a, m + 1)
+        fin_mois2 = date(a, m, monthrange(a, m)[1]).isoformat()
+        hyp = dict(reglages_cas, arrivages_ajoutes=[{"date": fin_mois2, "kg": 1000}])
+        s = c.ok("Choukri", "POST", f"/api/couverture/{q_ref}/simulation", hyp)["simulee"]
+        jours = s["jours"]
+        stock0 = s["synthese"]["disponible_kg"]
+        verifier(abs(stock0 - 600) < 0.001, f"cas 3 : stock {stock0} au lieu de 600")
+        b, solde = [], stock0
+        for j in jours:
+            solde += j["arrivee_kg"] - j["conso_prevue_kg"]
+            b.append(solde)
+        r = next(i for i, v in enumerate(b) if v < -1e-6)
+        p = s["propositions"][0]
+        w = p["fenetres"][0]
+        reste = b[r - 1] if r else stock0
+        plan_f = sum(j["conso_prevue_kg"] for j in jours[r:r + 30])
+        arr_f = sum(j["arrivee_kg"] for j in jours[r:r + 30])
+        verifier(jours[r]["date"] > fin_mois2, f"cas 3 : la rupture J+{r} tombe avant l'arrivage du {fin_mois2}")
+        verifier(s["synthese"]["premiere_rupture"] == jour(r) and w["date_besoin"] == jour(r - 60)
+                 and p["date_limite_commande"] == jour(r - 90),
+                 f"cas 3 : R {s['synthese']['premiere_rupture']} (J+{r} recalcule), D* {w['date_besoin']}, "
+                 f"limite {p['date_limite_commande']}")
+        verifier(r - 60 >= 30 and p["date_disponibilite"] == jour(r - 60) and not p["en_retard"],
+                 f"cas 3 : reception {p['date_disponibilite']}, attendue a D* = J+{r - 60} (pas en retard)")
+        verifier(abs(w["besoin_net_kg"] - (plan_f - reste - arr_f)) < 0.05 and abs(w["reste_kg"] - reste) < 0.05,
+                 f"cas 3 : Q0 {w['besoin_net_kg']}, recalcule {plan_f:.4f} - reste {reste:.4f} - arrivages {arr_f}")
+        verifier(abs(s["situation"]["securite"]["x_kg"]) < 1e-6 and abs(p["quantite_proposee_kg"] - w["besoin_net_kg"]) < 0.01,
+                 f"cas 3 : X {s['situation']['securite']['x_kg']}, Q {p['quantite_proposee_kg']} (Q0 {w['besoin_net_kg']})")
+        plan_r_n = sum(j["conso_prevue_kg"] for j in jours[:r + 30])
+        verifier(abs(stock0 + 1000 + w["besoin_net_kg"] - plan_r_n) < 0.05 and abs(p["stock_fin_fenetre_kg"]) < 0.05,
+                 f"cas 3 : bilan {stock0} + 1 000 + {w['besoin_net_kg']} != plan {plan_r_n:.4f} jusqu'a R + N, "
+                 f"stock a R + N {p['stock_fin_fenetre_kg']}")
+        verifier(any(a.get("hypothese") == "arrivage ajouté" and a["compte"] for a in s["arrivages"]),
+                 "cas 3 : l'arrivage simule n'est pas compte")
+
+        # CAS 1 — REGULIER, aux chiffres exacts : 1 800 kg en stock (1 200 de plus), 15 kg/j.
+        id_bc, lignes = bon_envoye(c, [(ref, 1200, 2.0)], frs=frs)
+        reception_validee(c, id_bc, lignes, [1200], lot_fournisseur="LOT-CIBLE-2", nb_bobines=240)
+        demande(lambda k: 15.0)
+        s = c.ok("Choukri", "POST", f"/api/couverture/{q_ref}/simulation", reglages_cas)["simulee"]
+        verifier(abs(s["synthese"]["disponible_kg"] - 1800) < 0.001, f"stock {s['synthese']['disponible_kg']} au lieu de 1 800")
+        p = s["propositions"][0]
+        w = p["fenetres"][0]
+        attendu = {"R": jour(120), "D*": jour(60), "D": jour(60), "limite": jour(30), "Q0": 450.0, "X": 0.0,
+                   "Q": 450.0, "stock R+N": 0.0}
+        obtenu = {"R": s["synthese"]["premiere_rupture"], "D*": w["date_besoin"], "D": p["date_disponibilite"],
+                  "limite": p["date_limite_commande"], "Q0": w["besoin_net_kg"], "X": s["situation"]["securite"]["x_kg"],
+                  "Q": p["quantite_proposee_kg"], "stock R+N": p["stock_fin_fenetre_kg"]}
+        for cle, v in attendu.items():
+            verifier(obtenu[cle] == v if isinstance(v, str) else abs(obtenu[cle] - v) < 0.01,
+                     f"cas 1 : {cle} = {obtenu[cle]}, attendu {v}")
+        verifier(s["synthese"]["statut"] == "COUVERT" and s["synthese"]["jours_couverture"] == 120
+                 and s["synthese"]["ecart_cible_j"] == 60,
+                 f"cas 1 : etat {s['synthese']['statut']}, couverture {s['synthese']['jours_couverture']} j, "
+                 f"ecart {s['synthese']['ecart_cible_j']} j")
+
+        # SANS CIBLE (§ 15.9 bis-1) : signal, aucune proposition, aucun repli ; C69 la liste.
+        infra.sql(f"UPDATE reference SET couverture_cible_mois = NULL WHERE code_reference = '{ref}'")
+        d = c.ok("Choukri", "GET", f"/api/couverture/{q_ref}")
+        verifier(not d["propositions"] and any(sg["code"] == "CIBLE_NON_DEFINIE" for sg in d["situation"]["signaux"]),
+                 f"sans cible : {len(d['propositions'])} proposition(s), signaux {d['situation']['signaux']}")
+        c69 = c.ok("Choukri", "GET", "/api/controles/C69")
+        verifier(any(x["code_reference"] == ref for x in c69), f"C69 ne liste pas {ref}")
+        # LE STOCK MINIMUM NE CHANGE AUCUNE QUANTITE ; C68 le signale.
+        infra.sql(f"UPDATE reference SET couverture_cible_mois = 2, stock_min_kg = 100000 WHERE code_reference = '{ref}'")
+        demande(lambda k: 15.0)
+        avec_min = c.ok("Choukri", "POST", f"/api/couverture/{q_ref}/simulation", reglages_cas)["simulee"]
+        verifier(abs(avec_min["propositions"][0]["quantite_proposee_kg"] - 450) < 0.01
+                 and any(sg["code"] == "SOUS_MINIMUM" for sg in avec_min["situation"]["signaux"]),
+                 f"stock minimum : Q {avec_min['propositions'][0]['quantite_proposee_kg']}, signaux "
+                 f"{avec_min['situation']['signaux']}")
+        verifier(any(x["code_reference"] == ref for x in c.ok("Choukri", "GET", "/api/controles/C68")),
+                 f"C68 ne liste pas {ref}")
+    finally:
+        infra.sql(f"DELETE FROM besoin_mrp WHERE code_reference = '{ref}'")
+        infra.sql(f"UPDATE reference SET stock_min_kg = NULL, couverture_cible_mois = COALESCE(couverture_cible_mois, 2) "
+                  f"WHERE code_reference = '{ref}'")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_bon_demande_prix,
@@ -6202,5 +6453,7 @@ SCENARIOS = [
     scenario_parametres_mrp_orphelins,
     scenario_sauvegarde_restaurable,
     scenario_import_taux_dossier_facultatif,
+    scenario_couverture_cible_colonnes,
+    scenario_couverture_cible,
     scenario_controles_finaux,
 ]

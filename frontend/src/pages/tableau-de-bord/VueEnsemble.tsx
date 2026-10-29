@@ -219,13 +219,13 @@ export function VueEnsemble() {
           />
           <CarteStat
             Icone={PackageX}
-            libelle="Plan non couvert"
-            valeur={n('nb_plan_non_couvert') == null ? '—' : `${nn('nb_plan_non_couvert')}`}
+            libelle="Rupture inévitable"
+            valeur={n('nb_rupture_inevitable') == null ? '—' : `${nn('nb_rupture_inevitable')}`}
             unite={`/ ${nn('nb_references')}`}
-            precision={`${nn('nb_a_commander_aujourdhui')} à commander aujourd’hui · ${nn('nb_sous_securite')} sous la sécurité`}
-            ton={nn('nb_plan_non_couvert') > 0 ? 'danger' : 'succes'}
+            precision={`${nn('nb_a_commander_aujourdhui')} à commander aujourd’hui · ${nn('nb_sous_securite')} sous la sécurité · ${nn('nb_sous_cible')} sous la cible`}
+            ton={nn('nb_rupture_inevitable') > 0 ? 'danger' : 'succes'}
             barres={horizon.rupture.length >= 3 ? horizon.rupture : undefined}
-            aide="Moteur de couverture. Les barres : les références au plan non couvert, mois par mois, sur l'horizon du plan."
+            aide="Moteur de couverture : la 1re rupture tombe avant aujourd’hui + délai. Les barres : les références dont le plan n’est pas couvert, mois par mois, sur l’horizon du plan."
           />
           <CarteStat
             Icone={PiggyBank}
@@ -348,8 +348,9 @@ export function VueEnsemble() {
               sousCentre="références"
               parts={[
                 { libelle: 'Couvert', valeur: nn('nb_couvert'), couleur: TON.succes },
+                { libelle: 'Sous la cible', valeur: nn('nb_sous_cible'), couleur: TON.neutre },
                 { libelle: 'Sous la sécurité', valeur: nn('nb_sous_securite'), couleur: TON.alerte },
-                { libelle: 'Plan non couvert', valeur: nn('nb_plan_non_couvert'), couleur: TON.danger },
+                { libelle: 'Rupture inévitable', valeur: nn('nb_rupture_inevitable'), couleur: TON.danger },
               ]}
             />
           )}
@@ -476,7 +477,7 @@ export function VueEnsemble() {
               series={[
                 { cle: 'ok', libelle: 'Couvert', valeurs: (a.abc_statut ?? []).map((x) => x.ok), couleur: TON.succes },
                 { cle: 'at', libelle: 'Sous la sécurité', valeurs: (a.abc_statut ?? []).map((x) => x.attention), couleur: TON.alerte },
-                { cle: 'al', libelle: 'Plan non couvert', valeurs: (a.abc_statut ?? []).map((x) => x.en_alerte), couleur: TON.danger },
+                { cle: 'al', libelle: 'Rupture inévitable', valeurs: (a.abc_statut ?? []).map((x) => x.en_alerte), couleur: TON.danger },
               ]}
             />
           )}

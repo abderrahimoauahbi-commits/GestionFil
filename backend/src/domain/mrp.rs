@@ -183,7 +183,8 @@ pub async fn prendre_snapshot(db: &Db, user: &Utilisateur, id_plan: &str) -> App
     let horodatage = maintenant();
     // LE SOLDE ET L'ETAT DU MOTEUR DE COUVERTURE (27/10/2026) : pour chaque mois du
     // plan EN SERVICE, le solde projete en fin de mois et l'etat du mois
-    // (PLAN_NON_COUVERT, SOUS_SECURITE, COUVERT). Un mois hors de l'horizon (passe)
+    // (`couverture::statut_mois` : PLAN_NON_COUVERT, SOUS_SECURITE, COUVERT ; une
+    // lecture de la projection, pas l'etat de la reference). Un mois hors de l'horizon (passe)
     // ou un plan qui n'est pas en service n'a pas de projection : vide.
     let etats = crate::routes::couverture::etats(db).await?;
     let (mut codes, mut mois, mut soldes, mut statuts) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());

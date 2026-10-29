@@ -106,11 +106,33 @@ function codesCalcules(source: string): string[] {
   return [...new Set([...texte.slice(debut, fin).matchAll(/(?:THEN|ELSE)\s+'([^']+)'/g)].map((m) => m[1]))]
 }
 
+/**
+ * Les codes du moteur de couverture (27/10/2026) : les constantes `pub const X:
+ * &str = "X";` d'un module Rust (`moteur:fichier#module`), relues a la source.
+ */
+function codesMoteur(source: string): string[] {
+  const [fichier, nom] = source.slice('moteur:'.length).split('#')
+  const texte = lire(fichier)
+  const debut = texte.search(new RegExp(String.raw`pub mod ${nom}\s*\{`))
+  assert.ok(debut >= 0, `« pub mod ${nom} » introuvable dans ${fichier}`)
+  const fin = texte.indexOf('\n}', debut)
+  return [...texte.slice(debut, fin).matchAll(/pub const \w+: &str = "([^"]+)";/g)].map((m) => m[1])
+}
+
+/** Une source, ou plusieurs reunies par « + » (le stock : la photo ET le moteur). */
+function codesDeLaSource(source: string, base: Map<string, string[]>): string[] | undefined {
+  const parties = source.split('+').map((s) =>
+    s.startsWith('calcule:') ? codesCalcules(s) : s.startsWith('moteur:') ? codesMoteur(s) : base.get(s),
+  )
+  if (parties.some((p) => !p)) return undefined
+  return [...new Set(parties.flatMap((p) => p ?? []))]
+}
+
 test('chaque code de la base a son libelle dans la table des statuts', () => {
   const base = codesDeLaBase()
   for (const entite of Object.keys(STATUTS) as EntiteStatut[]) {
     const source = SOURCE_STATUTS[entite]
-    const attendus = source.startsWith('calcule:') ? codesCalcules(source) : base.get(source)
+    const attendus = codesDeLaSource(source, base)
     assert.ok(attendus && attendus.length > 0, `${entite} : aucune contrainte CHECK pour ${source}`)
     const table = Object.keys(STATUTS[entite]).sort()
     assert.deepEqual(table, [...attendus].sort(), `${entite} (${source}) : la table et la base divergent`)
@@ -152,4 +174,21 @@ test('aucun libelle de la table n est un code brut, et une meme semantique garde
     if ('BROUILLON' in STATUTS[entite]) assert.equal(tonStatut(entite, 'BROUILLON'), 'neutre', entite)
   }
   assert.equal(tonStatut('statut_stock', 'CRITIQUE'), 'danger')
+  assert.equal(tonStatut('statut_stock', 'RUPTURE_INEVITABLE'), 'danger')
+})
+
+test('les etats et les signaux du moteur de couverture v2 (§ 15.4) ont leur libelle', () => {
+  assert.equal(libelleStatut('statut_stock', 'RUPTURE_INEVITABLE'), 'Rupture inévitable')
+  assert.equal(libelleStatut('statut_stock', 'SOUS_CIBLE'), 'Sous cible')
+  assert.equal(libelleStatut('statut_stock', 'SOUS_SECURITE'), 'Sous sécurité')
+  // Quatre tons distincts, du plus grave au plus calme.
+  assert.deepEqual(
+    ['RUPTURE_INEVITABLE', 'SOUS_SECURITE', 'SOUS_CIBLE', 'COUVERT'].map((c) => tonStatut('statut_stock', c)),
+    ['danger', 'alerte', 'info', 'succes'],
+  )
+  assert.equal(libelleStatut('signal_couverture', 'CIBLE_NON_DEFINIE'), 'Cible non définie')
+  assert.deepEqual(
+    codesMoteur('moteur:backend/src/domain/couverture.rs#etat').sort(),
+    ['COUVERT', 'RUPTURE_INEVITABLE', 'SOUS_CIBLE', 'SOUS_SECURITE'],
+  )
 })

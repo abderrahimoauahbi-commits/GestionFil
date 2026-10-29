@@ -418,7 +418,9 @@ pub const ENTITES: &[Entite] = &[
             "densite_kg_ml", "prix_catalogue",
             "description_commerciale",
             "code_devise_catalogue", "date_prix_catalogue", "stock_min_kg",
-            "couverture_min_mois", "marge_securite_pct", "moq_kg",
+            // La couverture cible du MRP (2026-10-27l) ; la marge de securite
+            // de l'article n'existe plus (celle de la qualite reste).
+            "couverture_cible_mois", "moq_kg",
             "multiple_achat_kg", "suivi_lot", "code_sh", "actif"],
         modification: &[
             "code_categorie", "code_fournisseur", "designation", "type_fil",
@@ -430,7 +432,7 @@ pub const ENTITES: &[Entite] = &[
             "densite_kg_ml", "prix_catalogue",
             "description_commerciale",
             "code_devise_catalogue", "date_prix_catalogue", "stock_min_kg",
-            "couverture_min_mois", "marge_securite_pct", "moq_kg",
+            "couverture_cible_mois", "moq_kg",
             "multiple_achat_kg", "suivi_lot", "code_sh", "actif",
         ],
         suppression: Suppression::Logique("actif"),

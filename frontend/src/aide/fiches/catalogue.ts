@@ -209,19 +209,15 @@ export const FICHES_CATALOGUE: Sujet[] = [
         nom: 'Stock minimum (kg)',
         alias: ['Stock min.'],
         description:
-          'Le stock minimum saisi sur la fiche : une ALERTE, jamais un terme du calcul (décision du 10/10/2026 : le plan d’achat suit le plan de production seul). Il n’entre ni dans l’état du moteur de couverture ni dans aucune proposition d’achat ; le stock projeté l’affiche comme alerte dans sa fenêtre de détail. Le seuil « SOUS SÉCU. » de l’état des stocks est la SÉCURITÉ DU JOUR du moteur (jours de sécurité de la classe ABC × plan à venir), pas ce minimum. Vide : aucun minimum — le minimum calculé (formule F3) n’existe plus depuis le 27/10/2026.',
+          'Stock minimum : garde-fou, un signal « vérifier le plan », jamais une quantité de commande. Le moteur de couverture le signale quand il est franchi entre aujourd’hui et aujourd’hui + délai (C68) ; il n’entre dans aucune proposition d’achat. Vide : aucun minimum.',
         valeurs: 'kg',
       },
       {
-        nom: 'Couverture minimale (mois)',
+        nom: 'Couverture cible (mois)',
+        alias: ['Couverture minimale (mois)'],
         description:
-          'La couverture minimale visée, en mois : une alerte affichée au stock projeté (vide : le paramètre P_CouvMinMois). Le minimum calculé (F3) qui la lisait n’existe plus (27/10/2026) : elle n’entre dans aucun calcul.',
-      },
-      {
-        nom: 'Marge de sécurité (%)',
-        description:
-          'L’ancienne majoration du minimum calculé (F3), qui n’existe plus depuis le 27/10/2026 : gardée sur la fiche, elle n’entre dans aucun calcul. La sécurité du moteur vient des jours de sécurité de la classe ABC.',
-        valeurs: 'pourcentage',
+          'Couverture cible (mois) : la couverture souhaitée au moment de la réception ; le moteur déclenche la commande pour qu’elle arrive C jours avant la rupture ; obligatoire pour un article soumis au MRP (sans cible : aucune proposition, signal C69). Jamais une quantité.',
+        valeurs: 'mois',
       },
       {
         nom: 'Prix par unité',

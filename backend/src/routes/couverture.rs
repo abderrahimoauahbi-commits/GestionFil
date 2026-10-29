@@ -8,11 +8,12 @@
 //! et la proposition enregistrée ne peuvent pas diverger.
 //!
 //! UNE SEULE SOURCE DE VÉRITÉ (arbitrage du 27/10/2026) : tout ce qui dit d'une
-//! référence qu'elle est couverte, en rupture, sous la sécurité ou « à commander »
+//! référence qu'elle est couverte, en rupture inévitable, sous la sécurité, sous la
+//! cible ou « à commander » (moteur v2, 27/10/2026, soir)
 //! vient d'ici — `etats()` pour les écrans et les compteurs (cockpit, briefing,
 //! stock projeté, mur de risques, indicateurs du plan d'achat, assistant, saisie
 //! d'un bon) et `controles_moteur()` pour les contrôles qui en dépendent (C05,
-//! C25). L'ancien calcul (`v_stock_projete`, `v_plan_achat`, `v_encours_fiable`,
+//! C25, C68, C69). L'ancien calcul (`v_stock_projete`, `v_plan_achat`, `v_encours_fiable`,
 //! `v_besoin_horizon`…) est retiré par 2026-10-27e.
 //!
 //! Ce qui est COMPTÉ aujourd'hui (décisions du 26/10/2026 et du 27/10/2026) :
@@ -37,7 +38,7 @@
 use crate::auth::{rbac::module, rbac::Action, Utilisateur};
 use crate::db::{arrondi_kg, Db};
 use crate::domain::couverture::{
-    self, jours_du_mois, Arrivee, Couverture, MoisPlan, Reglages, Source, MAX_PROPOSITIONS,
+    self, jours_du_mois, signal, Arrivee, Couverture, MoisPlan, Reglages, Signal, Source, MAX_PROPOSITIONS,
     trop_tard_pour_commander,
 };
 use crate::error::{AppError, AppResult};
@@ -60,19 +61,26 @@ const REGLES_PROVISOIRES: &[&str] = &[
     "L'import en route sans bon n'a pas de date fiable : hors couverture, listé à part.",
     "Un transfert en route arrive au magasin destinataire à sa date prévue de disponibilité, saisie à l'expédition et révisable tant qu'il roule : il est compté à cette date.",
     "Une date prévue de disponibilité dépassée met le transfert EN RETARD : hors couverture tant qu'aucune nouvelle date n'est saisie. Un transfert en route sans date (expédié avant la règle) est hors couverture, listé « sans date ».",
-    "La fenêtre d'une commande est [D, F[ : D inclus, F exclu, F = D + couverture du fournisseur, sinon P_MargeJours (30 jours pleins par défaut).",
+    "La réception normale arrive C jours avant la rupture (C = couverture cible de la fiche article) ; la commande couvre la fenêtre [R, R + N[, N = couverture du fournisseur, sinon P_MargeJours (30 jours pleins par défaut).",
     "Une référence sans classe ABC prend la plus longue des trois sécurités ; le défaut de données est signalé sur la ligne.",
+    "Un article actif au besoin du plan en service sans couverture cible n'a pas de proposition : la configuration MRP est incomplète (signal).",
 ];
 
-/// Les trois états d'une référence au sens du moteur (arbitrage du 27/10/2026) :
-/// ils remplacent RUPTURE / CRITIQUE / ATTENTION / OK de l'ancien calcul partout
-/// où une référence est dite couverte ou non.
+/// LES QUATRE ÉTATS d'une référence au sens du moteur v2 (§ 15.4, 27/10/2026) :
+/// RUPTURE_INEVITABLE, SOUS_SECURITE, SOUS_CIBLE, COUVERT — le plus grave
+/// l'emporte. Ils remplacent PLAN_NON_COUVERT / SOUS_SECURITE / COUVERT partout
+/// où une référence est dite couverte ou non. Les signaux sont à part.
 pub mod statut {
-    /// Une rupture est prévue sur l'horizon : une part du plan ne sera pas couverte.
+    pub use crate::domain::couverture::etat::*;
+}
+
+/// LES ÉTATS D'UN MOIS de la frise (mur de risques, photo du plan) : une part du
+/// plan du mois n'est pas couverte, le point bas passe sous le seuil de sécurité
+/// un jour du mois, ou rien de cela. Une lecture de la projection, pas l'état
+/// d'une référence.
+pub mod statut_mois {
     pub const PLAN_NON_COUVERT: &str = "PLAN_NON_COUVERT";
-    /// Le solde projeté passe sous la sécurité, sans rupture sur l'horizon.
     pub const SOUS_SECURITE: &str = "SOUS_SECURITE";
-    /// Ni rupture ni passage sous la sécurité sur l'horizon.
     pub const COUVERT: &str = "COUVERT";
 }
 
@@ -82,7 +90,7 @@ pub mod statut {
 
 #[derive(Clone)]
 struct Parametres {
-    securite: [f64; 3],
+    securite: [i64; 3],
     delai_defaut: i64,
     marge_jours: i64,
 }
@@ -112,6 +120,10 @@ struct Fiche {
     arrondi_palette: bool,
     poids_bobine_kg: Option<f64>,
     bobines_par_palette: Option<i64>,
+    /// La couverture cible de la fiche (mois) : C = 30 × mois. Absente : aucune proposition.
+    couverture_cible_mois: Option<f64>,
+    /// Le stock minimum de la fiche : un garde-fou, un signal seulement.
+    stock_min_kg: Option<f64>,
 }
 
 #[derive(Clone)]
@@ -215,9 +227,9 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
     // Un paramètre absent prend la valeur livrée par le socle (30 j, 60 j, 30 j).
     let parametres = Parametres {
         securite: [
-            entier(ctx.try_get("sec_a")?, 30) as f64,
-            entier(ctx.try_get("sec_b")?, 30) as f64,
-            entier(ctx.try_get("sec_c")?, 30) as f64,
+            entier(ctx.try_get("sec_a")?, 30),
+            entier(ctx.try_get("sec_b")?, 30),
+            entier(ctx.try_get("sec_c")?, 30),
         ],
         delai_defaut: entier(ctx.try_get("delai")?, 60),
         marge_jours: entier(ctx.try_get("marge")?, 30),
@@ -289,7 +301,8 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
                 f.delai_livraison_jours, f.couverture_commande_j,
                 r.moq_kg::float8 AS moq_kg, r.multiple_achat_kg::float8 AS multiple_achat_kg,
                 COALESCE(r.arrondi_palette, 0) = 1 AS arrondi_palette,
-                r.poids_bobine_kg::float8 AS poids_bobine_kg, r.bobines_par_palette
+                r.poids_bobine_kg::float8 AS poids_bobine_kg, r.bobines_par_palette,
+                r.couverture_cible_mois::float8 AS couverture_cible_mois, r.stock_min_kg::float8 AS stock_min_kg
            FROM reference r
            LEFT JOIN fournisseur f ON f.code_fournisseur = r.code_fournisseur
           WHERE ($1::text IS NULL OR r.code_reference = $1)",
@@ -315,6 +328,8 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
                 arrondi_palette: l.try_get("arrondi_palette")?,
                 poids_bobine_kg: l.try_get("poids_bobine_kg")?,
                 bobines_par_palette: l.try_get("bobines_par_palette")?,
+                couverture_cible_mois: l.try_get("couverture_cible_mois")?,
+                stock_min_kg: l.try_get("stock_min_kg")?,
             },
         );
     }
@@ -509,6 +524,9 @@ struct Analyse<'a> {
     source_couverture: Source,
     source_securite: String,
     source_multiple: &'static str,
+    /// La cible en mois (fiche ou simulation) et sa source ; `None` : non définie.
+    cible_mois: Option<f64>,
+    source_cible: Option<Source>,
     /// Un DÉFAUT DE DONNÉES de la fiche qui a imposé un réglage par défaut
     /// (aujourd'hui : pas de classe ABC). Signalé sur la ligne, jamais bloquant.
     defaut_donnees: Option<String>,
@@ -551,7 +569,40 @@ impl Analyse<'_> {
     }
     /// L'état de la référence au sens du moteur (voir `statut`).
     fn statut(&self) -> &'static str {
-        statut_de(&self.resultat)
+        self.resultat.etat
+    }
+    /// La raison de l'état, en une phrase chiffrée.
+    fn raison_etat(&self) -> String {
+        couverture::raison_etat(&self.resultat, self.reglages.aujourdhui, self.reglages.delai_j)
+    }
+    /// L'indice de jour de la réception proposée (la 1re proposition).
+    fn indice_reception(&self) -> Option<usize> {
+        self.resultat
+            .propositions
+            .first()
+            .map(|p| (p.date_disponibilite - self.reglages.aujourdhui).num_days().max(0) as usize)
+    }
+    /// LE BESOIN JUSQU'À RÉCEPTION : le plan daté de [aujourd'hui, D[, D la
+    /// réception proposée ; `None` sans réception proposée.
+    fn besoin_jusqu_reception_kg(&self) -> Option<f64> {
+        self.indice_reception()
+            .map(|d| arrondi_kg(couverture::plan_des_premiers_jours(&self.resultat, d as i64)) + 0.0)
+    }
+    /// LE STOCK À LA RÉCEPTION : B(D − 1), le solde au soir de la veille de D,
+    /// avant la commande proposée (la projection sans proposition).
+    fn stock_a_la_reception_kg(&self) -> Option<f64> {
+        let stock = self.magasin_compte_kg + self.machine_compte_kg;
+        self.indice_reception().map(|d| {
+            if d == 0 {
+                arrondi_kg(stock) + 0.0
+            } else {
+                self.resultat.jours.get(d - 1).map_or(0.0, |j| j.solde_kg)
+            }
+        })
+    }
+    /// Les codes des signaux (indépendants de l'état).
+    fn codes_signaux(&self) -> Vec<&'static str> {
+        self.resultat.signaux.iter().map(|s| s.code).collect()
     }
     /// Les jours couverts à partir d'aujourd'hui : jusqu'à la veille de la
     /// première rupture (0 = rupture aujourd'hui) ; `None` sans rupture sur l'horizon.
@@ -611,23 +662,13 @@ impl Analyse<'_> {
 struct Surcharges {
     delai_j: Option<i64>,
     couverture_j: Option<i64>,
-    jours_securite: Option<f64>,
+    jours_securite: Option<i64>,
+    /// La couverture cible C, en mois (§ 15.7-6).
+    couverture_cible_mois: Option<f64>,
     /// 0 = aucun minimum.
     moq_kg: Option<f64>,
     /// 0 = pas d'arrondi.
     multiple_kg: Option<f64>,
-}
-
-/// L'état d'une référence au sens du moteur : une rupture prévue sur l'horizon
-/// l'emporte sur un passage sous la sécurité.
-fn statut_de(c: &Couverture) -> &'static str {
-    if c.premiere_rupture.is_some() {
-        statut::PLAN_NON_COUVERT
-    } else if c.premier_passage_securite.is_some() {
-        statut::SOUS_SECURITE
-    } else {
-        statut::COUVERT
-    }
 }
 
 fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
@@ -663,7 +704,7 @@ fn analyser_avec<'a>(d: &'a Donnees, fiche: &'a Fiche, s: &Surcharges) -> Analys
         Some("B") => (p.securite[1], "classe B (P_SecuriteB)".to_string(), None),
         Some("C") => (p.securite[2], "classe C (P_SecuriteC)".to_string(), None),
         autre => {
-            let jours = p.securite.iter().cloned().fold(0.0, f64::max);
+            let jours = p.securite.iter().copied().max().unwrap_or(0);
             let classe = autre.filter(|c| !c.is_empty());
             (
                 jours,
@@ -699,12 +740,24 @@ fn analyser_avec<'a>(d: &'a Donnees, fiche: &'a Fiche, s: &Surcharges) -> Analys
         Some(m) => Some(m).filter(|m| *m > 0.0),
         None => fiche.moq_kg.filter(|m| *m > 0.0),
     };
+    // LA COUVERTURE CIBLE (§ 15.2) : la fiche article, obligatoire pour un
+    // article soumis au MRP ; absente, aucune proposition et aucun repli.
+    let (cible_mois, source_cible) = match (s.couverture_cible_mois, fiche.couverture_cible_mois.filter(|m| *m >= 0.0)) {
+        (Some(m), _) => (Some(m), Some(Source::Simulation)),
+        (None, Some(m)) => (Some(m), Some(Source::Fiche)),
+        (None, None) => (None, None),
+    };
+    // Soumis au MRP : actif ET présent dans le besoin du plan en service (§ 15.9 bis-1).
+    let soumis_mrp = fiche.actif && d.besoin.contains_key(code);
     let reglages = Reglages {
         aujourdhui: auj,
         fin_horizon: fin,
         delai_j,
         couverture_j,
         jours_securite,
+        cible_j: cible_mois.map(|m| (m * 30.0).round() as i64),
+        stock_min_kg: fiche.stock_min_kg,
+        soumis_mrp,
         moq_kg,
         multiple_kg,
         kg_palette,
@@ -854,7 +907,11 @@ fn analyser_avec<'a>(d: &'a Donnees, fiche: &'a Fiche, s: &Surcharges) -> Analys
         .filter(|a| a.compte)
         .filter_map(|a| a.date.map(|date| Arrivee { date, kg: a.kg }))
         .collect();
-    let resultat = couverture::calculer(magasin_compte_kg + machine_compte_kg, &plan, &arrivees, &reglages);
+    let mut resultat = couverture::calculer(magasin_compte_kg + machine_compte_kg, &plan, &arrivees, &reglages);
+    // Les données manquantes déjà connues (classe ABC absente…) : un signal aussi.
+    if let Some(msg) = &defaut_donnees {
+        resultat.signaux.push(Signal { code: signal::DEFAUT_DONNEES, date: None, message: msg.clone() });
+    }
 
     Analyse {
         fiche,
@@ -863,6 +920,8 @@ fn analyser_avec<'a>(d: &'a Donnees, fiche: &'a Fiche, s: &Surcharges) -> Analys
         source_couverture,
         source_securite,
         source_multiple,
+        cible_mois,
+        source_cible,
         defaut_donnees,
         magasin_compte_kg,
         machine_compte_kg,
@@ -909,7 +968,8 @@ fn ligne(a: &Analyse) -> Value {
         "qte_a_commander_kg": premiere.map(|p| p.quantite_proposee_kg),
         "palettes_equivalentes": premiere.and_then(|p| p.palettes_equivalentes),
         "date_disponibilite": premiere.map(|p| p.date_disponibilite),
-        "date_limite_commande": premiere.map(|p| p.date_limite_commande),
+        // La date limite de la 1re rupture (D* − L), même sans proposition.
+        "date_limite_commande": r.date_limite_commande,
         "nb_propositions": r.propositions.len(),
         "propositions_plafonnees": r.propositions_plafonnees,
         "motif_sans_proposition": r.motif_sans_proposition,
@@ -923,9 +983,27 @@ fn ligne(a: &Analyse) -> Value {
         "non_valide_kg": a.somme("NON_VALIDE"),
         "apres_horizon_kg": a.somme("APRES_HORIZON"),
     });
-    // L'état au sens du moteur (27/10/2026), le même pour tout l'ERP.
+    // L'état au sens du moteur (27/10/2026), le même pour tout l'ERP, et ses
+    // signaux, à part (codes et messages).
     if let Some(o) = v.as_object_mut() {
         o.insert("statut".into(), json!(a.statut()));
+        o.insert("signaux".into(), json!(r.signaux));
+        o.insert("raison_etat".into(), json!(a.raison_etat()));
+        // LE STOCK PROJETÉ (21 colonnes, 27/10/2026) : la réception proposée D (la
+        // 1re proposition), « en retard » quand la cible l'est, et le plan daté
+        // jusqu'à elle ; l'horizon en jours pour dire « > N j » sans rupture.
+        o.insert("reception_en_retard".into(), json!(premiere.map(|p| p.en_retard)));
+        o.insert("besoin_jusqu_reception_kg".into(), json!(a.besoin_jusqu_reception_kg()));
+        o.insert("horizon_j".into(), json!(r.jours.len().saturating_sub(1)));
+        // LA COUVERTURE CIBLE (§ 15.5) : couverture actuelle, cible, écart.
+        o.insert("date_besoin".into(), json!(r.date_besoin));
+        o.insert("couverture_cible_j".into(), json!(r.cible_j));
+        o.insert("couverture_cible_mois".into(), json!(a.cible_mois));
+        o.insert("source_cible".into(), json!(a.source_cible));
+        o.insert("ecart_cible_j".into(), json!(r.ecart_cible_j));
+        o.insert("securite_x_kg".into(), json!(r.securite.x_kg));
+        o.insert("stock_min_kg".into(), json!(r.stock_minimum.kg));
+        o.insert("sous_minimum_le".into(), json!(r.stock_minimum.franchi_le));
         o.insert("jours_couverture".into(), json!(a.jours_couverture()));
         o.insert("a_commander_aujourdhui".into(), json!(a.a_commander_aujourdhui()));
         o.insert("arrivages_comptes_kg".into(), json!(a.arrivages_comptes_kg()));
@@ -1022,11 +1100,12 @@ pub struct MoisFrise {
     pub entrees_kg: f64,
     /// Le solde projeté en fin de mois (ou au dernier jour de l'horizon), jamais négatif.
     pub stock_fin_kg: f64,
-    /// La ligne de sécurité au même jour.
+    /// Le seuil de sécurité NS au même jour.
     pub securite_kg: f64,
     pub plan_non_couvert_kg: f64,
-    /// PLAN_NON_COUVERT si une part du plan du mois n'est pas couverte, SOUS_SECURITE
-    /// si le solde passe sous la sécurité un jour du mois, COUVERT sinon.
+    /// `statut_mois` : PLAN_NON_COUVERT si une part du plan du mois n'est pas
+    /// couverte, SOUS_SECURITE si le point bas passe sous NS un jour du mois,
+    /// COUVERT sinon.
     pub statut: &'static str,
 }
 
@@ -1042,7 +1121,15 @@ pub struct Etat {
     pub code_fournisseur: Option<String>,
     pub fournisseur_nom: Option<String>,
     pub statut: &'static str,
+    /// La raison de l'état, en une phrase chiffrée.
+    pub raison_etat: String,
+    /// Les codes des signaux (§ 15.4), indépendants de l'état.
+    pub signaux: Vec<&'static str>,
+    /// La couverture actuelle (jours jusqu'à la 1re rupture ; `None` : tout l'horizon).
     pub jours_couverture: Option<i64>,
+    /// C, la couverture cible (jours), et l'écart couverture − C.
+    pub couverture_cible_j: Option<i64>,
+    pub ecart_cible_j: Option<i64>,
     pub premiere_rupture: Option<NaiveDate>,
     pub couvert_jusqu_au: Option<NaiveDate>,
     pub premier_passage_securite: Option<NaiveDate>,
@@ -1057,12 +1144,14 @@ pub struct Etat {
     pub a_commander_aujourdhui: bool,
     pub delai_j: i64,
     pub defaut_donnees: Option<String>,
-    /// LA SÉCURITÉ DU JOUR (27/10/2026) : la ligne de sécurité du moteur aujourd'hui
-    /// (jours de sécurité de la classe ABC × plan à venir) — le « stock minimum »
-    /// affiché, un seuil d'avenir, au plan.
+    /// LA SÉCURITÉ DU JOUR : NS(aujourd'hui), le plan des S jours suivants.
     pub securite_aujourdhui_kg: f64,
-    /// « Trop tard pour commander » : 1re rupture avant aujourd'hui + délai
-    /// (`domain::couverture::trop_tard_pour_commander`).
+    /// Le stock minimum de la fiche (garde-fou) et le jour où le point bas le
+    /// franchit dans [aujourd'hui, aujourd'hui + délai] (signal SOUS_MINIMUM).
+    pub stock_min_kg: Option<f64>,
+    pub sous_minimum_le: Option<NaiveDate>,
+    /// « Trop tard pour commander » : 1re rupture avant aujourd'hui + délai —
+    /// l'état RUPTURE_INEVITABLE (`domain::couverture::trop_tard_pour_commander`).
     pub trop_tard: bool,
     /// La ligne complète de la liste « À commander » (mêmes champs).
     pub ligne: Value,
@@ -1075,7 +1164,11 @@ impl Etat {
     pub fn colonnes(&self) -> serde_json::Map<String, Value> {
         let v = json!({
             "statut": self.statut,
+            "raison_etat": self.raison_etat,
+            "signaux": self.signaux,
             "jours_couverture": self.jours_couverture,
+            "couverture_cible_j": self.couverture_cible_j,
+            "ecart_cible_j": self.ecart_cible_j,
             "premiere_rupture": self.premiere_rupture,
             "couvert_jusqu_au": self.couvert_jusqu_au,
             "premier_passage_securite": self.premier_passage_securite,
@@ -1100,9 +1193,14 @@ impl Etat {
         self.statut != statut::COUVERT
     }
 
-    /// Classe A ET plan non couvert.
+    /// Classe A ET rupture inévitable.
     pub fn classe_a_en_rupture(&self) -> bool {
-        self.statut == statut::PLAN_NON_COUVERT && self.classe_abc.as_deref().map(str::trim) == Some("A")
+        self.statut == statut::RUPTURE_INEVITABLE && self.classe_abc.as_deref().map(str::trim) == Some("A")
+    }
+
+    /// Un signal de ce code est levé.
+    pub fn a_le_signal(&self, code: &str) -> bool {
+        self.signaux.contains(&code)
     }
 }
 
@@ -1118,9 +1216,10 @@ pub struct Etats {
 /// Rang d'un statut pour les tris : le plus grave d'abord.
 pub fn rang_statut(s: &str) -> u8 {
     match s {
-        statut::PLAN_NON_COUVERT => 0,
+        statut::RUPTURE_INEVITABLE => 0,
         statut::SOUS_SECURITE => 1,
-        _ => 2,
+        statut::SOUS_CIBLE => 2,
+        _ => 3,
     }
 }
 
@@ -1134,9 +1233,9 @@ impl Etats {
         self.references.values().filter(|e| e.suivie)
     }
 
-    /// Les références suivies en tension, les plus graves d'abord : plan non
-    /// couvert puis sous la sécurité, la rupture (ou le passage sous la sécurité)
-    /// la plus proche en tête.
+    /// Les références suivies en tension, les plus graves d'abord : rupture
+    /// inévitable, sous la sécurité, sous la cible ; la rupture (ou le passage
+    /// sous la sécurité) la plus proche en tête.
     pub fn en_tension(&self) -> Vec<&Etat> {
         let mut v: Vec<&Etat> = self.suivies().filter(|e| e.en_tension()).collect();
         v.sort_by(|a, b| {
@@ -1155,14 +1254,25 @@ impl Etats {
 
     /// Les compteurs du moteur (cockpit, briefing, Situation du plan d'achat).
     pub fn compteurs(&self) -> Value {
-        let (mut total, mut pnc, mut sous, mut couvert, mut aujourdhui, mut classe_a, mut trop_tard) =
-            (0, 0, 0, 0, 0, 0, 0);
+        let (mut total, mut inevitable, mut sous, mut sous_cible, mut couvert) = (0, 0, 0, 0, 0);
+        let (mut aujourdhui, mut classe_a, mut trop_tard) = (0, 0, 0);
+        let (mut sans_cible, mut sous_minimum, mut retard) = (0, 0, 0);
         for e in self.suivies() {
             total += 1;
             match e.statut {
-                statut::PLAN_NON_COUVERT => pnc += 1,
+                statut::RUPTURE_INEVITABLE => inevitable += 1,
                 statut::SOUS_SECURITE => sous += 1,
+                statut::SOUS_CIBLE => sous_cible += 1,
                 _ => couvert += 1,
+            }
+            if e.a_le_signal(signal::CIBLE_NON_DEFINIE) {
+                sans_cible += 1;
+            }
+            if e.a_le_signal(signal::SOUS_MINIMUM) {
+                sous_minimum += 1;
+            }
+            if e.a_le_signal(signal::RETARD_CIBLE) {
+                retard += 1;
             }
             if e.a_commander_aujourdhui {
                 aujourdhui += 1;
@@ -1176,9 +1286,13 @@ impl Etats {
         }
         json!({
             "nb_references": total,
-            "nb_plan_non_couvert": pnc,
+            "nb_rupture_inevitable": inevitable,
             "nb_sous_securite": sous,
+            "nb_sous_cible": sous_cible,
             "nb_couvert": couvert,
+            "nb_cible_non_definie": sans_cible,
+            "nb_sous_minimum": sous_minimum,
+            "nb_retard_cible": retard,
             "nb_a_commander_aujourdhui": aujourdhui,
             "nb_classe_a_en_rupture": classe_a,
             "nb_trop_tard": trop_tard,
@@ -1225,7 +1339,8 @@ impl Etats {
 impl Etat {
     fn noms_colonnes() -> &'static [&'static str] {
         &[
-            "statut", "jours_couverture", "premiere_rupture", "couvert_jusqu_au", "premier_passage_securite",
+            "statut", "raison_etat", "signaux", "jours_couverture", "couverture_cible_j", "ecart_cible_j", "premiere_rupture",
+            "couvert_jusqu_au", "premier_passage_securite",
             "plan_horizon_kg", "plan_mois_kg", "plan_non_couvert_kg", "arrivages_comptes_kg", "qte_a_commander_kg",
             "date_limite_commande", "a_commander_aujourdhui", "defaut_donnees", "trop_tard",
         ]
@@ -1247,7 +1362,7 @@ fn frise(c: &Couverture) -> Vec<MoisFrise> {
                 stock_fin_kg: 0.0,
                 securite_kg: 0.0,
                 plan_non_couvert_kg: 0.0,
-                statut: statut::COUVERT,
+                statut: statut_mois::COUVERT,
             });
             sous_jour.push(false);
         }
@@ -1257,7 +1372,7 @@ fn frise(c: &Couverture) -> Vec<MoisFrise> {
         m.plan_non_couvert_kg += j.plan_non_couvert_kg;
         m.stock_fin_kg = j.solde_kg;
         m.securite_kg = j.securite_kg;
-        if j.solde_kg < j.securite_kg - 1e-6 {
+        if j.point_bas_kg < j.securite_kg - 1e-6 {
             *sous = true;
         }
     }
@@ -1266,11 +1381,11 @@ fn frise(c: &Couverture) -> Vec<MoisFrise> {
         m.entrees_kg = arrondi_kg(m.entrees_kg) + 0.0;
         m.plan_non_couvert_kg = arrondi_kg(m.plan_non_couvert_kg) + 0.0;
         m.statut = if m.plan_non_couvert_kg > 1e-6 {
-            statut::PLAN_NON_COUVERT
+            statut_mois::PLAN_NON_COUVERT
         } else if sous {
-            statut::SOUS_SECURITE
+            statut_mois::SOUS_SECURITE
         } else {
-            statut::COUVERT
+            statut_mois::COUVERT
         };
     }
     mois
@@ -1287,7 +1402,11 @@ fn etat_de(a: &Analyse) -> Etat {
         code_fournisseur: a.fiche.code_fournisseur.clone(),
         fournisseur_nom: a.fiche.fournisseur_nom.clone(),
         statut: a.statut(),
+        raison_etat: a.raison_etat(),
+        signaux: a.codes_signaux(),
         jours_couverture: a.jours_couverture(),
+        couverture_cible_j: r.cible_j,
+        ecart_cible_j: r.ecart_cible_j,
         premiere_rupture: r.premiere_rupture,
         couvert_jusqu_au: r.couvert_jusqu_au,
         premier_passage_securite: r.premier_passage_securite,
@@ -1297,11 +1416,13 @@ fn etat_de(a: &Analyse) -> Etat {
         disponible_kg: arrondi_kg(a.magasin_compte_kg + a.machine_compte_kg),
         arrivages_comptes_kg: a.arrivages_comptes_kg(),
         qte_a_commander_kg: premiere.map(|p| p.quantite_proposee_kg),
-        date_limite_commande: premiere.map(|p| p.date_limite_commande),
+        date_limite_commande: r.date_limite_commande,
         a_commander_aujourdhui: a.a_commander_aujourdhui(),
         delai_j: a.reglages.delai_j,
         defaut_donnees: a.defaut_donnees.clone(),
         securite_aujourdhui_kg: r.jours.first().map(|j| j.securite_kg).unwrap_or(0.0),
+        stock_min_kg: r.stock_minimum.kg,
+        sous_minimum_le: r.stock_minimum.franchi_le,
         trop_tard: trop_tard_pour_commander(r.premiere_rupture, a.reglages.aujourdhui, a.reglages.delai_j),
         ligne: ligne(a),
         mois: frise(r),
@@ -1329,13 +1450,16 @@ pub async fn etats(db: &Db) -> AppResult<Etats> {
 
 /// LES CONTRÔLES QUI DÉPENDENT DU MOTEUR (27/10/2026) : ils ne peuvent plus vivre
 /// en SQL (le moteur est en Rust) et se servent à côté de `v_controles`, sous les
-/// mêmes codes et la même forme. C05 « plan non couvert sur l'horizon » remplace
-/// « stock projeté négatif sur 12 mois » ; C25 garde son sens (du stock qui dort
-/// face à un équivalent interchangeable en tension), la tension étant celle du
-/// moteur.
+/// mêmes codes et la même forme. Moteur v2 (§ 15.4) : C05 liste les ruptures
+/// INÉVITABLES (1re rupture avant aujourd'hui + délai) ; C25 garde son sens (du
+/// stock qui dort face à un équivalent interchangeable en tension, c.-à-d. pas
+/// COUVERT) ; C68 et C69 sont les signaux SOUS_MINIMUM et CIBLE_NON_DEFINIE. Des
+/// signaux : aucun ne bloque.
 pub const CONTROLES_MOTEUR: &[(&str, &str, &str)] = &[
-    ("C05", "Plan non couvert sur l'horizon (moteur de couverture)", "CRITIQUE"),
+    ("C05", "Rupture inevitable : 1re rupture avant aujourd'hui + delai (moteur de couverture)", "CRITIQUE"),
     ("C25", "Stock mobilisable face a un equivalent en tension (moteur de couverture)", "ATTENTION"),
+    ("C68", "Stock minimum franchi avant aujourd'hui + delai : verifier le plan (moteur de couverture)", "ATTENTION"),
+    ("C69", "Article au plan sans couverture cible : aucune proposition (moteur de couverture)", "ATTENTION"),
 ];
 
 /// Les lignes d'un contrôle du moteur (`None` : ce code n'en est pas un).
@@ -1343,13 +1467,37 @@ pub async fn controle_moteur_detail(db: &Db, e: &Etats, code: &str) -> AppResult
     match code.to_ascii_uppercase().as_str() {
         "C05" => Ok(Some(Value::Array(
             e.suivies()
-                .filter(|x| x.statut == statut::PLAN_NON_COUVERT)
+                .filter(|x| x.statut == statut::RUPTURE_INEVITABLE)
+                .map(|x| {
+                    json!({
+                        "code_reference": x.code_reference, "designation": x.designation,
+                        "statut": x.statut, "premiere_rupture": x.premiere_rupture, "delai_j": x.delai_j,
+                        "plan_non_couvert_kg": x.plan_non_couvert_kg, "disponible_kg": x.disponible_kg,
+                        "plan_horizon_kg": x.plan_horizon_kg, "arrivages_comptes_kg": x.arrivages_comptes_kg,
+                    })
+                })
+                .collect(),
+        ))),
+        "C68" => Ok(Some(Value::Array(
+            e.suivies()
+                .filter(|x| x.a_le_signal(signal::SOUS_MINIMUM))
+                .map(|x| {
+                    json!({
+                        "code_reference": x.code_reference, "designation": x.designation,
+                        "statut": x.statut, "stock_min_kg": x.stock_min_kg, "sous_minimum_le": x.sous_minimum_le,
+                        "disponible_kg": x.disponible_kg, "delai_j": x.delai_j,
+                    })
+                })
+                .collect(),
+        ))),
+        "C69" => Ok(Some(Value::Array(
+            e.suivies()
+                .filter(|x| x.a_le_signal(signal::CIBLE_NON_DEFINIE))
                 .map(|x| {
                     json!({
                         "code_reference": x.code_reference, "designation": x.designation,
                         "statut": x.statut, "premiere_rupture": x.premiere_rupture,
-                        "plan_non_couvert_kg": x.plan_non_couvert_kg, "disponible_kg": x.disponible_kg,
-                        "plan_horizon_kg": x.plan_horizon_kg, "arrivages_comptes_kg": x.arrivages_comptes_kg,
+                        "plan_horizon_kg": x.plan_horizon_kg,
                     })
                 })
                 .collect(),
@@ -1522,6 +1670,27 @@ fn vue_analyse(a: &Analyse) -> Value {
             "multiple_kg": a.reglages.multiple_kg, "source_multiple": a.source_multiple,
             "kg_palette": a.reglages.kg_palette,
             "defaut_donnees": a.defaut_donnees,
+            "couverture_cible_j": a.reglages.cible_j,
+            "couverture_cible_mois": a.cible_mois,
+            "source_cible": a.source_cible,
+            "stock_min_kg": a.reglages.stock_min_kg,
+        },
+        // LA SITUATION (§ 15.5) : couverture actuelle, cible, écart, rupture, D*,
+        // date limite, sécurité X (tS, b, NS), stock minimum, état et signaux.
+        "situation": {
+            "etat": r.etat,
+            "signaux": r.signaux,
+            "couverture_actuelle_j": r.couverture_actuelle_j,
+            "premiere_rupture": r.premiere_rupture,
+            "reste_rupture_kg": r.reste_rupture_kg,
+            "couverture_cible_j": r.cible_j,
+            "ecart_cible_j": r.ecart_cible_j,
+            "date_besoin": r.date_besoin,
+            "date_limite_commande": r.date_limite_commande,
+            "securite": r.securite,
+            "stock_minimum": r.stock_minimum,
+            "plan_mois_kg": a.plan_mois_kg(),
+            "source": "moteur de couverture, plan daté",
         },
         "synthese": ligne(a),
         "arrivages": a.arrivages.iter().map(|x| x.detail.clone()).collect::<Vec<_>>(),
@@ -1543,8 +1712,16 @@ fn retirer_quantites_masquees(v: &mut Value) {
     }
     if let Some(props) = v["propositions"].as_array_mut() {
         for p in props.iter_mut().filter_map(Value::as_object_mut) {
-            for champ in ["besoin_theorique_kg", "apres_minimum_kg", "quantite_proposee_kg", "palettes_equivalentes"] {
+            for champ in [
+                "besoin_net_kg", "securite_kg", "apres_minimum_kg", "arrondi_kg", "quantite_proposee_kg",
+                "palettes_equivalentes", "stock_apres_reception_kg", "stock_fin_fenetre_kg",
+            ] {
                 p.remove(champ);
+            }
+            if let Some(fenetres) = p.get_mut("fenetres").and_then(Value::as_array_mut) {
+                for w in fenetres.iter_mut().filter_map(Value::as_object_mut) {
+                    w.remove("besoin_net_kg");
+                }
             }
         }
     }
@@ -1570,7 +1747,7 @@ fn json_reference(f: &Fiche) -> Value {
 /// et la projection jour par jour pour la courbe. Depuis le 27/10/2026, aussi ce
 /// que la fenêtre du stock projeté montre en plus : le prix et le montant de la
 /// proposition (le prix du plan d'achat), et les réglages de la fiche qui ne sont
-/// que des ALERTES (stock minimum, couverture minimale, seuil d'alerte).
+/// que des repères (stock minimum = garde-fou, couverture cible, seuil d'alerte).
 pub async fn detail(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -1590,7 +1767,7 @@ pub async fn detail(
     let mut qualites: HashMap<String, Vec<Value>> = HashMap::new();
     if let Some(p) = &d.plan {
         for l in sqlx::query(
-            "SELECT lpp.annee_mois, lpp.code_qualite,
+            "SELECT lpp.annee_mois, lpp.code_qualite, max(rc.kg_m2)::float8 AS kg_m2,
                     sum(lpp.m2_prevus * rc.kg_m2 * (1 + COALESCE(pp.taux_perte_pct, 0) / 100.0))::float8 AS kg
                FROM plan_production pp
                JOIN ligne_plan_production lpp ON lpp.id_plan = pp.id_plan
@@ -1608,6 +1785,7 @@ pub async fn detail(
             let kg: Option<f64> = l.try_get("kg")?;
             qualites.entry(l.try_get("annee_mois")?).or_default().push(json!({
                 "code_qualite": l.try_get::<String, _>("code_qualite")?,
+                "kg_m2": l.try_get::<Option<f64>, _>("kg_m2")?,
                 "kg": arrondi_kg(kg.unwrap_or(0.0)),
             }));
         }
@@ -1714,13 +1892,22 @@ pub async fn detail(
         .remove(reference)
         .unwrap_or((None, "AUCUN".into()));
     let qte = r.propositions.first().map(|p| p.quantite_proposee_kg);
-    // LES RÉGLAGES DE LA FICHE QUI NE SONT QUE DES ALERTES (décision du
-    // 10/10/2026 : le plan d'achat suit le plan seul) : affichés, jamais des
-    // termes du calcul. Et le réel du grand livre, pour le distinguer du plan.
+    // LE PRIX EN DEVISE (27/10/2026) : celui que la proposition du plan d'achat
+    // porte (`domain/plan_achat.rs` : la devise et le prix du catalogue).
+    let (code_devise, prix_devise): (Option<String>, Option<f64>) = sqlx::query_as(
+        "SELECT code_devise_catalogue, prix_catalogue_kg::float8 FROM reference WHERE code_reference = $1",
+    )
+    .bind(reference)
+    .fetch_optional(&state.db)
+    .await?
+    .unwrap_or((None, None));
+    // LES RÉGLAGES DE LA FICHE (moteur v2, 27/10/2026) : la couverture cible
+    // (terme du calcul : la date de réception), le stock minimum (un garde-fou,
+    // un signal, jamais une quantité). Et le réel du grand livre, pour le
+    // distinguer du plan.
     let fiche_alertes = sqlx::query(
-        "SELECT r.stock_min_kg::float8 AS stock_min_kg, r.couverture_min_mois::float8 AS couverture_min_mois,
-                r.marge_securite_pct::float8 AS marge_securite_pct, r.unite_catalogue,
-                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_CouvMinMois') AS couv_min_param,
+        "SELECT r.stock_min_kg::float8 AS stock_min_kg, r.couverture_cible_mois::float8 AS couverture_cible_mois,
+                r.unite_catalogue,
                 (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_SeuilAlerte') AS seuil_alerte,
                 (SELECT s.reel_mois_kg::float8 FROM v_stock_reference s WHERE s.code_reference = r.code_reference)
                     AS reel_mois_kg
@@ -1734,9 +1921,7 @@ pub async fn detail(
     let approvisionnement = match fiche_alertes {
         Some(l) => json!({
             "stock_min_fiche_kg": l.try_get::<Option<f64>, _>("stock_min_kg")?,
-            "couverture_min_fiche_mois": l.try_get::<Option<f64>, _>("couverture_min_mois")?,
-            "couverture_min_parametre_mois": nombre(l.try_get("couv_min_param")?),
-            "marge_securite_fiche_pct": l.try_get::<Option<f64>, _>("marge_securite_pct")?,
+            "couverture_cible_fiche_mois": l.try_get::<Option<f64>, _>("couverture_cible_mois")?,
             "seuil_alerte_j": nombre(l.try_get("seuil_alerte")?),
             "unite_catalogue": l.try_get::<Option<String>, _>("unite_catalogue")?,
             "reel_mois_kg": l.try_get::<Option<f64>, _>("reel_mois_kg")?,
@@ -1773,12 +1958,212 @@ pub async fn detail(
         "prix_estime_mad": prix_mad,
         "source_prix": source_prix,
         "montant_estime_mad": crate::domain::plan_achat::montant_estime(qte, prix_mad),
+        "code_devise": code_devise,
+        "prix_devise": prix_devise,
+        "montant_devise": crate::domain::plan_achat::montant_estime(qte, prix_devise),
     });
+    v["stock_projete"] = stock_projete_detail(&state.db, &user, &d, &a).await?;
     v["approvisionnement"] = approvisionnement;
     user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;
+    user.masquer(&state.db, module::STOCK, &mut v["stock_projete"]["classement"]).await?;
     user.masquer_prix_au_cmup(&state.db, &mut v["achat"]).await?;
     retirer_quantites_masquees(&mut v);
     Ok(Json(v))
+}
+
+/// LA FENÊTRE DU STOCK PROJETÉ (décision du 27/10/2026) : ce qu'elle montre en
+/// plus du détail commun, tiré du moteur et des vues existantes, sans calcul
+/// nouveau — les tuiles, la cascade « où se trouve la matière » (chaque total
+/// est la somme exacte des lignes au-dessus), le classement et le risque (ce que
+/// les vues fournissent déjà), les lots, et l'historique (avec le droit de lire
+/// les mouvements).
+async fn stock_projete_detail(db: &Db, user: &Utilisateur, d: &Donnees, a: &Analyse<'_>) -> AppResult<Value> {
+    let code = a.fiche.code_reference.as_str();
+    let r = &a.resultat;
+    let premiere = r.propositions.first();
+    let d_idx = a.indice_reception();
+    let disponible = a.magasin_compte_kg + a.machine_compte_kg;
+
+    // ---- La cascade -----------------------------------------------------------
+    let magasins: Vec<Value> = d
+        .magasins
+        .get(code)
+        .into_iter()
+        .flatten()
+        .filter(|m| !m.quarantaine && m.inclure_mrp)
+        .map(|m| {
+            let compte = (m.quantite_kg - m.bloque_kg).max(0.0);
+            json!({
+                "code_magasin": m.code_magasin, "nom": m.nom,
+                "kg": arrondi_kg(compte - m.restes_kg.clamp(0.0, compte)) + 0.0,
+            })
+        })
+        .collect();
+    let machine_hors_restes = (a.machine_compte_kg - a.restes_machine_kg).max(0.0);
+    let restes = a.restes_magasin_kg + a.restes_machine_kg;
+    let avant = |x: &ArrivageClasse| match (x.date, d_idx) {
+        (Some(dt), Some(i)) => ((dt - a.reglages.aujourdhui).num_days() as usize) < i,
+        _ => false,
+    };
+    let arrivages_avant: f64 = a.arrivages.iter().filter(|x| x.compte && avant(x)).map(|x| x.kg).sum();
+    let arrivages_apres: Vec<Value> =
+        a.arrivages.iter().filter(|x| x.compte && !avant(x)).map(|x| x.detail.clone()).collect();
+    let non_comptes: Vec<Value> = a.arrivages.iter().filter(|x| !x.compte).map(|x| x.detail.clone()).collect();
+    let cascade = json!({
+        "magasins": magasins,
+        "sur_metiers_kg": arrondi_kg(machine_hors_restes) + 0.0,
+        "restes_kg": arrondi_kg(restes) + 0.0,
+        "disponible_kg": arrondi_kg(disponible) + 0.0,
+        "date_reception": premiere.map(|p| p.date_disponibilite),
+        "arrivages_avant_reception_kg": d_idx.map(|_| arrondi_kg(arrivages_avant) + 0.0),
+        "besoin_jusqu_reception_kg": a.besoin_jusqu_reception_kg(),
+        "stock_a_la_reception_kg": a.stock_a_la_reception_kg(),
+        "arrivages_apres": arrivages_apres,
+        "arrivages_non_comptes": non_comptes,
+        "quarantaine_kg": arrondi_kg(a.quarantaine_kg) + 0.0,
+        "bloque_kg": arrondi_kg(a.bloque_kg) + 0.0,
+        "hors_plan_kg": arrondi_kg(a.hors_plan_kg) + 0.0,
+    });
+
+    // ---- Les tuiles -------------------------------------------------------------
+    let tuiles = json!({
+        "stock_total_kg": arrondi_kg(disponible + a.quarantaine_kg + a.bloque_kg + a.hors_plan_kg) + 0.0,
+        "sur_metiers_kg": arrondi_kg(a.machine_compte_kg) + 0.0,
+        "disponible_kg": arrondi_kg(disponible) + 0.0,
+        "date_reception": premiere.map(|p| p.date_disponibilite),
+        "reception_en_retard": premiere.map(|p| p.en_retard),
+        "besoin_jusqu_reception_kg": a.besoin_jusqu_reception_kg(),
+        // P(R, R + N) : ce que couvre une commande (la 1re fenêtre).
+        "plan_commande_kg": premiere.and_then(|p| p.fenetres.first()).map(|w| w.plan_kg),
+        "couverture_commande_j": a.reglages.couverture_j,
+        "stock_a_la_reception_kg": a.stock_a_la_reception_kg(),
+        "couverture_actuelle_j": r.couverture_actuelle_j,
+        "couverture_cible_j": r.cible_j,
+        "ecart_cible_j": r.ecart_cible_j,
+        "horizon_j": r.jours.len().saturating_sub(1),
+        "qte_a_commander_kg": premiere.map(|p| p.quantite_proposee_kg),
+        "palettes_equivalentes": premiere.and_then(|p| p.palettes_equivalentes),
+        "date_limite_commande": r.date_limite_commande,
+        "raison_etat": a.raison_etat(),
+    });
+
+    // ---- Le classement et le risque : ce que les vues fournissent déjà ----------
+    let classement = sqlx::query(
+        "SELECT a.classe_abc, a.rang, a.pct_cumule::float8 AS pct_cumule,
+                a.valeur_conso_annuelle_mad::float8 AS valeur_conso_annuelle_mad, a.classe_xyz, a.politique,
+                s.nb_sources, s.risque_source,
+                (SELECT e.code_groupe_equiv FROM v_equivalence e WHERE e.code_reference = a.code_reference LIMIT 1)
+                    AS code_groupe_equiv,
+                (SELECT e.groupe_libelle FROM v_equivalence e WHERE e.code_reference = a.code_reference LIMIT 1)
+                    AS groupe_libelle,
+                (SELECT g.nb_fournisseurs FROM v_equivalence e
+                   JOIN v_groupe_equiv_detail g ON g.code_groupe_equiv = e.code_groupe_equiv
+                  WHERE e.code_reference = a.code_reference LIMIT 1) AS nb_fournisseurs_groupe,
+                es.derniere_sortie, es.jours_sans_mouvement::bigint AS jours_sans_mouvement,
+                EXISTS (SELECT 1 FROM v_stock_dormant sd WHERE sd.code_reference = a.code_reference) AS dormant
+           FROM v_analyse_abc_xyz a
+           LEFT JOIN v_risque_sourcing s ON s.code_reference = a.code_reference
+           LEFT JOIN v_etat_stock es ON es.code_reference = a.code_reference
+          WHERE a.code_reference = $1",
+    )
+    .bind(code)
+    .fetch_optional(db)
+    .await?;
+    let classement = match classement {
+        None => Value::Null,
+        Some(l) => json!({
+            "classe_abc": l.try_get::<Option<String>, _>("classe_abc")?,
+            "rang": l.try_get::<Option<i64>, _>("rang")?,
+            "pct_cumule": l.try_get::<Option<f64>, _>("pct_cumule")?,
+            "valeur_conso_annuelle_mad": l.try_get::<Option<f64>, _>("valeur_conso_annuelle_mad")?,
+            "classe_xyz": l.try_get::<Option<String>, _>("classe_xyz")?,
+            "politique": l.try_get::<Option<String>, _>("politique")?,
+            "nb_sources": l.try_get::<Option<i64>, _>("nb_sources")?,
+            "risque_source": l.try_get::<Option<String>, _>("risque_source")?,
+            "code_groupe_equiv": l.try_get::<Option<String>, _>("code_groupe_equiv")?,
+            "groupe_libelle": l.try_get::<Option<String>, _>("groupe_libelle")?,
+            "nb_fournisseurs_groupe": l.try_get::<Option<i64>, _>("nb_fournisseurs_groupe")?,
+            "derniere_sortie": l.try_get::<Option<String>, _>("derniere_sortie")?,
+            "jours_sans_mouvement": l.try_get::<Option<i64>, _>("jours_sans_mouvement")?,
+            "dormant": l.try_get::<bool, _>("dormant")?,
+        }),
+    };
+
+    // ---- Les lots (tous, comptés ou non) ----------------------------------------
+    let lots: Vec<Value> = sqlx::query(
+        "SELECT sl.code_magasin, mg.nom AS magasin_nom, sl.lot_fournisseur, sl.quantite_kg::float8 AS kg,
+                sl.nb_bobines, l.statut AS statut_lot, l.categorie,
+                sl.date_premiere_entree::text AS date_premiere_entree, sl.date_peremption::text AS date_peremption,
+                mg.est_quarantaine = 1 AS quarantaine, mg.inclure_mrp = 1 AS inclure_mrp
+           FROM stock_lot sl
+           JOIN lot l ON l.code_reference = sl.code_reference AND l.lot_fournisseur = sl.lot_fournisseur
+           JOIN magasin mg ON mg.code_magasin = sl.code_magasin
+          WHERE sl.code_reference = $1 AND sl.quantite_kg <> 0
+          ORDER BY sl.date_premiere_entree NULLS LAST, sl.code_magasin, sl.lot_fournisseur",
+    )
+    .bind(code)
+    .fetch_all(db)
+    .await?
+    .iter()
+    .map(|l| -> AppResult<Value> {
+        Ok(json!({
+            "code_magasin": l.try_get::<String, _>("code_magasin")?,
+            "magasin_nom": l.try_get::<Option<String>, _>("magasin_nom")?,
+            "lot_fournisseur": l.try_get::<String, _>("lot_fournisseur")?,
+            "kg": arrondi_kg(l.try_get("kg")?),
+            "nb_bobines": l.try_get::<Option<i64>, _>("nb_bobines")?,
+            "statut_lot": l.try_get::<Option<String>, _>("statut_lot")?,
+            "categorie": l.try_get::<Option<String>, _>("categorie")?,
+            "date_premiere_entree": l.try_get::<Option<String>, _>("date_premiere_entree")?,
+            "date_peremption": l.try_get::<Option<String>, _>("date_peremption")?,
+            "quarantaine": l.try_get::<bool, _>("quarantaine")?,
+            "inclure_mrp": l.try_get::<bool, _>("inclure_mrp")?,
+        }))
+    })
+    .collect::<AppResult<_>>()?;
+
+    // ---- L'historique : les derniers mouvements (droit de lire les mouvements) --
+    let historique = if crate::auth::rbac::a_permission(db, &user.role, module::MOUVEMENTS, Action::Lire).await? {
+        let lignes: Vec<Value> = sqlx::query(
+            "SELECT m.numero_mouvement, m.date_mouvement::text AS date_mouvement, m.code_type_mvt,
+                    t.libelle AS type_libelle, t.signe, m.code_magasin, lm.lot_fournisseur,
+                    lm.quantite_kg::float8 AS kg
+               FROM ligne_mouvement lm
+               JOIN mouvement m ON m.id_mouvement = lm.id_mouvement
+               LEFT JOIN type_mouvement t ON t.code_type_mvt = m.code_type_mvt
+              WHERE lm.code_reference = $1
+              ORDER BY m.date_mouvement DESC, m.numero_mouvement DESC
+              LIMIT 20",
+        )
+        .bind(code)
+        .fetch_all(db)
+        .await?
+        .iter()
+        .map(|l| -> AppResult<Value> {
+            Ok(json!({
+                "numero_mouvement": l.try_get::<Option<String>, _>("numero_mouvement")?,
+                "date_mouvement": l.try_get::<Option<String>, _>("date_mouvement")?,
+                "code_type_mvt": l.try_get::<Option<String>, _>("code_type_mvt")?,
+                "type_libelle": l.try_get::<Option<String>, _>("type_libelle")?,
+                "signe": l.try_get::<Option<i64>, _>("signe")?,
+                "code_magasin": l.try_get::<Option<String>, _>("code_magasin")?,
+                "lot_fournisseur": l.try_get::<Option<String>, _>("lot_fournisseur")?,
+                "kg": arrondi_kg(l.try_get::<Option<f64>, _>("kg")?.unwrap_or(0.0)),
+            }))
+        })
+        .collect::<AppResult<_>>()?;
+        Value::Array(lignes)
+    } else {
+        Value::Null
+    };
+
+    Ok(json!({
+        "tuiles": tuiles,
+        "cascade": cascade,
+        "classement": classement,
+        "lots": lots,
+        "historique": historique,
+    }))
 }
 
 // ============================================================================
@@ -1813,8 +2198,8 @@ pub struct ModificationArrivage {
 }
 
 /// LES HYPOTHÈSES D'UNE SIMULATION : rien que des entrées que le moteur reçoit
-/// déjà (arrivages datés, délai, couverture d'une commande, jours de sécurité,
-/// minimum, multiple). Aucune règle nouvelle : un arrivage simulé est classé
+/// déjà (arrivages datés, délai L, couverture d'une commande N, jours de
+/// sécurité S, couverture cible C en mois, minimum, multiple). Aucune règle nouvelle : un arrivage simulé est classé
 /// par les règles des vrais (daté dans l'horizon : compté ; date passée : en
 /// retard, hors couverture).
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1831,7 +2216,10 @@ pub struct Hypotheses {
     #[serde(default)]
     pub couverture_j: Option<i64>,
     #[serde(default)]
-    pub jours_securite: Option<f64>,
+    pub jours_securite: Option<i64>,
+    /// C, la couverture cible, en mois (comme la fiche article).
+    #[serde(default)]
+    pub couverture_cible_mois: Option<f64>,
     #[serde(default)]
     pub moq_kg: Option<f64>,
     #[serde(default)]
@@ -1986,11 +2374,22 @@ fn appliquer_hypotheses(d: &mut Donnees, code: &str, h: &Hypotheses) -> AppResul
         dites.push(format!("Couverture d'une commande : {x} j."));
     }
     if let Some(x) = h.jours_securite {
-        if !x.is_finite() || !(0.0..=365.0).contains(&x) {
+        if !(0..=365).contains(&x) {
             return Err(AppError::Invalide(format!("sécurité de {x} j : entre 0 et 365 jours.")));
         }
         s.jours_securite = Some(x);
         dites.push(format!("Sécurité : {x} j."));
+    }
+    if let Some(x) = h.couverture_cible_mois {
+        if !x.is_finite() || !(0.0..=24.0).contains(&x) {
+            return Err(AppError::Invalide(format!("couverture cible de {x} mois : entre 0 et 24 mois.")));
+        }
+        s.couverture_cible_mois = Some(x);
+        dites.push(format!(
+            "Couverture cible : {} mois ({} j).",
+            format!("{x}").replace('.', ","),
+            (x * 30.0).round() as i64
+        ));
     }
     if let Some(x) = h.moq_kg {
         if !kg_ok(x) {
@@ -2059,8 +2458,13 @@ mod tests_simulation {
     }
 
     /// Une référence REF : 2 000 kg comptés, plan de 100 kg par jour, délai 10 j,
-    /// couverture 30 j, sécurité de la classe A à 5 j ; un bon validé de 800 kg à
-    /// J25, un transfert en route de 300 kg à J70, un import sans bon de 50 kg.
+    /// couverture 30 j, sécurité de la classe A à 5 j, couverture cible 0,5 mois
+    /// (15 j) ; un bon validé de 800 kg à J25, un transfert en route de 300 kg à
+    /// J70, un import sans bon de 50 kg.
+    ///
+    /// Au moteur v2 : B(t) = 2 000 − 100 (t + 1) (+ 800 dès J25) : R = J21 (indice
+    /// 20), D* = J6 < aujourd'hui + 10 j : D = J11 (cible en retard) ; fenêtre
+    /// [J21, J51[, Q0 = le manque de son dernier jour = 5 000 − 2 000 − 800 = 2 200.
     fn donnees() -> Donnees {
         let code = "REF".to_string();
         let mut fiches = BTreeMap::new();
@@ -2080,6 +2484,8 @@ mod tests_simulation {
                 arrondi_palette: false,
                 poids_bobine_kg: None,
                 bobines_par_palette: None,
+                couverture_cible_mois: Some(0.5),
+                stock_min_kg: None,
             },
         );
         let besoin = HashMap::from([(
@@ -2149,7 +2555,7 @@ mod tests_simulation {
         )]);
         Donnees {
             aujourdhui: j(1),
-            parametres: Parametres { securite: [5.0, 5.0, 5.0], delai_defaut: 60, marge_jours: 30 },
+            parametres: Parametres { securite: [5, 5, 5], delai_defaut: 60, marge_jours: 30 },
             plan: Some(PlanEnService {
                 id_plan: "P1".into(),
                 libelle: None,
@@ -2185,10 +2591,14 @@ mod tests_simulation {
         let (ds, s, dites) = simuler(&Hypotheses::default()).unwrap();
         assert!(dites.is_empty());
         assert_eq!(vue_analyse(&analyser(&d, fiche)), vue_analyse(&analyser_avec(&ds, fiche, &s)));
-        // L'exemple validé n° 1 : D = J16, 2 200 kg (le bon de 800 kg à J25 dans la fenêtre).
+        // D = J11 (aujourd'hui + délai, la cible en retard), 2 200 kg (le bon de
+        // 800 kg à J25 dans la fenêtre [J21, J51[).
         let a = analyser(&d, fiche);
-        assert_eq!(a.resultat.propositions[0].date_disponibilite, j(16));
-        assert!((premiere(&a) - 2200.0).abs() < 1e-6);
+        assert_eq!(a.resultat.propositions[0].date_disponibilite, j(11));
+        assert_eq!(a.resultat.premiere_rupture, Some(j(21)));
+        assert!((premiere(&a) - 2200.0).abs() < 1e-6, "{}", premiere(&a));
+        assert_eq!(a.statut(), statut::COUVERT, "20 j de couverture ≥ cible de 15 j");
+        assert!(a.codes_signaux().contains(&signal::RETARD_CIBLE));
     }
 
     #[test]
@@ -2243,7 +2653,7 @@ mod tests_simulation {
     fn modifier_date_kilos_ou_retirer_un_arrivage() {
         let d = donnees();
         let fiche = &d.fiches["REF"];
-        let sans_bon = 3000.0; // sans l'arrivage de 800 kg : exemple « propositions enchaînées »
+        let sans_bon = 3000.0; // sans l'arrivage de 800 kg : le manque de J50 (5 000 − 2 000)
         // Retiré : la proposition reprend les 800 kg.
         let retirer = Hypotheses {
             arrivages_modifies: vec![ModificationArrivage { cle: "BON:L1".into(), date: None, kg: None, retirer: true }],
@@ -2251,9 +2661,9 @@ mod tests_simulation {
         };
         let (ds, s, _) = simuler(&retirer).unwrap();
         assert!((premiere(&analyser_avec(&ds, fiche, &s)) - sans_bon).abs() < 1e-6);
-        // Daté hors de la fenêtre [J16, J46[ : il ne réduit plus le besoin.
+        // Daté hors de la fenêtre [J21, J51[ (la fin exclue) : il ne réduit plus le besoin.
         let tard = Hypotheses {
-            arrivages_modifies: vec![ModificationArrivage { cle: "BON:L1".into(), date: Some(j(50)), kg: None, retirer: false }],
+            arrivages_modifies: vec![ModificationArrivage { cle: "BON:L1".into(), date: Some(j(51)), kg: None, retirer: false }],
             ..Default::default()
         };
         let (ds, s, dites) = simuler(&tard).unwrap();
@@ -2266,13 +2676,14 @@ mod tests_simulation {
         };
         let (ds, s, _) = simuler(&moins).unwrap();
         assert!((premiere(&analyser_avec(&ds, fiche, &s)) - 2500.0).abs() < 1e-6);
-        // Le transfert ramené à J20 : compté plus tôt, la proposition baisse de 300 kg.
+        // Le transfert ramené à J20 : compté plus tôt, il repousse la rupture de
+        // 3 jours (300 kg à 100 kg/j) ; la fenêtre glisse d'autant.
         let transfert = Hypotheses {
             arrivages_modifies: vec![ModificationArrivage { cle: "TRANSFERT:LT1".into(), date: Some(j(20)), kg: None, retirer: false }],
             ..Default::default()
         };
         let (ds, s, _) = simuler(&transfert).unwrap();
-        assert!((premiere(&analyser_avec(&ds, fiche, &s)) - 1900.0).abs() < 1e-6);
+        assert_eq!(analyser_avec(&ds, fiche, &s).resultat.premiere_rupture, Some(j(24)));
     }
 
     #[test]
@@ -2280,6 +2691,7 @@ mod tests_simulation {
         let d = donnees();
         let fiche = &d.fiches["REF"];
         let h = Hypotheses { delai_j: Some(20), moq_kg: Some(2500.0), multiple_kg: Some(1000.0), ..Default::default() };
+        // (D* = J6 : la réception attend aujourd'hui + 20 j.)
         let (ds, s, dites) = simuler(&h).unwrap();
         let a = analyser_avec(&ds, fiche, &s);
         assert_eq!(a.reglages.delai_j, 20);
@@ -2311,7 +2723,9 @@ mod tests_simulation {
         assert!(refus(Hypotheses { arrivages_ajoutes: vec![ArriveeSimulee { date: j(1) + Duration::days(5000), kg: 5.0 }], ..Default::default() }));
         assert!(refus(Hypotheses { delai_j: Some(-1), ..Default::default() }));
         assert!(refus(Hypotheses { couverture_j: Some(0), ..Default::default() }));
-        assert!(refus(Hypotheses { jours_securite: Some(400.0), ..Default::default() }));
+        assert!(refus(Hypotheses { jours_securite: Some(400), ..Default::default() }));
+        assert!(refus(Hypotheses { couverture_cible_mois: Some(-1.0), ..Default::default() }));
+        assert!(refus(Hypotheses { couverture_cible_mois: Some(f64::NAN), ..Default::default() }));
         assert!(refus(Hypotheses {
             arrivages_ajoutes: vec![ArriveeSimulee { date: j(10), kg: 1.0 }; MAX_HYPOTHESES + 1],
             ..Default::default()
@@ -2339,7 +2753,51 @@ mod tests_simulation {
         assert!((l["arrivages_comptes_kg"].as_f64().unwrap() - 1100.0).abs() < 1e-6);
         // Le besoin jusqu'à livraison : 10 jours de plan à 100 kg.
         assert!((l["besoin_jusqu_livraison_kg"].as_f64().unwrap() - 1000.0).abs() < 1e-6);
-        // La sécurité du jour : 5 j × 100 kg/j.
+        // La sécurité du jour : NS(0), le plan des 5 jours suivants.
         assert!((l["securite_aujourdhui_kg"].as_f64().unwrap() - 500.0).abs() < 1e-6);
+        // La couverture cible et l'écart (§ 15.5) : 20 j de couverture, cible 15 j.
+        assert_eq!(l["jours_couverture"], json!(20));
+        assert_eq!(l["couverture_cible_j"], json!(15));
+        assert_eq!(l["ecart_cible_j"], json!(5));
+        assert_eq!(l["source_cible"], json!("fiche article"));
+    }
+
+    /// LA CIBLE EN SIMULATION (§ 15.7-6) : C modifiable comme hypothèse, mêmes
+    /// formules. Cible 1 mois (30 j) : D* = J21 − 30 j, toujours en retard ; cible
+    /// 0 : D* = R = J21, la réception à la rupture (au-delà du délai).
+    #[test]
+    fn la_cible_se_simule() {
+        let d = donnees();
+        let fiche = &d.fiches["REF"];
+        let h = Hypotheses { couverture_cible_mois: Some(0.0), ..Default::default() };
+        let (ds, s, dites) = simuler(&h).unwrap();
+        let a = analyser_avec(&ds, fiche, &s);
+        assert_eq!(a.source_cible, Some(Source::Simulation));
+        assert_eq!(a.resultat.propositions[0].date_disponibilite, j(21), "D = D* = R");
+        assert_eq!(dites.len(), 1);
+        let h = Hypotheses { couverture_cible_mois: Some(1.0), ..Default::default() };
+        let (ds, s, _) = simuler(&h).unwrap();
+        let a = analyser_avec(&ds, fiche, &s);
+        assert_eq!(a.statut(), statut::SOUS_CIBLE, "20 j < 30 j");
+        assert_eq!(a.resultat.ecart_cible_j, Some(-10));
+    }
+
+    /// § 15.9 bis-1 : un article au besoin du plan, actif, sans cible : un signal,
+    /// aucune proposition, aucun repli ; « Commander » n'a rien à reprendre.
+    #[test]
+    fn sans_cible_ni_proposition_ni_repli() {
+        let mut d = donnees();
+        d.fiches.get_mut("REF").unwrap().couverture_cible_mois = None;
+        let fiche = &d.fiches["REF"];
+        let a = analyser(&d, fiche);
+        assert!(a.resultat.propositions.is_empty());
+        assert!(a.codes_signaux().contains(&signal::CIBLE_NON_DEFINIE));
+        let e = etat_de(&a);
+        assert!(e.a_le_signal(signal::CIBLE_NON_DEFINIE));
+        assert_eq!(e.qte_a_commander_kg, None);
+        // Inactif : plus soumis au MRP, plus de signal.
+        d.fiches.get_mut("REF").unwrap().actif = false;
+        let a = analyser(&d, &d.fiches["REF"]);
+        assert!(!a.codes_signaux().contains(&signal::CIBLE_NON_DEFINIE));
     }
 }

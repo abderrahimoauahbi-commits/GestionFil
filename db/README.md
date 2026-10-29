@@ -79,7 +79,8 @@ db/pg/
 ├── 010b_declencheurs_logique.sql solde, CMUP, capacité machine
 ├── 011_vues.sql                  vues de pilotage
 ├── 012_controles.sql             contrôles métier C01–C37 (sauf C05, C25, C27), C43, C44, C66
-│                                 (C38–C42, C45–C65 sauf C49, C67 : migrations ; C05, C25 : moteur)
+│                                 (C38–C42, C45–C65 sauf C49, C67 : migrations ;
+│                                  C05, C25, C68, C69 : moteur — plage C01–C69)
 ├── 013_vues_cockpit.sql          le cockpit : Pareto, économies, devises, mono-source
 ├── 014_audit_operations.sql      journal d'audit des opérations
 ├── seed_*.sql                    référentiels, sécurité, qualités, comptes réels
@@ -234,6 +235,8 @@ Les migrations du 09/10/2026 (audit v5) et du 10/10 ajoutent, tous en **signal**
 | C65 | mouvement d'un magasin daté de la période de comptage (du jour d'ouverture au jour de clôture) d'un inventaire clôturé, saisi après son ouverture : passé pendant le comptage avant le gel du 23/10/2026, ou antidaté après la clôture — le comptage ne l'a pas vu (ajustements de l'inventaire et leurs contre-passations exclus). Même étendue que le gel (24a) : pour un tournant ou un ciblé, seul compte un mouvement dont une ligne porte une référence de l'inventaire (sa liste, ou ses lignes avant 24b) | 23g, 24a, 24b |
 | C66 | transfert en route (`VALIDE`) sans date prévue de disponibilité : le moteur de couverture le liste « sans date » et ne le compte pas, jusqu'à ce qu'une date soit saisie | 27d, 27e |
 | C67 | rapprochement machine, par référence : chargé (CHARGE_MACHINE − ANNUL) − déchargé au magasin (RETOUR_MACHINE − ANNUL) − variation de l'état machine (actuel − départ) ≠ faits machine du grand livre de la consommation (consommation, rebut, autres écarts), au-delà de 0,01 kg (seuil technique d'arrondi). Un signal | 27g |
+| C68 | stock minimum franchi dans [aujourd'hui, aujourd'hui + délai] (signal, vérifier le plan) — servi par le moteur de couverture en Rust, aucun SQL, hors `v_controles` | 27l (moteur v2) |
+| C69 | article soumis au MRP (actif, au besoin du plan en service) sans couverture cible : aucune proposition — servi par le moteur de couverture en Rust, aucun SQL, hors `v_controles` | 27l (moteur v2) |
 
 **Le 27/10/2026 (migration 27e, une seule source de vérité : le moteur de couverture).** **C05**
 (plan non couvert sur l'horizon, ex-« stock projeté négatif ») et **C25** (stock mobilisable face à
@@ -249,6 +252,18 @@ et `P_EcartCouvertureJours`, sans lecteur, sont supprimés par `2026-10-27j`. **
 (transfert en route sans date prévue). C31, C32 et le coût de revient gardent les réceptions
 clôturées ; C35 et C36 lisent l'état des machines (`machine_etat`). `v_controles` porte donc
 C01–C67 moins C05, C25, C27 et C49.
+
+**Le 27/10/2026 au soir (moteur de couverture v2, migration `2026-10-27l_couverture_cible.sql`).**
+**C05** devient la **rupture inévitable** (1re rupture avant aujourd'hui + délai). **C68** (stock
+minimum franchi dans [aujourd'hui, aujourd'hui + délai] : un signal, vérifier le plan) et **C69**
+(article soumis au MRP — actif, au besoin du plan en service — sans couverture cible : aucune
+proposition) naissent. Les trois sont **servis par le moteur en Rust**, aucun SQL, comme C25 : la
+plage des contrôles va de C01 à C69, `v_controles` en porte la part SQL. Sur la fiche article,
+`couverture_min_mois` est renommée **`couverture_cible_mois`** (la couverture souhaitée au moment de
+la réception, cible du MRP ; jamais une quantité), `stock_min_kg` reste un garde-fou (un signal,
+jamais une quantité de commande), `marge_securite_pct` de l'article est supprimée (celle de la
+qualité, défaut du plan de production, reste) ; la vue `v_stocks_minimums_a_revoir` et la route
+`/api/plan-achat/stocks-minimums` sont retirées.
 
 **C11 est le contrôle central** : il compare le solde de `stock_magasin` au grand livre. `stock_magasin` n'est qu'un cache ; `ligne_mouvement` fait foi. Toute divergence signale un bug applicatif, et le solde est reconstructible.
 

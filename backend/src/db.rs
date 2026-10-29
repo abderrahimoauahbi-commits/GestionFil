@@ -110,6 +110,15 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // La couverture cible (moteur v2, 27/10/2026) : la fiche article porte
+        // couverture_cible_mois (ancienne couverture_min_mois), lue par le moteur
+        // et ecrite par le CRUD ; la marge de securite de l'article est retiree.
+        "2026-10-27l_couverture_cible.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'reference'
+                           AND column_name = 'couverture_cible_mois')",
+    ),
+    (
         // Le taux d'un dossier d'import est facultatif (arbitrage du 27/10/2026) :
         // le serveur l'ecrit NULL pour une devise sans taux, au lieu d'inventer 1.
         // Sans elle, la creation d'un tel dossier echouerait sur NOT NULL.
@@ -676,10 +685,10 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
         "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_dernier_prix_achat_mad')",
     ),
     (
-        // La saison, les alertes C49/C50, les stocks minimums a revoir.
+        // La saison, les alertes C49/C50. Sa vue des stocks minimums a revoir est
+        // retiree par 2026-10-27l : le temoin ne retient que la saison.
         "2026-10-09k_saisonnalite.sql",
-        "SELECT to_regclass('public.saison_mois') IS NOT NULL
-            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_stocks_minimums_a_revoir')",
+        "SELECT to_regclass('public.saison_mois') IS NOT NULL",
     ),
     (
         // Le taux engage d'un bon, justifie : le service ecrit ces colonnes.

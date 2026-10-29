@@ -47,7 +47,7 @@ import { cn, fmt } from '../lib/utils'
 import { libelleStatut } from '../lib/statuts'
 
 /** Les états d'une référence au moteur de couverture (27/10/2026). */
-const ETATS_MOTEUR = ['PLAN_NON_COUVERT', 'SOUS_SECURITE', 'COUVERT']
+const ETATS_MOTEUR = ['RUPTURE_INEVITABLE', 'SOUS_SECURITE', 'SOUS_CIBLE', 'COUVERT']
 
 
 export function GrilleLignesMobile({
@@ -149,7 +149,7 @@ export function GrilleLignesMobile({
       ton:
         suggere > 0
           ? 'primaire'
-          : r.statut_stock === 'PLAN_NON_COUVERT' || r.statut_stock === 'RUPTURE'
+          : r.statut_stock === 'RUPTURE_INEVITABLE' || r.statut_stock === 'RUPTURE'
             ? 'alerte'
             : 'neutre',
       desactivee: prises.has(r.code_reference),

@@ -196,7 +196,7 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
   deux factures, et l'arrivage ne se clôture que quand tout est facturé. Écrans `/factures-fournisseur`.
 - `docs/ecarts-cahier-des-charges.md` — traçabilité cahier des charges → implémentation, points
   en attente de décision métier.
-- `db/README.md` — invariants, vues, contrôles C01–C66 (C38–C42 machines au 05/10 ; C43 colisage incohérent au 08/10 ; C45–C52 au 09/10, C53–C54 au 10/10, C55 période close au 17/10, C56 ligne d'import sans position tarifaire au 19/10, C57–C58 proposition et réception en double au 19/10, C59 écart au prix confirmé de la demande de prix au 21/10, C60 ligne de bon en double au 21/10, C61–C64 OF au 22/10, C65 mouvement daté pendant un inventaire au 23/10, C66 transfert en route sans date prévue au 27/10, tous des signaux).
+- `db/README.md` — invariants, vues, contrôles C01–C69 (C38–C42 machines au 05/10 ; C43 colisage incohérent au 08/10 ; C45–C52 au 09/10, C53–C54 au 10/10, C55 période close au 17/10, C56 ligne d'import sans position tarifaire au 19/10, C57–C58 proposition et réception en double au 19/10, C59 écart au prix confirmé de la demande de prix au 21/10, C60 ligne de bon en double au 21/10, C61–C64 OF au 22/10, C65 mouvement daté pendant un inventaire au 23/10, C66 transfert en route sans date prévue au 27/10, C67 rapprochement machine / grand livre, C68 stock minimum franchi et C69 article au plan sans cible au 27/10 (servis par le moteur, comme C05 et C25), tous des signaux).
 - Audit P3 du 19/10/2026 : création idempotente (`id_document` tiré par l'écran, `domain/idempotence.rs`) ; positions tarifaires, valeur en douane et répartition « au taux des droits » (`2026-10-19a`) ; étiquettes de lot Code 128 et scan (`2026-10-19b`, `routes/etiquettes.rs`, `lib/code128.ts`, `composants/ChampScan.tsx`). Une colonne de date nouvelle naît en `timestamptz`/`date` (cliquet A1) — `routes/json.rs` les sérialise.
 - `docs/matrice-mouvements.md` — matrice des 19 types de mouvement (CONSO_DIRECTE le 21/10, RETOUR_CONSO le 22/10) (sens, CMUP, coût, validation, réversibilité), générée par `python db/pg/matrice.py` depuis `backend/tests/banc/matrice_mouvements.json`, que le banc vérifie contre la base : modifier un type = modifier ce fichier.
 - Règles de gestion validées le 08/10/2026 : migrations `db/pg/migrations/2026-10-08_regles_p1.sql` (sections 1 à 14) puis `2026-10-08b_audit_v4.sql` (corrections de l'audit v4), les deux exigées au démarrage ; `seed_006_regles_2026_10.sql` en porte les référentiels pour une base neuve. Le colisage incohérent se SIGNALE, il ne bloque jamais.
@@ -221,18 +221,27 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
   `v_of_bilan`, `v_qualite_consommation`. Le besoin « OF retenus + plan non couvert » de `22c` est **remplacé par
   le plan seul** (`2026-10-27b`, exigée au démarrage) : l'OF ne sert que l'axe production / statistiques (C64 signale
   toujours un OF au-delà du plan) ; le fil sur machine compte au dernier constat, quel que soit son âge.
-- **Moteur de couverture et « Commander »** (26–27/10/2026) : `domain/couverture.rs` (calcul pur, testé),
-  `routes/couverture.rs` (`GET /api/couverture[/{ref}]`, onglet « À commander » de `PlanAchatCouverture.tsx`, trié par
-  1re rupture puis date limite de commande). **La génération du plan d'achat (`domain/plan_achat.rs`) prend la 1re
-  proposition du moteur** (quantité, D = date de besoin, date limite, urgence déduite) ; prix / devise / fournisseur
-  inchangés ; `POST /api/plan-achat/generer?reference=` = bouton « Commander » (une seule référence). Migrations
-  `2026-10-27a` à `27c`, exigées au démarrage. Pas de fiche de production (abandonnée, viendra de l'ERP de production).
-  **Une seule source de vérité (27/10/2026, `2026-10-27e`, exigée)** : l'ancien calcul (`v_stock_projete`,
-  `v_plan_achat`, `v_encours_fiable`, `v_besoin_horizon`, `v_risque_*`, `v_cockpit_stock/_couverture`,
-  `P_MrpInclureStockMachine`) est retiré ; tout état de couverture (cockpit, briefing, assistant, stock projeté, mur de
-  risques, indicateurs, supervision, saisie d'un bon) vient de `couverture::etats()` — PLAN_NON_COUVERT / SOUS_SECURITE
-  / COUVERT ; les vues d'affichage lisent la lecture neutre `v_stock_reference` ; C05 et C25 sont servis par le moteur
-  (`couverture::controles_moteur`), C27 et C49 retirés. **Le fil en route est un arrivage** (`2026-10-27d`, exigée) :
+- **Moteur de couverture v2 : la couverture cible** (spécification `docs/A-DECIDER-of-supply-chain.md` § 15, livré le
+  27/10/2026 au soir) : `domain/couverture.rs` (calcul pur ; les cas 1, 2, 3, 4a, 4b du § 15.6 sont des tests aux
+  chiffres exacts, avec bilan, équivalence classique et propriété sur plans aléatoires), `routes/couverture.rs`
+  (`GET /api/couverture[/{ref}]`, `POST …/simulation` avec C, N, L, S en hypothèses). Le solde B(t) n'est PAS plafonné à
+  zéro ; R = 1re rupture ; C = 30 × `reference.couverture_cible_mois` ; D* = R − C, D = max(D*, aujourd'hui + L), date
+  limite D* − L ; **Q0 = le plus grand manque de [R, R + N[ (FIGÉ, ne pas « améliorer »)** ; X = creux le plus bas sous
+  NS (plan des S jours suivants) dans [0, L], 1re proposition seulement ; Q = arrondi(Q0 + X) ; propositions en retard
+  consolidées. Aucune moyenne dans le moteur. **États** (`couverture::etats()`, une seule source) : RUPTURE_INEVITABLE /
+  SOUS_SECURITE / SOUS_CIBLE / COUVERT (le plus grave l'emporte, raison chiffrée `raison_etat`) ; **signaux** à part
+  (CIBLE_NON_DEFINIE, SOUS_MINIMUM, RETARD_CIBLE, HORIZON_COURT, DEFAUT_DONNEES), jamais bloquants ; contrôles servis par
+  le moteur : C05 (rupture inévitable), C25, C68 (stock minimum = garde-fou, jamais une quantité), C69 (sans cible =
+  aucune proposition, aucun repli). La frise mensuelle garde ses codes (`statut_mois` : PLAN_NON_COUVERT par mois).
+  Migrations `2026-10-27l` (colonne renommée, `reference.marge_securite_pct` supprimée, champs déclarés ; exigée) et
+  `2026-10-27m` (colonnes du stock projeté). **Écrans** : /stock = Stock projeté (21 colonnes, ligne ↳ fixée par
+  `ColonneDT.complement`, fenêtre `FenetreStockProjete`), Simulation, Surveillance (l'ancien onglet « À commander » du
+  plan d'achat, déplacé) ; **aucun bouton « Commander »** pour l'instant (`POST /api/plan-achat/generer?reference=`
+  reste au serveur) ; au plan d'achat, un clic sur une ligne ouvre la fenêtre de surveillance (`ModaleReference`). La
+  génération du plan d'achat (`domain/plan_achat.rs`) prend la 1re proposition du moteur (quantité, D, date limite) ;
+  prix / devise / fournisseur inchangés. Avant le v2 : `2026-10-27a` à `27e` (exigées) ; l'ancien calcul (`v_stock_projete`,
+  `v_plan_achat`, `v_encours_fiable`, `v_besoin_horizon`, `v_risque_*`, `P_MrpInclureStockMachine`) est retiré, les vues
+  d'affichage lisent `v_stock_reference`. **Le fil en route est un arrivage** (`2026-10-27d`, exigée) :
   `transfert.date_disponibilite_prevue` obligatoire à l'expédition (TRF-DATE), révisable en route
   (`POST /api/transferts/{id}/date-disponibilite`), comptée par le moteur ; sans date : C66.
 - Décisions du 23/10/2026 : **le conditionnement est par lot** (`2026-10-23a` : `lot.poids_bobine_kg`,

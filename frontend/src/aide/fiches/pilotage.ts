@@ -136,9 +136,9 @@ export const FICHES_PILOTAGE: Sujet[] = [
         valeurs: 'MAD',
       },
       {
-        nom: 'Plan non couvert',
+        nom: 'Rupture inévitable',
         description:
-          'Le nombre de références dont une rupture est prévue sur l’horizon du plan, sur les références suivies par le moteur de couverture ; dessous, celles « à commander aujourd’hui » (date limite atteinte) et celles « sous la sécurité ». Les barres : les références au plan non couvert, mois par mois. Dans les graphiques, la même couleur rouge.',
+          'Le nombre de références suivies dont la 1re rupture tombe avant aujourd’hui + délai (aucune commande passée aujourd’hui n’arrive à temps) ; dessous, celles « à commander aujourd’hui » (date limite atteinte), « sous sécurité » et « sous cible ». Les barres : les références dont le plan n’est pas couvert, mois par mois. Dans les graphiques, la même couleur rouge.',
       },
       {
         nom: 'Économies identifiées',
@@ -158,7 +158,7 @@ export const FICHES_PILOTAGE: Sujet[] = [
       },
       {
         nom: 'Santé du catalogue',
-        description: 'Les références suivies réparties par état du moteur : Couvert, Sous la sécurité, Plan non couvert.',
+        description: 'Les références suivies réparties par état du moteur : Couvert, Sous cible, Sous sécurité, Rupture inévitable.',
       },
       {
         nom: 'Les décisions les plus urgentes',
@@ -189,7 +189,7 @@ export const FICHES_PILOTAGE: Sujet[] = [
     ],
     regles: [
       'Chaque bloc dit d’où vient son chiffre et mène à l’écran où l’on agit : on vient ici pour voir, on va là-bas pour faire.',
-      'Plan non couvert, sous la sécurité, couvert, à commander aujourd’hui : ce sont les états du moteur de couverture, les mêmes qu’au plan d’achat et au stock projeté.',
+      'Rupture inévitable, sous sécurité, sous cible, couvert, à commander aujourd’hui : ce sont les états du moteur de couverture, les mêmes qu’au plan d’achat et au stock projeté.',
       '« Réceptions à contrôler » compte les réceptions soumises au contrôle ; un clic ouvre la liste des réceptions.',
       'Une panne du serveur s’affiche (« Chiffres clés indisponibles ») : un compteur absent n’est jamais montré comme un zéro.',
     ],
@@ -217,7 +217,7 @@ export const FICHES_PILOTAGE: Sujet[] = [
       {
         titre: 'Risques et files',
         etapes: [
-          'Les chiffres clés : Plan non couvert, À commander aujourd’hui, À commander, Budget à engager, et le sourcing des références en risque.',
+          'Les chiffres clés : Rupture inévitable, À commander aujourd’hui, À commander, Budget à engager, et le sourcing des références en risque.',
           '« À traiter — Achats / Stock / Qualité » : les files de votre rôle, par domaine ; un clic ouvre la liste.',
           '« Références en risque, mois par mois » : combien de références passent sous la sécurité ou ont un plan non couvert, chaque mois.',
           '« Mur de risques » : une ligne par référence en tension, une case par mois — survolez une case pour le plan du mois, les arrivages, le solde de fin de mois et la sécurité.',
@@ -235,9 +235,9 @@ export const FICHES_PILOTAGE: Sujet[] = [
     ],
     champs: [
       {
-        nom: 'Plan non couvert',
+        nom: 'Rupture inévitable',
         description:
-          'Le nombre de références suivies dont une rupture est prévue sur l’horizon du plan (moteur de couverture) ; les barres, mois par mois. Dans les graphiques et le mur, la couleur rouge.',
+          'Le nombre de références suivies dont la 1re rupture tombe avant aujourd’hui + délai (moteur de couverture) ; dessous, celles sous cible ; les barres : les références dont le plan n’est pas couvert, mois par mois. Dans les graphiques et le mur, la couleur rouge.',
       },
       {
         nom: 'À commander aujourd’hui',
@@ -297,8 +297,8 @@ export const FICHES_PILOTAGE: Sujet[] = [
       { nom: 'Délai (j)', description: 'Le délai de livraison du fournisseur.', valeurs: 'jours' },
       {
         nom: 'Statut',
-        description: 'L’état au moteur de couverture.',
-        valeurs: 'Plan non couvert · Sous la sécurité · Couvert',
+        description: 'L’état au moteur de couverture, le plus grave l’emporte : Rupture inévitable (la 1re rupture tombe avant aujourd’hui + délai), Sous sécurité (un creux sous le seuil de sécurité dans le délai), Sous cible (couverture actuelle sous la couverture cible), Couvert.',
+        valeurs: 'Rupture inévitable · Sous sécurité · Sous cible · Couvert',
       },
       {
         nom: 'Couverture',
@@ -314,7 +314,7 @@ export const FICHES_PILOTAGE: Sujet[] = [
     ],
     regles: [
       'Une adresse inconnue (/tableau-de-bord/…) ramène à la vue d’ensemble.',
-      'Plan non couvert, sous la sécurité, couvert : les états du moteur de couverture, les mêmes partout. Le mur de risques groupe par mois les jours que le moteur projette, arrivages comptés à leur date.',
+      'Rupture inévitable, sous sécurité, sous cible, couvert : les états du moteur de couverture, les mêmes partout. Le mur de risques groupe par mois les jours que le moteur projette, arrivages comptés à leur date : un mois est rouge quand une part de son plan n’est pas couverte, orange quand le point bas passe sous le seuil de sécurité.',
       'Un bandeau « Anomalies bloquantes » apparaît quand un contrôle bloquant est en anomalie : il se traite avant tout le reste.',
     ],
     liens: [
@@ -796,7 +796,7 @@ export const FICHES_PILOTAGE: Sujet[] = [
       {
         nom: 'Critiques',
         description:
-          'Une situation métier qui demande une décision, pas une correction technique (ex. C05 plan non couvert sur l’horizon, calculé par le moteur de couverture ; C10 écart de pesée sans dérogation ; C38 consommation machine négative ; C44 deux inventaires en cours ; C45).',
+          'Une situation métier qui demande une décision, pas une correction technique (ex. C05 rupture inévitable, calculé par le moteur de couverture ; C10 écart de pesée sans dérogation ; C38 consommation machine négative ; C44 deux inventaires en cours ; C45).',
       },
       {
         nom: 'Attention',
@@ -809,7 +809,7 @@ export const FICHES_PILOTAGE: Sujet[] = [
       'Les contrôles se recalculent à chaque lecture (et toutes les 5 minutes) : ils n’ont pas de mémoire, rien ne dit depuis quand une anomalie dure.',
       'C11 compare le cache du stock au grand livre des mouvements, qui fait foi : il doit rester à zéro, et se traite avant tout le reste.',
       'Les contrôles C46 à C66 sont des signaux : ils montrent, ils n’empêchent jamais une saisie.',
-      'C05 (« Plan non couvert sur l’horizon ») et C25 (« Stock mobilisable face à un équivalent en tension ») sont calculés par le moteur de couverture, la même source que le plan d’achat et le stock projeté, et servis sous leurs codes à côté des autres. C27 et C49 sont retirés depuis le 27/10/2026 : le moteur n’a ni seuils de jours ni prolongation du plan.',
+      'C05 (« Rupture inévitable : 1re rupture avant aujourd’hui + délai »), C25 (« Stock mobilisable face à un équivalent en tension »), C68 (« Stock minimum franchi avant aujourd’hui + délai : vérifier le plan ») et C69 (« Article au plan sans couverture cible : aucune proposition ») sont calculés par le moteur de couverture, la même source que le plan d’achat et le stock projeté, et servis sous leurs codes à côté des autres. Des signaux : aucun ne bloque. C27 et C49 sont retirés depuis le 27/10/2026.',
       'C28 (« Commande en retard : hors couverture tant qu’aucune nouvelle date n’existe ») compte les lignes de bon validé dont la date de livraison prévue — celle de la ligne, sinon de l’en-tête — est dépassée : le moteur ne les compte plus. Une nouvelle date sur le bon les fait revenir.',
       'C66 (« Transfert en route sans date prevue de disponibilite (hors couverture) », ATTENTION) : un transfert expédié avant que la date ne devienne obligatoire n’en a pas ; le moteur le liste « sans date » et ne le compte pas, jusqu’à ce qu’une date soit saisie (« Réviser la date » dans la liste des transferts).',
       'C64 signale un OF qui va au-delà du plan de production pour une qualité et un mois : le besoin d’achat vient du plan seul, l’OF n’y ajoute rien.',
@@ -1470,7 +1470,7 @@ export const FICHES_PILOTAGE: Sujet[] = [
       {
         nom: 'Restreindre à un état',
         description: 'Ne garder que les références d’un état du moteur de couverture ; le sous-titre de la feuille le rappelle.',
-        valeurs: 'Toutes les références · Plan non couvert · Sous la sécurité · Couvert',
+        valeurs: 'Toutes les références · Rupture inévitable · Sous sécurité · Sous cible · Couvert',
         defaut: 'Toutes les références',
       },
       { nom: 'Référence', description: 'Le code et la désignation.' },
@@ -1490,8 +1490,8 @@ export const FICHES_PILOTAGE: Sujet[] = [
       {
         nom: 'État',
         description:
-          'L’état au moteur de couverture : Plan non couvert (une rupture est prévue sur l’horizon), Sous la sécurité (le solde passe sous la sécurité, sans rupture), Couvert.',
-        valeurs: 'Plan non couvert · Sous la sécurité · Couvert',
+          'L’état au moteur de couverture, le plus grave l’emporte : Rupture inévitable (la 1re rupture tombe avant aujourd’hui + délai), Sous sécurité (un creux sous le seuil de sécurité dans le délai), Sous cible (couverture actuelle sous la couverture cible), Couvert.',
+        valeurs: 'Rupture inévitable · Sous sécurité · Sous cible · Couvert',
       },
       { nom: 'Valeur MAD', description: 'La valeur du stock de la référence, au CMUP.', valeurs: 'MAD' },
     ],
@@ -1511,7 +1511,7 @@ export const FICHES_PILOTAGE: Sujet[] = [
       'Imprimer les propositions d’achat groupées par fournisseur, avec leurs quantités, leur urgence et leur montant estimé : le document de la revue d’achats.',
     droits:
       'Lecture du module Plan d’achat. Les colonnes de prix et de montant, et le montant estimé de l’en-tête, n’apparaissent qu’à qui voit le prix estimé.',
-    prerequis: ['Des propositions générées dans le plan d’achat (« Régénérer » ou « Commander »).'],
+    prerequis: ['Des propositions générées dans le plan d’achat (« Régénérer »).'],
     procedures: [
       {
         titre: 'Imprimer le plan d’achat',
@@ -1655,7 +1655,7 @@ export const FICHES_PILOTAGE: Sujet[] = [
       { nom: 'Unité', description: 'L’unité du catalogue de la référence.' },
       { nom: 'Prix', description: 'Le prix catalogue, dans la devise du fournisseur.' },
       { nom: 'Stock min', description: 'Le stock minimum saisi sur la fiche de la référence.', valeurs: 'kg' },
-      { nom: 'Couv. min', description: 'La couverture minimale saisie sur la fiche de la référence.', valeurs: 'mois' },
+      { nom: 'Couv. cible', description: 'La couverture cible saisie sur la fiche de la référence : la cible du moteur de couverture (C = 30 × mois).', valeurs: 'mois' },
     ],
     regles: ['Seules les références actives figurent, triées par code.'],
     liens: [{ route: '/catalogue', libelle: 'Références' }],

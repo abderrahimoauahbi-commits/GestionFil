@@ -182,7 +182,7 @@ export function AnalyseTableau() {
                 series={[
                   { cle: 'ok', libelle: 'Couvert', valeurs: d.abc_statut.map((x) => x.ok), couleur: TON.succes },
                   { cle: 'at', libelle: 'Sous la sécurité', valeurs: d.abc_statut.map((x) => x.attention), couleur: TON.alerte },
-                  { cle: 'al', libelle: 'Plan non couvert', valeurs: d.abc_statut.map((x) => x.en_alerte), couleur: TON.danger },
+                  { cle: 'al', libelle: 'Rupture inévitable', valeurs: d.abc_statut.map((x) => x.en_alerte), couleur: TON.danger },
                 ]}
               />
             </Bloc>

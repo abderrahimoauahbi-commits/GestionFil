@@ -83,7 +83,11 @@ export function CourbeSolde({
 
   const chemin = (v: (j: Jour) => number) =>
     jours.map((j, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v(j)).toFixed(1)}`).join(' ')
-  const aire = `${chemin((j) => j.solde_kg)} L${x(n - 1).toFixed(1)},${y0} L${x(0).toFixed(1)},${y0} Z`
+  // LE SOLDE DU MOTEUR v2 N'EST PAS PLAFONNÉ À ZÉRO (B(t), § 15.1) : la courbe le
+  // dessine à zéro au plus bas, la bande sous l'axe dit le plan non couvert, et
+  // l'infobulle donne le solde exact (négatif quand le plan n'est pas couvert).
+  const trace = (j: Jour) => Math.max(0, j.solde_kg)
+  const aire = `${chemin(trace)} L${x(n - 1).toFixed(1)},${y0} L${x(0).toFixed(1)},${y0} Z`
 
   // Les séries de jours où le plan n'est pas couvert, et ce qu'elles perdent.
   const zones: { debut: number; fin: number; kg: number }[] = []
@@ -166,21 +170,21 @@ export function CourbeSolde({
         <path d={chemin((j) => j.securite_kg)} fill="none" stroke={COULEUR.securite} strokeWidth={1.3} strokeDasharray="5 3" />
         {comparaison && comparaison.length === n && (
           <path
-            d={comparaison.map((j, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(j.solde_kg).toFixed(1)}`).join(' ')}
+            d={comparaison.map((j, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(Math.max(0, j.solde_kg)).toFixed(1)}`).join(' ')}
             fill="none"
             stroke={COULEUR.texte}
             strokeWidth={1.2}
             strokeDasharray="2 3"
           />
         )}
-        <path d={chemin((j) => j.solde_kg)} fill="none" stroke={COULEUR.solde} strokeWidth={1.8} strokeLinejoin="round" />
+        <path d={chemin(trace)} fill="none" stroke={COULEUR.solde} strokeWidth={1.8} strokeLinejoin="round" />
 
         {/* Les arrivages qui remontent le solde */}
         {jours.map((jj, i) =>
           jj.arrivee_kg > 0.0001 ? (
             <path
               key={jj.date}
-              d={`M${x(i)},${y(jj.solde_kg) - 9} l-4.5,7 h9 Z`}
+              d={`M${x(i)},${y(trace(jj)) - 9} l-4.5,7 h9 Z`}
               fill={COULEUR.arrivage}
             >
               <title>{`Arrivage le ${dateCourte(jj.date)} : ${kg(jj.arrivee_kg)} kg`}</title>
@@ -211,7 +215,7 @@ export function CourbeSolde({
         {j && survol != null && (
           <g pointerEvents="none">
             <line x1={x(survol)} x2={x(survol)} y1={M.h} y2={y0 + bande} stroke={COULEUR.texte} strokeWidth={0.8} />
-            <circle cx={x(survol)} cy={y(j.solde_kg)} r={3} fill={COULEUR.solde} />
+            <circle cx={x(survol)} cy={y(trace(j))} r={3} fill={COULEUR.solde} />
           </g>
         )}
       </svg>

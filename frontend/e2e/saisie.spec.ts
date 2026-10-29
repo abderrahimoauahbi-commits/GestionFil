@@ -335,8 +335,7 @@ test('référence : la direction crée une fiche, poids et prix au format franç
   await saisir(champNombre(page, { name: /^Poids par unité/ }), '2,597')
   await saisir(champNombre(page, { name: /^Unités par palette/ }), '240')
   await saisir(champNombre(page, { name: /^Stock minimum/ }), '1 500')
-  await saisir(champNombre(page, { name: 'Couverture minimale (mois)' }), '1,5')
-  await saisir(champNombre(page, { name: /^Marge de sécurité/ }), '12,5')
+  await saisir(champNombre(page, { name: /^Couverture cible \(mois\)/ }), '1,5')
   await saisir(champNombre(page, { name: 'Prix par unité *' }), '3,85')
   await page.getByRole('combobox', { name: 'Devise *' }).selectOption('USD')
   const constats = [...veille.constats, ...(await mesurer(page))]
@@ -374,8 +373,9 @@ test('référence : la direction crée une fiche, poids et prix au format franç
   expect(Number(r.poids_bobine_kg), 'poids par unité').toBeCloseTo(2.597, 4)
   expect(Number(r.bobines_par_palette), 'unités par palette').toBe(240)
   expect(Number(r.stock_min_kg), 'stock minimum').toBeCloseTo(1500, 4)
-  expect(Number(r.couverture_min_mois), 'couverture').toBeCloseTo(1.5, 4)
-  expect(Number(r.marge_securite_pct), 'marge').toBeCloseTo(12.5, 4)
+  expect(Number(r.couverture_cible_mois), 'couverture cible').toBeCloseTo(1.5, 4)
+  // La marge de sécurité de l'article est retirée (2026-10-27l) ; celle de la qualité reste.
+  expect(r.marge_securite_pct, 'marge article retirée').toBeUndefined()
   expect(Number(r.prix_catalogue), 'prix').toBeCloseTo(3.85, 4)
   expect(veille.erreurs).toEqual([])
   await page.context().close()

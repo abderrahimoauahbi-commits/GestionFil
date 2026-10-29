@@ -14,6 +14,7 @@
  * couverture et la date prévue de disponibilité du fil en route.
  */
 import type { ChampAide, MessageAide, Procedure, Sujet } from '../types.ts'
+import { REGLES_MOTEUR_V2 } from '../moteurCouverture.ts'
 
 /* ==========================================================================
  * LE DOCUMENT DE TRANSFERT : un seul écran (pages/TransfertNouveau.tsx) pour la
@@ -1112,15 +1113,15 @@ export const FICHES_STOCK: Sujet[] = [
       {
         nom: 'Statut',
         description:
-          'L’état au moteur de couverture (le même que le stock projeté et le plan d’achat) : Plan non couvert (une rupture est prévue sur l’horizon du plan), Sous la sécurité (le solde projeté passe sous la sécurité, sans rupture), Couvert. « SOUS SÉCU. » : le disponible compté est, aujourd’hui, sous la sécurité du jour — une information, qui n’entre pas dans l’état.',
-        valeurs: 'Plan non couvert · Sous la sécurité · Couvert',
+          'L’état au moteur de couverture, le plus grave l’emporte : Rupture inévitable (la 1re rupture tombe avant aujourd’hui + délai), Sous sécurité (un creux sous le seuil de sécurité dans le délai), Sous cible (couverture actuelle sous la couverture cible), Couvert. Le même qu’au stock projeté et au plan d’achat. « SOUS SÉCU. » : le disponible compté est, aujourd’hui, sous la sécurité du jour — une information, qui n’entre pas dans l’état.',
+        valeurs: 'Rupture inévitable · Sous sécurité · Sous cible · Couvert',
       },
       { nom: 'CMUP', description: 'Le coût moyen unitaire pondéré.', valeurs: 'MAD/kg' },
       { nom: 'Valeur MAD', description: 'Stock × CMUP.' },
       {
         nom: 'A cder kg',
         description:
-          'La quantité de la première proposition du moteur de couverture (celle de l’onglet « À commander » du plan d’achat) ; en rouge quand sa date limite de commande est atteinte. Vide : rien à commander.',
+          'La quantité de la première proposition du moteur de couverture (celle de /stock › Surveillance) ; en rouge quand sa date limite de commande est atteinte. Vide : rien à commander.',
         valeurs: 'kg',
       },
       { nom: 'Disponible', description: 'Téléphone : le stock physique net (hors quarantaine).', valeurs: 'kg' },
@@ -1224,250 +1225,241 @@ export const FICHES_STOCK: Sujet[] = [
   },
 
   // ==========================================================================
-  // STOCK PROJETÉ — trois onglets sur le même moteur de couverture (27/10/2026)
+  // STOCK PROJETÉ — trois onglets sur le même moteur de couverture (v2, 27/10/2026)
   // ==========================================================================
   {
     route: '/stock',
     titre: 'Stock projeté et alertes',
     chemin: 'Planification → Stock projeté et alertes',
     objectif:
-      'Voir, pour chaque matière suivie, ce qui est compté aujourd’hui, ce qui arrive, ce que le plan demande jusqu’à la livraison, jusqu’où il est couvert et ce qu’il faut commander pour combien ; essayer des hypothèses sans rien enregistrer ; surveiller les références à commander. Trois onglets — Stock projeté, Simulation, Surveillance / Alertes — sur LE MÊME moteur de couverture.',
+      'Voir, pour chaque matière suivie, ce qui est compté aujourd’hui, ce qui arrive, ce que le plan daté demande jusqu’à la réception proposée, combien de jours le stock couvre face à la couverture cible, et ce qu’il faut commander avant quelle date ; essayer des hypothèses sans rien enregistrer ; surveiller les références à commander. Trois onglets — Stock projeté, Simulation, Surveillance — sur LE MÊME moteur de couverture.',
     prerequis: [
-      'Un plan de production en service dont le MRP est calculé : c’est sa demande, jour par jour, que le moteur projette.',
+      'Un plan de production en service dont le MRP est calculé : c’est son plan daté, jour par jour, que le moteur projette.',
+      'Une couverture cible sur la fiche de chaque article au plan : sans elle, aucune proposition (signal « Cible non définie »).',
     ],
     droits:
-      'Lecture du module Stock pour l’onglet Stock projeté. La grande fenêtre de détail, la Simulation et la Surveillance lisent le moteur sous le droit de lecture du Plan d’achat : sans lui, ces onglets sont grisés. Les montants (prix, montant de la commande) suivent la grille de droits, comme au plan d’achat. Les colonnes que votre grille masque ne sont ni affichées ni envoyées.',
+      'Lecture du module Stock pour l’onglet Stock projeté. La fenêtre de détail, la Simulation et la Surveillance lisent le moteur sous le droit de lecture du Plan d’achat : sans lui, ces onglets sont grisés. Les montants suivent la grille de droits, comme au plan d’achat ; l’historique des mouvements de la fenêtre exige la lecture des mouvements. Les colonnes que votre grille masque ne sont ni affichées ni envoyées.',
     procedures: [
       {
         titre: 'Lire le stock projeté (onglet « Stock projeté »)',
         etapes: [
-          'Dans le rail, choisissez un état (Plan non couvert, Sous la sécurité, Couvert), « À commander aujourd’hui » ou une classe ABC : chaque entrée porte le nombre de références derrière elle. Cherchez une référence, une désignation ou un fournisseur ; affinez avec les filtres État, Fournisseur, Classe ABC, Référence.',
-          'Lisez la ligne de gauche à droite : Disponible + Sur machine + Restant + Arrivages = Stock total projeté (aucun kilo compté deux fois) ; face à lui, le Besoin jusqu’à livraison ; puis la Couverture planifiée, ce qu’il faut commander et son montant.',
-          'Ce qui ne tient pas dans la largeur passe, avec son titre, sur la ligne ↳ sous la référence (Fournisseur, Délai, 1re rupture, Date limite de commande, ABC / XYZ d’abord).',
-          'Cliquez une ligne : la GRANDE FENÊTRE du détail s’ouvre — situation, approvisionnement, courbe, projection chronologique, résultat MRP, calcul de la proposition, ressources et arrivages, besoins du plan mois par mois. Échap ou la croix la ferment.',
+          'Dans le rail, choisissez un état (Rupture inévitable, Sous sécurité, Sous cible, Couvert), « À commander aujourd’hui » ou une classe ABC : chaque entrée porte le nombre de références derrière elle. Affinez avec les filtres État, Fournisseur, Classe ABC, Référence.',
+          'La liste est triée par gravité de l’état, puis par « Avant le ». Lisez la ligne de gauche à droite : Stock disponible + Sur machines + Restant constaté + Arrivages = Stock projeté (aucun kilo compté deux fois) ; face à lui, le Besoin jusqu’à réception ; puis la Couverture actuelle, la Cible et l’Écart, ce qu’il faut commander, son montant, avant quelle date, et l’état.',
+          'Sous chaque ligne, la ligne ↳ : Désignation, Fournisseur, ABC / XYZ, 1re rupture projetée, Délai, Date réception proposée, Unité / palette. Ce qui ne tient pas dans la largeur y passe aussi, avec son titre.',
+          'Survolez l’état : sa raison, en une phrase chiffrée.',
+          'Cliquez la ligne : la fenêtre du détail s’ouvre (voir ci-dessous). Échap ou la croix la ferment.',
           'Clic droit sur une ligne : commander la référence (nouveau bon), ouvrir sa fiche, son historique de mouvements, chercher un équivalent, lancer un inventaire.',
         ],
-        resultat: 'Vous savez quelles références menacent le plan, depuis quand, et ce qu’il faut commander, pour combien.',
+        resultat: 'Vous savez quelles références menacent le plan, de combien de jours elles s’écartent de leur cible, et ce qu’il faut commander, pour combien, avant quand.',
       },
       {
-        titre: 'Reconstituer une proposition (fenêtre de détail)',
+        titre: 'Lire la fenêtre d’une référence (clic sur la ligne)',
         etapes: [
-          '« Résultat MRP » : la première date sous la sécurité, la première rupture, le besoin non couvert, la quantité proposée, D, la date limite de commande, la prochaine proposition et le montant.',
-          'Dessous, la reconstitution au jour déterminant : plan de D au jour déterminant + sécurité − S(D) − arrivages après D = besoin de réapprovisionnement ; + minimum ; + arrondi = quantité proposée. La fenêtre est [D, F[ : D inclus, F exclu.',
-          '« Projection chronologique » : « Par événements » (comme la chronologie) ou « Jour par jour » (toute l’horizon, défilement dans le tableau).',
+          'En tête : l’état et sa raison chiffrée ; « Voir les lots → », « Ses mouvements → », « Simuler cette référence » ; les signaux, s’il y en a.',
+          'Les tuiles : Stock total, Sur métiers, Disponible hors quarantaine, Besoin jusqu’à réception, Stock à la réception, Couverture actuelle (avec la cible et l’écart), À commander (avec la date limite).',
+          '« Approvisionnement » : ce que le calcul utilise, chacun avec sa source ; le stock minimum n’y est qu’un garde-fou.',
+          '« Calcul de la quantité » : Q0 (besoin net de la fenêtre) + X (sécurité) + arrondi = la quantité à commander, la fenêtre couverte et le stock après réception.',
+          '« Classement et risque », puis « Où se trouve la matière » : une cascade dont chaque total est la somme des lignes au-dessus.',
+          'En bas, les onglets : Besoins du plan (par qualité, mois par mois), Projection (courbe et événements), Lots, Sur les métiers, Historique.',
         ],
       },
       {
         titre: 'Essayer une hypothèse (onglet « Simulation »)',
         etapes: [
           'Choisissez la « Référence à simuler » (ou « Simuler cette référence » dans la fenêtre de détail) : la situation réelle s’affiche, et la simulation sans hypothèse la rend à l’identique.',
-          'Saisissez une ou plusieurs hypothèses : un délai fournisseur, une couverture d’une commande, des jours de sécurité, un minimum ou un multiple ; changez la date ou les kilos d’un arrivage lu, ou retirez-le ; « Ajouter un arrivage » ; « Simuler une commande » (préremplie avec la première proposition : sa date D et sa quantité).',
+          'Saisissez une ou plusieurs hypothèses : une couverture cible, un délai fournisseur, une couverture d’une commande, des jours de sécurité, un minimum ou un multiple ; changez la date ou les kilos d’un arrivage lu, ou retirez-le ; « Ajouter un arrivage » ; « Simuler une commande » (préremplie avec la première proposition : sa date D et sa quantité).',
           'À chaque changement, le même moteur recalcule : le tableau « Réel / Simulé » met en couleur ce qui change ; la courbe trace le solde simulé, le réel en pointillé ; dessous, le calcul de la proposition simulée, les arrivages simulés et la projection simulée.',
           '« Tout effacer » revient à la situation réelle. Quitter la page efface les hypothèses.',
         ],
-        resultat: 'Vous voyez ce que l’hypothèse change — couverture, rupture, besoin non couvert, quantité à commander, date limite — sans que rien soit enregistré.',
+        resultat: 'Vous voyez ce que l’hypothèse change — état, couverture, rupture, quantité à commander, date limite — sans que rien soit enregistré.',
       },
       {
-        titre: 'Surveiller (onglet « Surveillance / Alertes »)',
+        titre: 'Surveiller (onglet « Surveillance »)',
         etapes: [
-          'C’est exactement la liste « À commander » du plan d’achat : une ligne par référence, la première rupture la plus proche en tête, puis la date limite de commande.',
-          'Filtrez par fournisseur, proposition, plan non couvert ; cliquez une ligne pour la même fenêtre de détail qu’au plan d’achat.',
-          'Pour commander, passez par le plan d’achat (« Commander ») ou le clic droit du premier onglet.',
+          'C’est le tableau « À commander », déplacé du plan d’achat (27/10/2026) : une ligne par référence, la première rupture la plus proche en tête, puis la date limite de commande.',
+          'Filtrez par fournisseur, proposition, plan non couvert ; cliquez une ligne : la fenêtre de surveillance s’ouvre (la même qu’au plan d’achat).',
+          'Pas de bouton « Commander » pour l’instant : la proposition se génère au plan d’achat (« Régénérer »), ou passez par le clic droit du premier onglet.',
         ],
       },
     ],
     champs: [
-      /* --- Onglet « Stock projeté » : la liste ------------------------------ */
+      /* --- Onglet « Stock projeté » : les 21 colonnes ------------------------- */
       {
         nom: 'Référence',
         description:
-          'Le code de la référence. Comme filtre, une recherche sur le code. Dans la Surveillance, suivi de la désignation et du fournisseur ; l’icône ⤢ ouvre la fenêtre de détail.',
+          'Le code de la référence. Un clic sur la ligne entière ouvre la fenêtre du détail. Dans la Surveillance, suivi de la désignation et du fournisseur.',
+      },
+      { nom: 'Désignation', description: 'La désignation de la fiche article (« — » quand elle répète le code). Sur la ligne ↳.' },
+      { nom: 'Fournisseur', description: 'Le fournisseur principal de la fiche article. Sur la ligne ↳ ; comme filtre, la liste se cherche à la frappe.' },
+      { nom: 'ABC / XYZ', description: 'La classe ABC puis XYZ de la fiche article. La classe ABC fixe les jours de sécurité du moteur. Sur la ligne ↳.' },
+      {
+        nom: 'Stock disponible',
+        description: 'Les magasins comptés au MRP, hors quarantaine, hors lots bloqués, HORS RESTES (les restes sont dans « Restant constaté »).',
+        valeurs: 'kg',
       },
       {
-        nom: 'Désignation',
-        description: 'La désignation de la fiche article (« — » quand elle répète le code). Elle passe la première sur la ligne ↳ quand la place manque.',
+        nom: 'Sur machines',
+        description: 'Le fil sur les métiers au dernier constat, quel que soit son âge, hors restes et hors lots bloqués.',
+        valeurs: 'kg',
       },
       {
-        nom: 'Disponible',
-        description:
-          'Stock projeté : les magasins comptés au plan, hors quarantaine, hors magasins exclus du plan, lots bloqués retirés et HORS RESTES (les restes sont dans « Restant »). Surveillance : le disponible compté du moteur, restes compris — magasins comptés + fil sur métiers.',
-        valeurs: 'kg (source : moteur, magasin compté − restes en magasin)',
-      },
-      {
-        nom: 'Sur machine',
-        description:
-          'Le fil sur les machines au dernier constat, quel que soit son âge, lots bloqués exclus, HORS RESTES chargés (comptés dans « Restant »). Dans la fenêtre : tout le fil compté sur machine.',
-        valeurs: 'kg (source : moteur, machine_etat au dernier constat)',
-      },
-      {
-        nom: 'Restant',
-        description:
-          'Les restes que le moteur compte : lots de catégorie RESTES non bloqués, en magasin compté ou chargés sur machine. Comptés une seule fois : ils ne sont ni dans « Disponible » ni dans « Sur machine ».',
-        valeurs: 'kg (source : moteur)',
+        nom: 'Restant constaté',
+        description: 'Les lots de catégorie RESTES, en magasin compté ou chargés sur métier. Comptés une seule fois.',
+        valeurs: 'kg',
       },
       {
         nom: 'Arrivages',
         description:
-          'Les arrivages que le moteur compte à leur date dans l’horizon : lignes de bon validé, envoyé ou livré partiellement, fil en route à sa date prévue de disponibilité. Au survol, le prochain. Un bon ou un transfert en retard ou sans date, un bon non validé, l’import sans bon n’y sont pas. Dans la projection : les arrivages comptés depuis la rangée précédente.',
-        valeurs: 'kg (source : moteur, arrivages comptés)',
-      },
-      {
-        nom: 'Stock total projeté',
-        description:
-          'Disponible + Sur machine + Restant + Arrivages : tout ce que le moteur compte pour couvrir le plan sur l’horizon, sans aucun recouvrement (la somme des trois premières colonnes est exactement le disponible compté du moteur).',
+          'Les bons validés et les transferts en route DATÉS dans l’horizon, comptés à leur date. Le non daté (en retard, sans date, import sans bon, bon non validé) n’est pas compté : il est listé dans la fenêtre.',
         valeurs: 'kg',
       },
       {
-        nom: 'Besoin jusqu’à livraison',
-        description:
-          'Le PLAN DATÉ des jours [aujourd’hui, aujourd’hui + délai fournisseur[ — ce que le stock d’aujourd’hui doit servir avant qu’une commande passée ce jour puisse arriver (le jour d’arrivée est exclu : son arrivage compte avant son plan). Lu sur la projection journalière du moteur. En orange quand il dépasse le stock compté d’aujourd’hui.',
-        valeurs: 'kg (source : moteur, plan jour par jour)',
+        nom: 'Stock projeté',
+        description: 'Stock disponible + Sur machines + Restant constaté + Arrivages : toutes les ressources projetées, sans double compte.',
+        valeurs: 'kg',
       },
       {
-        nom: 'Couverture planifiée',
+        nom: 'Besoin jusqu’à réception',
         description:
-          'Les jours couverts à partir d’aujourd’hui, jusqu’à la veille de la première rupture du plan (0 : rupture aujourd’hui). « horizon » : aucune rupture jusqu’à la fin du plan en service. En rouge : plan non couvert ; en orange : sous la sécurité. Au survol, la cause en une date.',
-        valeurs: 'jours (source : moteur, jours_couverture)',
+          'Le PLAN DATÉ d’aujourd’hui jusqu’à la date de réception proposée (exclue). « — » sans réception proposée. Dans la fenêtre, suivi de ce que couvre une commande : le plan des N jours de sa fenêtre.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Couverture actuelle',
+        description:
+          'R − aujourd’hui : les jours que couvre le stock projeté avec le plan daté et les arrivages datés, jusqu’à la première rupture R. « > N j » : aucune rupture sur l’horizon du plan (N jours). Une mesure, jamais une décision.',
+        valeurs: 'jours',
+      },
+      {
+        nom: 'Cible',
+        description: 'La couverture cible de l’article : 30 × la couverture cible de la fiche (mois). « non définie » : aucune proposition (signal « Cible non définie »).',
+        valeurs: 'jours',
+      },
+      {
+        nom: 'Écart cible',
+        description: 'Couverture actuelle − cible. En rouge quand il est négatif : la couverture est sous la cible.',
+        valeurs: 'jours',
+      },
+      {
+        nom: '1re rupture projetée',
+        description: 'R : le premier jour où le solde projeté passe sous zéro, propositions non comptées. Sur la ligne ↳.',
+        valeurs: 'date',
+      },
+      {
+        nom: 'Délai',
+        description: 'Le délai de livraison retenu : celui du fournisseur, sinon le paramètre P_DelaiDefaut (au survol, sa source).',
+        valeurs: 'jours',
+      },
+      {
+        nom: 'Date réception proposée',
+        description:
+          'D = R − C, C jours avant la rupture ; si cette date est déjà trop proche, la 1re réception possible (aujourd’hui + délai), marquée « en retard ». Sur la ligne ↳.',
+        valeurs: 'date',
       },
       {
         nom: 'À commander',
         description:
-          'La quantité de la première proposition du moteur — celle de l’onglet « À commander » du plan d’achat, que « Commander » enregistre. En rouge quand sa date limite de commande est atteinte ou dépassée. « — » : rien à commander.',
-        valeurs: 'kg (source : moteur, 1re proposition)',
+          'La quantité Q de la première proposition du moteur : Q0 (besoin net de la fenêtre) + X (sécurité) + arrondi fournisseur. « — » : rien à commander. C’est la proposition que « Régénérer » enregistre au plan d’achat.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Unité / palette',
+        description: 'La quantité à commander en palettes, quand le conditionnement de l’article est connu (bobines par palette × poids de bobine) ; sinon « — ». Pour information.',
+        valeurs: 'palettes',
       },
       {
         nom: 'Montant commande',
         description:
-          'À commander × le prix d’achat estimé — LE MÊME prix que la proposition du plan d’achat : dernier achat chez le fournisseur, sinon catalogue au taux du jour, sinon CMUP (au survol, la source). Masqué selon votre grille de droits, comme les montants du plan d’achat ; au CMUP, masqué à qui ne voit pas le CMUP.',
+          'À commander × le prix estimé, LE MÊME calcul qu’au plan d’achat : dernier achat chez le fournisseur, sinon catalogue au taux du jour, sinon CMUP (au survol, la source). Masqué selon votre grille de droits.',
         valeurs: 'MAD',
       },
-      { nom: 'Fournisseur', description: 'Le fournisseur de la fiche article. Comme filtre, la liste se cherche à la frappe.' },
       {
-        nom: 'Délai (j)',
-        description: 'Le délai de livraison retenu (celui du fournisseur, sinon P_DelaiDefaut) : D − délai donne la date limite de commande.',
-        valeurs: 'jours',
-      },
-      {
-        nom: '1re rupture',
-        description:
-          'Le premier jour où le plan n’est plus couvert (aucune : couvert sur tout l’horizon). Dans la Surveillance, en rouge quand il tombe avant aujourd’hui + délai : une commande passée maintenant arrivera trop tard.',
-        valeurs: 'date (source : moteur)',
-      },
-      {
-        nom: 'Date limite de commande',
-        description: 'La date limite de commande de la première proposition : D − délai fournisseur. En rouge une fois atteinte.',
-        valeurs: 'date (source : moteur)',
-      },
-      { nom: 'ABC / XYZ', description: 'La classe ABC puis XYZ de la fiche article. La classe ABC fixe les jours de sécurité du moteur.' },
-      { nom: 'État', description: 'Filtre : l’état au moteur — Plan non couvert, Sous la sécurité, Couvert.', valeurs: 'Plan non couvert · Sous la sécurité · Couvert' },
-      { nom: 'Classe ABC', description: 'Filtre : la classe ABC de la fiche article.' },
-      /* --- Onglet « Surveillance / Alertes » : la liste « À commander » ----- */
-      {
-        nom: 'Couvert jusqu’au',
-        description:
-          'Le dernier jour où le solde projeté couvre le plan, la veille de la première rupture. « tout l’horizon » : aucune rupture jusqu’à la fin du plan. « non couvert » : la rupture est dès aujourd’hui.',
+        nom: 'Avant le',
+        description: 'La date limite de commande : la date de besoin (R − C) moins le délai fournisseur. En rouge une fois atteinte ou dépassée.',
         valeurs: 'date',
       },
       {
-        nom: 'Prochain arrivage',
-        description: 'Le premier arrivage COMPTÉ et ses kilos (bon validé daté, transfert en route à sa date prévue de disponibilité).',
+        nom: 'État',
+        description:
+          'L’état au moteur, le plus grave l’emporte : 1. RUPTURE INÉVITABLE — la 1re rupture tombe avant aujourd’hui + délai, aucune commande passée aujourd’hui n’arrive à temps ; 2. SOUS SÉCURITÉ — le point bas passe sous le seuil de sécurité (le plan des S jours suivants) avant aujourd’hui + délai ; 3. SOUS CIBLE — la couverture actuelle est sous la cible ; 4. COUVERT — la couverture atteint la cible (ou aucune rupture sur l’horizon). Au survol, la raison en une phrase chiffrée. Comme filtre : les mêmes quatre états.',
+        valeurs: 'Rupture inévitable · Sous sécurité · Sous cible · Couvert',
+      },
+      { nom: 'Classe ABC', description: 'Filtre : la classe ABC de la fiche article. Dans la fenêtre : la classe, son rang et le pourcentage cumulé de la valeur consommée.' },
+      /* --- La fenêtre du détail ------------------------------------------------ */
+      { nom: 'Stock total', description: 'Tout le stock physique de la référence, magasins et métiers, compté ou non (quarantaine, lots bloqués, magasins hors plan compris).', valeurs: 'kg' },
+      { nom: 'Sur métiers', description: 'Le fil monté sur les métiers, pas encore tissé, au dernier constat (lots bloqués exclus).', valeurs: 'kg' },
+      {
+        nom: 'Disponible hors quarantaine',
+        description: 'Le stock compté du moteur aujourd’hui : magasins comptés + métiers + restes, hors quarantaine et lots bloqués.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Stock à la réception',
+        description: 'Le solde projeté au soir de la veille de la réception proposée, avant la commande proposée. Négatif : le plan n’est pas couvert jusqu’à la réception.',
+        valeurs: 'kg',
+      },
+      { nom: 'Délai fournisseur', description: 'Le délai retenu par le calcul et sa source : le fournisseur, sinon P_DelaiDefaut (« simulation » dans l’espace Simulation).', valeurs: 'jours' },
+      { nom: 'Couverture d’une commande', description: 'N : la durée de besoin qu’une commande couvre — celle du fournisseur, sinon P_MargeJours (30 jours). Elle fixe la QUANTITÉ.', valeurs: 'jours' },
+      { nom: 'Prix en devise', description: 'Le prix que la proposition du plan d’achat porte dans la devise du fournisseur (le prix du catalogue), et la source du prix retenu en MAD.', valeurs: 'devise/kg' },
+      { nom: 'Minimum / multiple', description: 'Le minimum de commande et le multiple d’achat de la fiche (ou la palette si « Arrondi à la palette pleine »), appliqués à Q0 + X.' },
+      { nom: 'Montant', description: 'La quantité à commander × le prix estimé, en MAD et dans la devise du fournisseur. Masqué selon vos droits.', valeurs: 'MAD' },
+      { nom: 'Couverture cible', description: 'C : la couverture souhaitée au moment de la réception, en jours (fiche article). Elle fixe la DATE de la réception normale.', valeurs: 'jours' },
+      { nom: 'Jours de sécurité', description: 'S : les jours de sécurité de la classe ABC (P_SecuriteA, B, C) ; sans classe, la plus longue des trois. Une hypothèse de la Simulation peut les remplacer.', valeurs: 'jours' },
+      {
+        nom: 'Stock minimum',
+        description: 'Le stock minimum de la fiche : un garde-fou, « respecté » ou « franchi le … » (le point bas passe dessous avant aujourd’hui + délai : vérifier le plan). Jamais une quantité.',
+        valeurs: 'kg',
+      },
+      { nom: 'Plan / mois', description: 'Le plan de l’horizon ramené à un mois de 30 jours. Un indicateur : le calcul ne l’utilise pas.', valeurs: 'kg' },
+      { nom: 'Réel / mois', description: 'La consommation réelle, moyenne des 12 mois pleins du grand livre de la consommation. Un constat du passé : le moteur ne la lit pas.', valeurs: 'kg' },
+      {
+        nom: 'Calcul de la quantité',
+        description:
+          'R (rupture), D (réception) et pourquoi, la fenêtre couverte, le plan de la fenêtre − le reste au début − les arrivages datés de la fenêtre = Q0 ; + X, la sécurité (le creux le plus bas sous le seuil dans le délai, 1re proposition seulement) ; + l’arrondi (minimum, multiple) = la quantité à commander ; le stock après réception ; « À commander avant le ».',
+      },
+      { nom: 'Valeur réelle 12 mois', description: 'La valeur consommée des 12 mois pleins (grand livre de la consommation), qui classe l’article en ABC. Masquée selon vos droits.', valeurs: 'MAD' },
+      { nom: 'Classe XYZ', description: 'La régularité du besoin (X régulier, Y variable, Z erratique) et la politique d’approvisionnement qui en découle.' },
+      { nom: 'Sourcing', description: 'Le nombre de sources (fournisseurs) de l’article et son risque : mono source ou multi source.' },
+      { nom: 'Groupe d’équivalence', description: 'Le groupe d’équivalence de l’article et le nombre de fournisseurs du groupe ; « aucun » sans groupe.' },
+      { nom: 'Dernière sortie', description: 'La date de la dernière sortie de stock de l’article.', valeurs: 'date' },
+      { nom: 'Sans mouvement depuis', description: 'Les jours écoulés depuis le dernier mouvement de l’article.', valeurs: 'jours' },
+      { nom: 'Dormant', description: 'Oui quand un magasin garde du stock de l’article sans mouvement depuis plus que P_SeuilDormant.' },
+      {
+        nom: 'Où se trouve la matière',
+        description:
+          'La cascade, chaque total la somme exacte des lignes au-dessus : magasins comptés (hors restes) + sur métiers + restes constatés = disponible hors quarantaine ; + arrivages datés avant la réception proposée − besoin jusqu’à réception = stock à la réception. Puis, hors calcul : les arrivages datés après, les arrivages non comptés (avec leur raison), la quarantaine et les lots bloqués.',
+      },
+      { nom: 'Besoins du plan', description: 'Onglet : le besoin du plan par qualité, mois par mois (douze mois), avec le kg/m² de la recette, le total, et la ligne « Besoin du plan » (la photo du MRP).' },
+      { nom: 'Projection', description: 'Onglet : la courbe du solde projeté jour par jour (le seuil de sécurité en tirets) et les événements datés (arrivage, rupture, reprise, passage sous la sécurité, aujourd’hui + délai, fins de mois).' },
+      { nom: 'Lots', description: 'Onglet : les lots en stock de la référence, par magasin, avec leur statut, leur catégorie et leur date d’entrée.' },
+      { nom: 'Sur les métiers', description: 'Onglet : le fil sur chaque métier au dernier constat, compté ou non, avec l’âge du constat.' },
+      { nom: 'Historique', description: 'Onglet : les vingt derniers mouvements de la référence (avec le droit de lire les mouvements).' },
+      /* --- Onglet « Surveillance » : le tableau « À commander » ---------------- */
+      { nom: 'Disponible', description: 'Surveillance : le disponible compté du moteur, restes compris — magasins comptés + fil sur métiers.', valeurs: 'kg' },
+      {
+        nom: 'Couvert jusqu’au',
+        description: 'Le dernier jour où le solde projeté couvre le plan, la veille de la première rupture. « tout l’horizon » : aucune rupture jusqu’à la fin du plan. « non couvert » : la rupture est dès aujourd’hui.',
+        valeurs: 'date',
+      },
+      { nom: 'Prochain arrivage', description: 'Le premier arrivage COMPTÉ et ses kilos (bon validé daté, transfert en route à sa date prévue de disponibilité).' },
+      {
+        nom: '1re rupture',
+        description: 'Surveillance : le premier jour où le plan n’est plus couvert. En rouge quand il tombe avant aujourd’hui + délai : une commande passée maintenant arrivera trop tard.',
+        valeurs: 'date',
       },
       {
         nom: 'Plan non couvert',
-        description:
-          'Les kilos du plan que le solde ne peut pas servir sur l’horizon, perdus jour par jour : ni reportés, ni rattrapés (le solde ne descend jamais sous zéro). Comme filtre : avant ou après aujourd’hui + délai, ou couvert sur l’horizon.',
+        description: 'Surveillance : les kilos du plan que le solde ne peut pas servir sur l’horizon. Comme filtre : avant ou après aujourd’hui + délai, ou couvert sur l’horizon.',
         valeurs: 'kg',
       },
-      { nom: 'Délai', description: 'Le délai de livraison du fournisseur, en jours (au survol, sa source).', valeurs: 'jours' },
       {
         nom: 'Proposition',
-        description:
-          'La quantité de la première proposition du moteur, et son équivalent en palettes ordinaires de la fiche (pour information). « rien » : aucune proposition — au survol, la raison.',
+        description: 'Surveillance : la quantité de la première proposition du moteur, et son équivalent en palettes ordinaires de la fiche. « rien » : aucune proposition — au survol, la raison.',
         valeurs: 'kg',
       },
-      { nom: 'Avant le', description: 'La date limite de commande de la première proposition (D − délai). En rouge une fois dépassée, en orange à 7 jours ou moins.', valeurs: 'date' },
-      /* --- La fenêtre de détail : situation ----------------------------------- */
-      {
-        nom: 'Délai fournisseur',
-        description: 'Le délai retenu par le calcul et sa source : le fournisseur, sinon le paramètre global P_DelaiDefaut (« simulation » dans l’espace Simulation).',
-        valeurs: 'jours',
-      },
-      {
-        nom: 'Prix d’achat',
-        description: 'Le prix au kilo que la proposition du plan d’achat retiendrait, et sa source (dernier achat, catalogue au taux du jour, CMUP). Masqué selon vos droits.',
-        valeurs: 'MAD/kg',
-      },
-      { nom: 'Stock total', description: 'Tout le stock physique de la référence, compté ou non : magasins comptés, sur machine, quarantaine, bloqué, magasins hors plan.', valeurs: 'kg' },
-      { nom: 'Disponible (compté)', description: 'Ce que le moteur compte aujourd’hui : magasins comptés + fil sur machine, restes compris, lots bloqués exclus.', valeurs: 'kg' },
-      { nom: 'Disponible hors quarantaine', description: 'Les magasins comptés au plan seuls (hors quarantaine, hors magasins exclus, lots bloqués retirés, restes compris).', valeurs: 'kg' },
-      { nom: 'Arrivages prévus', description: 'Les arrivages comptés à leur date sur l’horizon (voir « Arrivages »).', valeurs: 'kg' },
-      { nom: 'Stock y compris arrivages', description: 'Le disponible compté + les arrivages comptés : le « Stock total projeté » de la liste.', valeurs: 'kg' },
-      {
-        nom: 'Seuil de sécurité',
-        description:
-          'La ligne de sécurité du moteur aujourd’hui : jours de sécurité de la classe ABC × plan moyen par jour sur la fenêtre de couverture à venir. Un seuil d’avenir, au plan — pas le stock minimum de la fiche.',
-        valeurs: 'kg',
-      },
-      { nom: 'Plan / mois', description: 'Le plan de l’horizon ramené à un mois de 30 jours, tel que le moteur le consomme (source : plan_mois_kg).', valeurs: 'kg' },
-      {
-        nom: 'Réel / mois',
-        description: 'La consommation RÉELLE, moyenne des 12 mois pleins glissants du grand livre de la consommation. Un constat du passé : le moteur ne la lit pas.',
-        valeurs: 'kg',
-      },
-      { nom: 'Montant de la commande', description: 'Comme « Montant commande » : à commander × prix d’achat. Masqué selon vos droits.', valeurs: 'MAD' },
-      /* --- La fenêtre de détail : approvisionnement ------------------------- */
-      { nom: 'Couverture d’une commande', description: 'Les jours que couvre une commande, F = D + couverture : celle du fournisseur, sinon P_MargeJours (30 jours pleins).', valeurs: 'jours' },
-      { nom: 'Jours de sécurité', description: 'Les jours de sécurité de la classe ABC (P_SecuriteA, B, C) ; sans classe, la plus longue des trois. Une hypothèse de la Simulation peut les remplacer.', valeurs: 'jours' },
-      { nom: 'Horizon du plan', description: 'La fin de l’horizon : la date de fin du plan en service, ou la fin de son dernier mois de besoin si elle va plus loin.' },
-      { nom: 'Minimum de commande', description: 'Le minimum de commande (MOQ) de la fiche, appliqué après le besoin théorique. « aucun » : pas de minimum.', valeurs: 'kg' },
-      { nom: 'Règle d’arrondi', description: 'L’arrondi VERS LE HAUT après le minimum : le multiple d’achat de la fiche, sinon la palette si « Arrondi à la palette pleine » est coché ; sinon pas d’arrondi.' },
-      { nom: 'Unité / palette', description: 'La palette ordinaire de la fiche (bobines × poids de bobine) et l’unité du catalogue : pour information, jamais une palette imposée.' },
-      {
-        nom: 'Stock minimum (fiche)',
-        description:
-          'Le stock minimum saisi sur la fiche article. UNE ALERTE, PAS UN TERME DU CALCUL (décision du 10/10/2026 : le plan d’achat suit le plan de production seul) ; la sécurité du calcul vient des jours de sécurité de la classe ABC.',
-        valeurs: 'kg',
-      },
-      {
-        nom: 'Couverture minimale',
-        description:
-          'La couverture minimale de la fiche, sinon le paramètre P_CouvMinMois. Une alerte : le moteur ne la lit pas (décision du 10/10/2026).',
-        valeurs: 'mois',
-      },
-      { nom: 'Seuil d’alerte', description: 'Le paramètre P_SeuilAlerte. Une alerte : le moteur ne le lit pas.', valeurs: 'jours' },
-      /* --- La fenêtre de détail : projection et résultat MRP --------------- */
-      {
-        nom: 'Projection chronologique',
-        description:
-          'Le tableau de la projection du moteur, par événements (aujourd’hui, arrivage, rupture, passage sous la sécurité, aujourd’hui + délai, fins de mois, fin de l’horizon) ou jour par jour. Chaque rangée cumule depuis la précédente.',
-      },
-      { nom: 'Date', description: 'Projection : le jour de la rangée (et, par événements, ce qui s’y passe).', valeurs: 'date' },
-      { nom: 'Stock début', description: 'Projection : le stock projeté de la rangée précédente (la première : le disponible compté d’aujourd’hui).', valeurs: 'kg' },
-      {
-        nom: 'Besoin planifié',
-        description:
-          'Projection : le PLAN DATÉ depuis la rangée précédente (kg du mois ÷ jours réels du mois, jour par jour) — un besoin au plan, jamais une consommation réelle.',
-        valeurs: 'kg',
-      },
-      { nom: 'Stock projeté', description: 'Projection : le solde du moteur en fin de journée, jamais négatif.', valeurs: 'kg' },
-      { nom: 'Sécurité', description: 'Projection : la ligne de sécurité du moteur ce jour-là.', valeurs: 'kg' },
-      { nom: 'Écart à la sécurité', description: 'Projection : stock projeté − sécurité ; en orange sous la sécurité.', valeurs: 'kg' },
-      {
-        nom: 'Besoin non couvert',
-        description: 'Le plan que le solde n’a pas pu servir — depuis la rangée précédente dans la projection, sur tout l’horizon dans le résultat MRP. Perdu, jamais reporté.',
-        valeurs: 'kg',
-      },
-      { nom: '1re date sous la sécurité', description: 'Résultat MRP : le premier jour où le solde projeté passe sous la sécurité.', valeurs: 'date' },
-      {
-        nom: 'Quantité proposée',
-        description: 'Résultat MRP : la quantité de la première proposition, après le minimum et l’arrondi. Elle se reconstitue dessous, au jour déterminant.',
-        valeurs: 'kg',
-      },
-      { nom: 'Disponible le (D)', description: 'D, la date de disponibilité de la commande : MAX(aujourd’hui + délai ; premier passage sous la sécurité).', valeurs: 'date' },
-      { nom: 'Prochaine proposition', description: 'La deuxième proposition du moteur, indicative : elle suppose la première commandée.' },
-      { nom: 'Montant', description: 'Résultat MRP : quantité proposée × prix d’achat. Masqué selon vos droits.', valeurs: 'MAD' },
       /* --- L'onglet « Simulation » ------------------------------------------- */
       { nom: 'Référence à simuler', description: 'La référence dont on essaie des hypothèses. Tapez au moins deux caractères.' },
+      { nom: 'Couverture cible (mois)', description: 'Simulation : une autre couverture cible C, en mois comme sur la fiche. Vide : celle de la fiche.', valeurs: 'mois, de 0 à 24' },
       { nom: 'Délai fournisseur (j)', description: 'Simulation : un autre délai fournisseur. Vide : celui du calcul réel (entre parenthèses).', valeurs: 'jours, de 0 à 730' },
       { nom: 'Couverture d’une commande (j)', description: 'Simulation : une autre couverture d’une commande. Vide : celle du calcul réel.', valeurs: 'jours, de 1 à 730' },
       { nom: 'Minimum de commande (kg)', description: 'Simulation : un autre minimum ; 0 = aucun minimum. Vide : celui de la fiche.', valeurs: 'kg' },
@@ -1477,13 +1469,10 @@ export const FICHES_STOCK: Sujet[] = [
       { nom: 'Simulé', description: 'Simulation : la valeur recalculée avec les hypothèses ; en couleur quand elle diffère du réel.' },
     ],
     regles: [
-      'UN SEUL MOTEUR (27/10/2026) : les trois onglets, la fenêtre de détail et la simulation lisent le moteur de couverture — les mêmes chiffres que l’onglet « À commander » du plan d’achat. Aucune formule de besoin n’est refaite à l’écran.',
-      'LE STOCK TOTAL PROJETÉ NE COMPTE RIEN DEUX FOIS : Disponible (hors restes) + Sur machine (hors restes) + Restant (les restes comptés) = le disponible compté du moteur ; + les arrivages comptés.',
-      'LES MOTS DU BESOIN : « Plan / mois » (le plan de l’horizon ramené à 30 jours), « Réel / mois » (la consommation réelle du grand livre, 12 mois pleins), « Besoin jusqu’à livraison » (le plan d’aujourd’hui à aujourd’hui + délai), « Besoin de couverture » (le plan sur la fenêtre [D, F[), « Besoin de réapprovisionnement » (le besoin théorique). Le moteur ne lit que le PLAN DATÉ.',
-      'La projection se fait jour par jour sur l’horizon du plan en service ; le solde ne descend jamais sous zéro. L’état se calcule SANS les propositions d’achat : une référence reste « plan non couvert » tant que la commande n’est pas validée et datée.',
-      'Le fil en route compte à sa date prévue de disponibilité au magasin destinataire ; en retard ou sans date (contrôle C66), il ne compte pas. Un bon en retard ne compte pas non plus (contrôle C28).',
-      'Le stock minimum, la couverture minimale et le seuil d’alerte de la fiche sont des ALERTES (décision du 10/10/2026) : ils ne changent ni la sécurité, ni la proposition.',
-      'LA SIMULATION N’ÉCRIT JAMAIS RIEN : ni stock, ni bon, ni proposition, ni journal. Ses hypothèses sont des entrées que le moteur reçoit déjà (arrivages datés, délai, couverture, sécurité, minimum, multiple) ; un arrivage simulé est classé par les règles des vrais (daté dans l’horizon : compté ; date passée : en retard, hors couverture). L’import en route sans bon n’a pas de date fiable : une hypothèse ne le date pas.',
+      ...REGLES_MOTEUR_V2,
+      'LE STOCK PROJETÉ NE COMPTE RIEN DEUX FOIS : Stock disponible (hors restes) + Sur machines (hors restes) + Restant constaté = le stock compté du moteur ; + les arrivages datés.',
+      'Les signaux ne se lisent que dans la fenêtre de détail : la liste ne porte que l’état.',
+      'LA SIMULATION N’ÉCRIT JAMAIS RIEN : ni stock, ni bon, ni proposition, ni journal. Ses hypothèses sont des entrées que le moteur reçoit déjà (arrivages datés, couverture cible, délai, couverture, sécurité, minimum, multiple) ; un arrivage simulé est classé par les règles des vrais. L’import en route sans bon n’a pas de date fiable : une hypothèse ne le date pas.',
       'Sont suivies les références qui ont une demande au plan, du stock ou un arrivage, même hors couverture.',
     ],
     messages: [
@@ -1497,11 +1486,11 @@ export const FICHES_STOCK: Sujet[] = [
       },
       {
         message: 'Requete invalide : délai de … j : entre 0 et 730 jours.',
-        cause: 'Une hypothèse de réglage hors bornes (délai, couverture de 1 à 730 j, sécurité de 0 à 365 j).',
+        cause: 'Une hypothèse de réglage hors bornes (délai, couverture de 1 à 730 j, sécurité de 0 à 365 j, couverture cible de 0 à 24 mois).',
       },
     ],
     liens: [
-      { route: '/plan-achat', libelle: 'Plan d’achat (onglet À commander)' },
+      { route: '/plan-achat', libelle: 'Plan d’achat' },
       { route: '/etat-stock', libelle: 'État des stocks' },
       { route: '/etats/stock', libelle: 'État des stocks imprimé' },
       { route: '/transferts', libelle: 'Transferts' },

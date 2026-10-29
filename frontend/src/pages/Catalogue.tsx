@@ -429,16 +429,15 @@ export function Catalogue() {
       champ: 'stock_min_kg',
       libelle: 'Stock minimum (kg)',
       type: 'nombre',
-      aide: 'Une alerte seulement : le plan d’achat suit le plan de production, le calcul ne lit pas ce minimum. Vide : aucun minimum.',
+      aide: 'Garde-fou : un signal « vérifier le plan », jamais une quantité de commande. Vide : aucun minimum.',
       section: 'Conditionnement et stockage',
     },
-    { champ: 'couverture_min_mois', libelle: 'Couverture minimale (mois)', type: 'nombre', section: 'Conditionnement et stockage' },
     {
-      champ: 'marge_securite_pct',
-      libelle: 'Marge de sécurité (%)',
+      champ: 'couverture_cible_mois',
+      libelle: 'Couverture cible (mois)',
       type: 'nombre',
       aide:
-        'Ancienne majoration du minimum calculé, qui n’existe plus : gardée sur la fiche, elle n’entre dans aucun calcul.',
+        'La couverture souhaitée au moment de la réception : le moteur déclenche la commande pour qu’elle arrive C jours avant la rupture. Obligatoire pour un article soumis au MRP ; jamais une quantité.',
       section: 'Conditionnement et stockage',
     },
     /* --- Achat ------------------------------------------------------- */

@@ -74,7 +74,8 @@ async fn par_le_moteur(state: &AppState, id: &str) -> AppResult<Option<(Value, V
                 .collect();
             (
                 json!({
-                    "plan_non_couvert": c["nb_plan_non_couvert"], "sous_securite": c["nb_sous_securite"],
+                    "rupture_inevitable": c["nb_rupture_inevitable"], "sous_securite": c["nb_sous_securite"],
+                    "sous_cible": c["nb_sous_cible"],
                     "total": c["nb_references"], "aujourdhui": c["nb_a_commander_aujourdhui"],
                 }),
                 Value::Array(detail),
@@ -135,8 +136,8 @@ const CATALOGUE: &[Question] = &[
         // CALCULEE PAR LE MOTEUR DE COUVERTURE (27/10/2026) : voir `par_le_moteur`.
         resume: MOTEUR,
         detail: None,
-        gabarit: "{plan_non_couvert} reference(s) au plan non couvert sur l'horizon, \
-                  {sous_securite} sous la securite, sur {total} suivies ; \
+        gabarit: "{rupture_inevitable} reference(s) en rupture inevitable, \
+                  {sous_securite} sous la securite, {sous_cible} sous la cible, sur {total} suivies ; \
                   {aujourdhui} a commander aujourd'hui.",
         lien: "/stock",
     },

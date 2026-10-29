@@ -182,8 +182,9 @@ pub async fn risques_rupture(
 
     // LA FRISE EST CELLE DU MOTEUR DE COUVERTURE (27/10/2026) : ses jours,
     // regroupes par mois — plan du mois, arrivages comptes, solde en fin de mois,
-    // securite ; un mois est PLAN_NON_COUVERT si une part de son plan n'est pas
-    // couverte, SOUS_SECURITE si le solde passe sous la securite. La MARGE DE
+    // seuil de securite NS ; un mois est PLAN_NON_COUVERT si une part de son plan
+    // n'est pas couverte, SOUS_SECURITE si le point bas passe sous NS
+    // (`couverture::statut_mois`). La MARGE DE
     // DECISION est le temps qui reste avant la date limite de commande de la
     // premiere proposition (negative : deja depassee) ; sans proposition, avant le
     // premier passage sous la securite, delai deduit.
@@ -191,14 +192,15 @@ pub async fn risques_rupture(
     let auj = etats.aujourdhui;
     let mut risques: Vec<(i64, u8, i64, Value)> = Vec::new();
     for e in etats.suivies().filter(|e| e.en_tension()) {
-        let nb_rupture = e.mois.iter().filter(|m| m.statut == super::couverture::statut::PLAN_NON_COUVERT).count();
-        let nb_tendu = e.mois.iter().filter(|m| m.statut == super::couverture::statut::SOUS_SECURITE).count();
+        use super::couverture::statut_mois;
+        let nb_rupture = e.mois.iter().filter(|m| m.statut == statut_mois::PLAN_NON_COUVERT).count();
+        let nb_tendu = e.mois.iter().filter(|m| m.statut == statut_mois::SOUS_SECURITE).count();
         let premier_rupture = e
             .mois
             .iter()
-            .find(|m| m.statut == super::couverture::statut::PLAN_NON_COUVERT)
+            .find(|m| m.statut == statut_mois::PLAN_NON_COUVERT)
             .map(|m| m.annee_mois.clone());
-        let premier_risque = e.mois.iter().find(|m| m.statut != super::couverture::statut::COUVERT);
+        let premier_risque = e.mois.iter().find(|m| m.statut != statut_mois::COUVERT);
         let marge = match (e.date_limite_commande, e.premier_passage_securite) {
             (Some(limite), _) => Some((limite - auj).num_days()),
             (None, Some(sous)) => Some((sous - auj).num_days() - e.delai_j),
@@ -837,8 +839,9 @@ pub async fn supervision(
     )
     .await?;
     // LES TROIS INDICATEURS DE COUVERTURE VIENNENT DU MOTEUR (27/10/2026) : taux de
-    // rupture (plan non couvert sur l'horizon), taux de disponibilite (couvert sur
-    // tout l'horizon) sur les references suivies, couverture mediane (jours
+    // rupture (une rupture prevue sur l'horizon), taux de disponibilite (etat
+    // COUVERT : la couverture atteint la cible) sur les references suivies,
+    // couverture mediane (jours
     // couverts jusqu'a la premiere rupture, sinon tout l'horizon) sur celles qui
     // ont un plan. La vue ne les porte plus.
     let etats = super::couverture::etats(&state.db).await?;
@@ -863,7 +866,7 @@ pub async fn supervision(
     // laisse vides, la route les calcule (meme regle que le tableau de bord).
     let (economies, nb_opportunites) = total_economies(&economies_au_plan(&state.db, &etats).await?);
     let du_moteur = [
-        ("taux_rupture", part(&|e| e.statut == super::couverture::statut::PLAN_NON_COUVERT)),
+        ("taux_rupture", part(&|e| e.premiere_rupture.is_some())),
         ("taux_disponibilite", part(&|e| e.statut == super::couverture::statut::COUVERT)),
         ("couverture_mediane", mediane),
         ("economies", (nb_opportunites > 0).then_some(economies)),
@@ -1029,10 +1032,10 @@ pub async fn etat_stock(
     let etats = super::couverture::etats(&state.db).await?;
     etats.enrichir(&mut valeur, "statut");
     // LE MINIMUM AFFICHE EST UN SEUIL D'AVENIR, AU PLAN (27/10/2026) : la securite du
-    // jour du moteur (jours de securite de la classe ABC x plan a venir). L'ancien
-    // minimum dynamique lisait le « plus grand » du reel et du plan : il est
-    // supprime. « Sous le minimum » = le disponible compte par le moteur sous cette
-    // securite, aujourd'hui.
+    // jour du moteur (NS : le plan date des S jours suivants, S selon la classe ABC).
+    // « Sous le minimum » = le disponible compte par le moteur sous cette securite,
+    // aujourd'hui. (Le stock minimum de la fiche, garde-fou du moteur v2, est le
+    // signal SOUS_MINIMUM : fenetre de detail et controle C68.)
     if let Some(a) = valeur.as_array_mut() {
         for l in a.iter_mut() {
             let code = l["code_reference"].as_str().unwrap_or_default().to_string();
@@ -1056,7 +1059,7 @@ pub async fn etat_stock(
 }
 
 /// Trie un tableau de lignes enrichies par le moteur : le plus grave d'abord
-/// (plan non couvert, sous la securite, couvert), puis la rupture la plus proche,
+/// (rupture inevitable, sous la securite, sous la cible, couvert), puis la rupture la plus proche,
 /// puis la cle secondaire (texte).
 fn trier_par_etat(v: &mut Value, secondaire: &str) {
     if let Some(a) = v.as_array_mut() {
@@ -1080,7 +1083,7 @@ fn tronquer(v: &mut Value, limite: i64) {
 /// du stock ou un arrivage), ses ressources comptees, sa couverture (1re rupture,
 /// couvert jusqu'au, plan non couvert), sa premiere proposition, et ce qui est
 /// compte a part — les memes champs que l'onglet « A commander ». `?statut=`
-/// filtre sur l'etat du moteur (PLAN_NON_COUVERT, SOUS_SECURITE, COUVERT).
+/// filtre sur l'etat du moteur (RUPTURE_INEVITABLE, SOUS_SECURITE, SOUS_CIBLE, COUVERT).
 pub async fn stock_projete(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -1137,12 +1140,13 @@ pub async fn stock_projete(
             l
         })
         .collect();
+    // LE TRI PAR DEFAUT DU STOCK PROJETE (27/10/2026) : la gravite de l'etat, puis
+    // « Avant le » (la date limite de commande ; sans date, apres).
     lignes.sort_by(|x, y| {
         let rang = |l: &Value| super::couverture::rang_statut(l["statut"].as_str().unwrap_or(""));
-        let jours = |l: &Value| l["jours_couverture"].as_i64().unwrap_or(i64::MAX);
-        let securite = |l: &Value| l["premier_passage_securite"].as_str().unwrap_or("9999").to_string();
+        let avant_le = |l: &Value| l["date_limite_commande"].as_str().unwrap_or("9999").to_string();
         let code = |l: &Value| l["code_reference"].as_str().unwrap_or("").to_string();
-        (rang(x), jours(x), securite(x), code(x)).cmp(&(rang(y), jours(y), securite(y), code(y)))
+        (rang(x), avant_le(x), code(x)).cmp(&(rang(y), avant_le(y), code(y)))
     });
     let mut valeur = Value::Array(lignes);
     tronquer(&mut valeur, f.limite());
@@ -1209,15 +1213,16 @@ pub async fn substitutions(
     State(state): State<AppState>,
     user: Utilisateur,
 ) -> AppResult<Json<Value>> {
-    // LA TENSION VIENT DU MOTEUR (27/10/2026) : une reference principale au plan
-    // non couvert (l'ancien RUPTURE / CRITIQUE), avec ses substituts en stock.
+    // LA TENSION VIENT DU MOTEUR (27/10/2026) : une reference principale en
+    // rupture inevitable (moteur v2 ; l'ancien RUPTURE / CRITIQUE), avec ses
+    // substituts en stock.
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
     let etats = super::couverture::etats(&state.db).await?;
     let rows = sqlx::query("SELECT * FROM v_substitution_dispo").fetch_all(&state.db).await?;
     let mut lignes: Vec<Value> = Vec::new();
     for mut l in lignes_en_json(&rows).as_array().cloned().unwrap_or_default() {
         let principale = l["ref_principale"].as_str().and_then(|c| etats.get(c));
-        let Some(p) = principale.filter(|p| p.statut == super::couverture::statut::PLAN_NON_COUVERT) else {
+        let Some(p) = principale.filter(|p| p.statut == super::couverture::statut::RUPTURE_INEVITABLE) else {
             continue;
         };
         let substitut = l["ref_substitut"].as_str().and_then(|c| etats.get(c));
@@ -1234,22 +1239,10 @@ pub async fn substitutions(
     Ok(Json(valeur))
 }
 
-/// `GET /api/plan-achat/stocks-minimums` — LES STOCKS MINIMUMS A REVOIR (regle 9,
-/// 09/10/2026) : ceux qui depassent trois mois du besoin mensuel du plan, avec
-/// une valeur proposee (couverture minimale en mois x besoin mensuel). Les 793 t
-/// de minimums venaient du classeur ; les achats les revoient ici.
-pub async fn stocks_minimums(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
-    lister(
-        &state,
-        &user,
-        module::PLAN_ACHAT,
-        // La version de la fiche : appliquer la proposition la modifie (verrou, 19/10/2026).
-        "SELECT v.*, r.version FROM v_stocks_minimums_a_revoir v
-           JOIN reference r ON r.code_reference = v.code_reference
-          ORDER BY v.stock_min_kg - COALESCE(v.valeur_proposee_kg, 0) DESC",
-    )
-    .await
-}
+// `GET /api/plan-achat/stocks-minimums` (les stocks minimums a revoir, regle 9
+// du 09/10/2026) est retiree le 27/10/2026 (2026-10-27l) avec sa vue et son
+// ecran, jamais monte : le stock minimum n'est plus qu'un garde-fou (un signal),
+// jamais une quantite ; la couverture cible du MRP vit sur la fiche article.
 
 #[derive(Deserialize)]
 pub struct DetailProposition {
@@ -1353,7 +1346,9 @@ pub async fn kpi_plan_achat(
     let (mut sortie, date_calcul) = match fige {
         // Un releve fige avant le 27/10/2026 parle l'ancien calcul (ruptures,
         // critiques…) : il se recalcule une fois au moteur.
-        Some(x) if x.0["globaux"].get("plan_non_couvert").is_some() => x,
+        // Un releve fige avant le moteur v2 (27/10/2026, soir) parle encore de
+        // « plan non couvert » : recalcule une fois, lui aussi.
+        Some(x) if x.0["globaux"].get("rupture_inevitable").is_some() => x,
         _ => figer_kpi_plan_achat(&state.db, &user).await?,
     };
     if let Some(o) = sortie.as_object_mut() {
@@ -1419,9 +1414,12 @@ pub async fn figer_kpi_plan_achat(db: &crate::db::Db, user: &Utilisateur) -> App
     if let Some(o) = globaux.as_object_mut() {
         for (cle, champ) in [
             ("references", "nb_references"),
-            ("plan_non_couvert", "nb_plan_non_couvert"),
+            ("rupture_inevitable", "nb_rupture_inevitable"),
             ("sous_securite", "nb_sous_securite"),
+            ("sous_cible", "nb_sous_cible"),
             ("couvert", "nb_couvert"),
+            ("cible_non_definie", "nb_cible_non_definie"),
+            ("sous_minimum", "nb_sous_minimum"),
             ("a_commander_aujourdhui", "nb_a_commander_aujourdhui"),
             ("classe_a_en_rupture", "nb_classe_a_en_rupture"),
         ] {
@@ -1460,8 +1458,8 @@ pub async fn figer_kpi_plan_achat(db: &crate::db::Db, user: &Utilisateur) -> App
                 ROUND(SUM(pa.qte_a_commander_kg), 2)           AS quantite_kg,
                 ROUND(SUM(pa.montant_estime_mad), 2)           AS montant_mad,
                 COUNT(*) FILTER (WHERE pa.tier = 'TIER 1')              AS nb_tier1,
-                -- Les references au plan non couvert, au sens du moteur.
-                COUNT(*) FILTER (WHERE pa.statut = 'PLAN_NON_COUVERT')  AS nb_plan_non_couvert
+                -- Les references en rupture inevitable, au sens du moteur v2.
+                COUNT(*) FILTER (WHERE pa.statut = 'RUPTURE_INEVITABLE')  AS nb_rupture_inevitable
            FROM pa_kpi pa
            JOIN fournisseur f ON f.code_fournisseur = pa.code_fournisseur
           -- REGROUPER SUR LA CLE DU FOURNISSEUR, pas seulement sur le code
@@ -1667,18 +1665,20 @@ pub async fn risques_sourcing(
     .await?;
     let mut valeur = lignes_en_json(&lignes);
     // L'ETAT VIENT DU MOTEUR (27/10/2026), et l'action recommandee le suit : la
-    // meme grille qu'avant, ou « rupture ou critique » se lit desormais « plan
-    // non couvert » et « attention » « sous la securite ».
+    // meme grille qu'avant, ou « rupture ou critique » se lit desormais « rupture
+    // inevitable » et « attention » « sous la securite » ou « sous la cible ».
     super::couverture::etats(&state.db).await?.enrichir(&mut valeur, "statut");
     if let Some(a) = valeur.as_array_mut() {
         for l in a.iter_mut() {
             let mono = l["nb_sources"].as_i64().unwrap_or(1) <= 1;
             let classe_a = l["classe_abc"].as_str() == Some("A");
             let action = match l["statut"].as_str() {
-                Some(super::couverture::statut::PLAN_NON_COUVERT) if mono => "Commander et qualifier une seconde source",
-                Some(super::couverture::statut::PLAN_NON_COUVERT) => "Commander cette semaine",
+                Some(super::couverture::statut::RUPTURE_INEVITABLE) if mono => "Commander et qualifier une seconde source",
+                Some(super::couverture::statut::RUPTURE_INEVITABLE) => "Commander cette semaine",
                 _ if mono && classe_a => "Qualifier une seconde source sous 30 jours",
-                Some(super::couverture::statut::SOUS_SECURITE) => "Surveiller, commander au prochain point",
+                Some(super::couverture::statut::SOUS_SECURITE | super::couverture::statut::SOUS_CIBLE) => {
+                    "Surveiller, commander au prochain point"
+                }
                 _ => "Aucune action",
             };
             if let Some(o) = l.as_object_mut() {
@@ -1757,8 +1757,8 @@ pub async fn cockpit_analyse(
                 etats.suivies().filter(|e| e.classe_abc.as_deref().map(str::trim) == Some(*classe)).collect();
             (!de_la_classe.is_empty()).then(|| {
                 let n = |s: &str| de_la_classe.iter().filter(|e| e.statut == s).count();
-                json!({ "classe_abc": classe, "en_alerte": n(etat::PLAN_NON_COUVERT),
-                        "attention": n(etat::SOUS_SECURITE), "ok": n(etat::COUVERT) })
+                json!({ "classe_abc": classe, "en_alerte": n(etat::RUPTURE_INEVITABLE),
+                        "attention": n(etat::SOUS_SECURITE) + n(etat::SOUS_CIBLE), "ok": n(etat::COUVERT) })
             })
         })
         .collect();
@@ -1801,9 +1801,9 @@ pub async fn cockpit_analyse(
             o
         })
         .collect();
-    let plan_non_couvert: Vec<String> = etats
+    let en_rupture: Vec<String> = etats
         .suivies()
-        .filter(|e| e.statut == etat::PLAN_NON_COUVERT)
+        .filter(|e| e.statut == etat::RUPTURE_INEVITABLE)
         .map(|e| e.code_reference.clone())
         .collect();
 
@@ -1853,8 +1853,8 @@ pub async fn cockpit_analyse(
            (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc IS NULL)    AS nb_non_classees,
            (SELECT ROUND(AVG(ABS(ecart_pct)), 2) FROM v_archive_reception_courante
              WHERE ecart_pct IS NOT NULL)                                             AS ecart_pesee_moyen_pct,
-           -- Le budget des propositions ouvertes des references au plan non
-           -- couvert (moteur de couverture, 27/10/2026).
+           -- Le budget des propositions ouvertes des references en rupture
+           -- inevitable (moteur de couverture v2, 27/10/2026).
            (SELECT ROUND(COALESCE(SUM(COALESCE(montant_total_mad, quantite_suggeree_kg * prix_estime_mad)), 0), 2)
               FROM plan_achat
              WHERE statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE')
@@ -1864,7 +1864,7 @@ pub async fn cockpit_analyse(
                          / NULLIF(SUM(valeur_mad), 0), 1)
               FROM stock_magasin)                                                     AS pct_valeur_dormante",
     )
-    .bind(&plan_non_couvert)
+    .bind(&en_rupture)
     .fetch_all(&state.db)
     .await?;
     if let Some(mut ligne) = lignes_en_json(&ind).as_array().and_then(|a| a.first()).cloned() {

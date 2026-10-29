@@ -82,13 +82,13 @@ pub async fn briefing(State(state): State<AppState>, user: Utilisateur) -> AppRe
 
     if let (true, Some(e)) = (peut(module::STOCK), &etats) {
         let c = e.compteurs();
-        let plan_non_couvert = c["nb_plan_non_couvert"].as_i64().unwrap_or(0);
+        let inevitable = c["nb_rupture_inevitable"].as_i64().unwrap_or(0);
         let aujourdhui = c["nb_a_commander_aujourdhui"].as_i64().unwrap_or(0);
-        if plan_non_couvert > 0 {
+        if inevitable > 0 {
             points.push(point(
                 "stock",
-                "référence(s) au plan non couvert sur l'horizon",
-                plan_non_couvert,
+                "référence(s) en rupture inévitable (avant aujourd'hui + délai)",
+                inevitable,
                 "danger",
                 "/stock",
                 &if aujourdhui > 0 { format!("{aujourdhui} à commander aujourd'hui") } else { String::new() },

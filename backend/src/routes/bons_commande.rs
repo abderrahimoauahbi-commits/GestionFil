@@ -1568,9 +1568,9 @@ pub async fn references_commandables(
     .fetch_one(&state.db)
     .await?;
 
-    // LA TENSION VIENT DU MOTEUR DE COUVERTURE (27/10/2026) : les references au
-    // plan non couvert puis sous la securite, les plus proches de la rupture
-    // d'abord. Elles ordonnent la liste (apres ce que le plan d'achat propose) et
+    // LA TENSION VIENT DU MOTEUR DE COUVERTURE (v2, 27/10/2026) : les references
+    // en rupture inevitable, sous la securite puis sous la cible, les plus
+    // proches de la rupture d'abord. Elles ordonnent la liste (apres ce que le plan d'achat propose) et
     // designent les references « en tension » dont celle-ci est l'equivalent.
     let etats = super::couverture::etats(&state.db).await?;
     let en_tension: Vec<String> = etats.en_tension().iter().map(|e| e.code_reference.clone()).collect();

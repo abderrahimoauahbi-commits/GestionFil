@@ -9,6 +9,7 @@
  * SEUL, l'OF n'en est plus une source.
  */
 import type { Sujet } from '../types.ts'
+import { REGLES_MOTEUR_V2 } from '../moteurCouverture.ts'
 
 export const FICHES_PLANIFICATION: Sujet[] = [
   // ==========================================================================
@@ -622,7 +623,7 @@ export const FICHES_PLANIFICATION: Sujet[] = [
     titre: 'Plan d’achat',
     chemin: 'Planification → Plans d’achat',
     objectif:
-      'Savoir, référence par référence, jusqu’où le plan de production est couvert et quoi commander avant quelle date (onglet « À commander », le moteur de couverture), puis arbitrer les propositions et les envoyer en bon de commande.',
+      'Arbitrer les propositions du moteur de couverture et les envoyer en bon de commande. Le calcul — jusqu’où le plan est couvert, quoi commander avant quelle date — se lit dans Stock projeté et alertes › Surveillance (l’onglet « À commander » y est déplacé depuis le 27/10/2026) ; ici, un clic sur une ligne ouvre la même fenêtre de surveillance.',
     prerequis: [
       'Un plan de production EN COURS dont le MRP est calculé : c’est sa photo du besoin, mois par mois, qui fait toute la demande. Sans plan en service, rien ne se projette.',
       'Des références actives avec leur fournisseur et un prix (dernier achat, catalogue ou CMUP) : sans eux, la référence est calculée mais ne devient pas une proposition.',
@@ -630,34 +631,21 @@ export const FICHES_PLANIFICATION: Sujet[] = [
       'Une classe ABC sur chaque fiche : elle fixe les jours de sécurité. Sans classe, la plus longue des trois sécurités s’applique et la ligne signale le défaut de données.',
     ],
     droits:
-      'Lecture du module Plan d’achat pour consulter. Écriture du module Plan d’achat pour Régénérer, Commander, Écarter et basculer sur un équivalent ; « Envoyer au bon de commande » exige en plus l’écriture du module Bons de commande.',
+      'Lecture du module Plan d’achat pour consulter. Écriture du module Plan d’achat pour Régénérer, Écarter et basculer sur un équivalent ; « Envoyer au bon de commande » exige en plus l’écriture du module Bons de commande.',
     procedures: [
       {
-        titre: 'Lire la couverture (onglet « À commander »)',
+        titre: 'Ouvrir la fenêtre de surveillance d’une référence',
         etapes: [
-          'Le bandeau rappelle le plan en service, la fin de son horizon, la date de la photo du besoin et le jour d’où part la projection (aujourd’hui).',
-          'Une ligne par référence qui a une demande au plan, du stock ou un arrivage. L’ordre : la première rupture la plus proche d’abord (une rupture aujourd’hui en tête, sans rupture en dernier), puis la date limite de commande.',
-          'Resserrez avec les filtres Fournisseur, Proposition (avec / sans) et Plan non couvert (avant ou après aujourd’hui + délai, ou couvert sur l’horizon), ou la recherche (référence, désignation, fournisseur).',
-          'La ligne ↳ sous une référence dit ce qui est compté à part (fil sur métiers, restes, fil en route à sa date), ce qui n’est pas compté (quarantaine, bloqué, magasins hors plan) et ce qui est hors couverture (en retard, sans date, bons non validés, après l’horizon).',
-          'Cliquez la ligne (ou l’icône ⤢ devant la référence) : le détail s’ouvre dans une GRANDE FENÊTRE (titre : la référence et sa désignation), qui défile en hauteur — les réglages et leur source, la courbe du solde jour par jour, le calcul de la première proposition étape par étape, les propositions suivantes, les ressources et arrivages avec leur raison, la chronologie et les besoins du plan mois par mois par qualité. Échap ou la croix la ferment ; « Commander » reste sur la ligne.',
-          '« Règles des dates d’arrivage, de la fenêtre et des réglages par défaut » (au-dessus de la liste) déplie les règles appliquées.',
+          'Dans « Besoins » ou « Lignes à commander », cliquez une ligne (hors cases, champs et boutons) : la fenêtre de surveillance de la référence s’ouvre — la même que dans Stock projeté et alertes › Surveillance : l’état et sa raison, la couverture actuelle, la cible et l’écart, la courbe du solde, le calcul de la proposition (Q0 + X + arrondi), les ressources et arrivages, la chronologie et les besoins du plan mois par mois.',
+          'Échap ou la croix la ferment. Les cases à cocher, les champs et les boutons de la ligne gardent leur geste.',
         ],
-        resultat: 'Vous savez jusqu’à quel jour le plan est couvert, combien commander et avant quelle date.',
-      },
-      {
-        titre: 'Commander une référence depuis « À commander »',
-        etapes: [
-          'Sur la ligne, cliquez « Commander » (l’icône seule sur un écran étroit). Le bouton n’apparaît que si le moteur propose une quantité et si la référence est active.',
-          'La proposition de CETTE référence est régénérée depuis le moteur (une proposition figée ou arbitrée reste telle quelle), puis s’ouvre, cochée, dans l’onglet « Lignes à commander ».',
-          'Continuez avec « Envoyer au bon de commande » ci-dessous.',
-        ],
-        resultat: 'La proposition attend dans les lignes à commander ; rien n’est encore engagé.',
+        resultat: 'Vous savez d’où viennent les kilos proposés, sans quitter le plan d’achat.',
       },
       {
         titre: 'Régénérer et arbitrer les propositions (onglet « Besoins »)',
         etapes: [
           '« Régénérer » (confirmation demandée) : les propositions ouvertes sont remplacées par la première proposition du moteur pour chaque référence. Le message donne le nombre de propositions, le budget, les TIER 1, ce qui a été conservé (protégées, arbitrées) et les références non proposées (sans fournisseur ou sans prix).',
-          'Lisez les propositions, la plus urgente d’abord ; la flèche en tête de ligne déplie le calcul du moteur pour cette référence.',
+          'Lisez les propositions, la plus urgente d’abord ; un clic sur la ligne ouvre la fenêtre de surveillance de la référence.',
           'Écartez ce qui n’est pas à commander (icône ⊘) : la référence n’est plus reproposée pendant P_DureeEcartJours (90 jours).',
           'Pour couvrir le besoin par un équivalent (icône ⇄) : choisissez la référence du groupe d’équivalence, écrivez le « Motif de la bascule », puis « Basculer le besoin ».',
           'Cochez les propositions à commander (ou « Tout cocher »), puis « Lignes à commander ».',
@@ -681,7 +669,7 @@ export const FICHES_PLANIFICATION: Sujet[] = [
       {
         nom: 'Référence',
         description:
-          'La référence, sa désignation (quand elle ne répète pas le code) et son fournisseur. Dans « À commander », un clic sur la ligne (ou l’icône ⤢) ouvre le détail du calcul dans une grande fenêtre ; dans « Besoins », la flèche en tête de ligne le déplie sous la proposition ; dans « Lignes à commander », la ligne rappelle l’urgence, la livraison prévue (D) et la date limite de commande.',
+          'La référence, sa désignation (quand elle ne répète pas le code) et son fournisseur. Dans « Besoins » et « Lignes à commander », un clic sur la ligne ouvre la fenêtre de surveillance de la référence ; dans « Lignes à commander », la ligne rappelle l’urgence, la livraison prévue (D) et la date limite de commande.',
       },
       {
         nom: 'Disponible',
@@ -734,12 +722,12 @@ export const FICHES_PLANIFICATION: Sujet[] = [
       {
         nom: 'Solde projeté jour par jour',
         description:
-          'La courbe du solde projeté (trait plein), la ligne de sécurité (tirets), les arrivages comptés (triangles), le jour D de la première proposition et, sous zéro, les jours où le plan n’est pas couvert. Survolez un jour pour son solde, sa sécurité, son besoin planifié (le plan du jour) et ses arrivages.',
+          'La courbe du solde projeté (trait plein, dessinée à zéro au plus bas), le seuil de sécurité (tirets : le plan des S jours suivants), les arrivages comptés (triangles), le jour D de la première proposition et, sous zéro, les jours où le plan n’est pas couvert. Survolez un jour pour son solde exact (négatif quand le plan n’est pas couvert), son seuil, son besoin planifié et ses arrivages.',
       },
       {
         nom: 'À commander — le calcul',
         description:
-          'Le calcul de la première proposition, étape par étape : D (disponibilité de la commande) et pourquoi, F (fin de la fenêtre, exclue), plan sur la fenêtre, + sécurité, − S(D), − arrivages après D, = besoin théorique (avec son jour déterminant), + minimum de commande, arrondi vers le haut, = quantité proposée, et « À commander avant le ». Dessous, les propositions suivantes, indicatives : elles supposent les précédentes commandées (douze au plus).',
+          'Le calcul de la première proposition (moteur v2) : R (rupture), D (réception) et pourquoi, la fenêtre couverte, plan de la fenêtre − reste au début − arrivages datés = Q0 (besoin net) ; + X (sécurité, 1re proposition seulement) ; + arrondi (minimum, multiple) = quantité proposée ; le stock après réception et « À commander avant le ». Dessous, les propositions suivantes, indicatives : elles supposent les précédentes reçues (douze au plus).',
       },
       {
         nom: 'Arrivages',
@@ -882,13 +870,15 @@ export const FICHES_PLANIFICATION: Sujet[] = [
           'Les références suivies (actives, avec un plan, du stock ou un arrivage) comptées par état du moteur de couverture, telles qu’à la dernière génération du plan (« calculée le … »).',
       },
       { nom: 'Références suivies', description: 'Les références actives que le moteur suit : une demande au plan, du stock ou un arrivage.' },
-      { nom: 'Sous la sécurité', description: 'Les références dont le solde projeté passe sous la sécurité, sans rupture sur l’horizon.' },
-      { nom: 'Couvert', description: 'Les références sans rupture ni passage sous la sécurité sur l’horizon.' },
+      { nom: 'Rupture inévitable', description: 'Les références dont la 1re rupture tombe avant aujourd’hui + délai : aucune commande passée aujourd’hui n’arrive à temps.' },
+      { nom: 'Sous sécurité', description: 'Les références dont le point bas passe sous le seuil de sécurité avant aujourd’hui + délai.' },
+      { nom: 'Sous cible', description: 'Les références dont la couverture actuelle est sous la couverture cible.' },
+      { nom: 'Couvert', description: 'Les références dont la couverture atteint la cible, ou sans rupture sur l’horizon.' },
       {
         nom: 'À commander aujourd’hui',
         description: 'Les références dont la date limite de commande de la première proposition est atteinte ou dépassée.',
       },
-      { nom: 'Classe A au plan non couvert', description: 'Les références de classe A dont une rupture est prévue sur l’horizon.' },
+      { nom: 'Classe A en rupture inévitable', description: 'Les références de classe A en rupture inévitable.' },
       { nom: 'Budget total', description: 'Le montant des propositions ouvertes (proposées, en révision, validées).', valeurs: 'MAD' },
       { nom: 'Quantité totale', description: 'Les kilos des propositions ouvertes.', valeurs: 'kg' },
       { nom: 'Références', description: 'Le nombre de propositions ouvertes, une par référence.' },
@@ -898,28 +888,15 @@ export const FICHES_PLANIFICATION: Sujet[] = [
       },
     ],
     regles: [
-      'UNE SEULE SOURCE DE VÉRITÉ (27/10/2026) : tout ce qui dit d’une référence qu’elle est couverte, sous la sécurité ou à commander vient du moteur de couverture — cet écran, le stock projeté, le tableau de bord, l’état des stocks, les contrôles C05 et C25.',
-      'LA DEMANDE EST LE PLAN SEUL : la photo du besoin du plan en service, mois par mois. Consommation prévue d’un jour = kg du mois ÷ nombre de jours réels du mois. Le mois en cours ne compte qu’à partir d’aujourd’hui : le plan des jours passés est perdu, jamais reporté. Les ordres de fabrication n’y entrent pas.',
-      'L’HORIZON est celui du plan en service : sa date de fin, ou la fin de son dernier mois de besoin si elle va plus loin.',
-      'LA PROJECTION SE FAIT JOUR PAR JOUR : solde du jour = solde de la veille + arrivages comptés du jour − consommation prévue du jour. Le solde ne descend jamais sous zéro : un déficit est un « plan non couvert », ni reporté ni rattrapé.',
-      'CE QUI EST COMPTÉ : le stock des magasins comptés au plan (hors quarantaine), lots libres — restes et dormants compris —, lots bloqués exclus ; le fil sur les machines au dernier constat, quel que soit son âge ; les lignes de bon VALIDÉ, ENVOYÉ ou LIVRÉ PARTIEL à la date de livraison prévue de la ligne, sinon de l’en-tête ; le fil en route (transfert expédié) à sa date prévue de disponibilité.',
-      'CE QUI N’EST PAS COMPTÉ, mais montré : quarantaine, bloqué, magasins hors plan ; un bon dont la date est dépassée (en retard, contrôle C28) ou sans date ; un transfert en route en retard ou sans date (contrôle C66) ; un bon non validé (brouillon, contrôle, demande de prix, attente de validation) ; l’import en route sans bon ; ce qui arrive après l’horizon.',
-      'LA SÉCURITÉ est une ligne distincte de la rupture : jours de sécurité de la classe ABC (P_SecuriteA, B, C) × consommation moyenne prévue du plan sur la fenêtre. Sans classe ABC, la plus longue des trois, et le défaut de données est signalé sur la ligne.',
-      'D, LA DATE DE DISPONIBILITÉ = MAX(aujourd’hui + délai ; premier jour où le solde passe sous la sécurité). Motif « délai » quand D tombe sur aujourd’hui + délai (même si la sécurité est franchie ce jour-là ou avant), « sécurité » sinon.',
-      'LA FENÊTRE EST [D, F[ : D inclus, F exclu, F = D + couverture d’une commande (celle du fournisseur, sinon P_MargeJours : 30 jours pleins), bornée à la fin de l’horizon. Le dernier jour couvert est F − 1 ; un arrivage le jour F est hors de la fenêtre.',
-      'S(D) = le solde au début de D, arrivages du jour D compris, jamais négatif. BESOIN THÉORIQUE = MAX(0 ; le plus fort, sur chaque jour t de [D, F[, de sécurité + plan de D à t − arrivages après D jusqu’à t − S(D)). Le jour où ce maximum est atteint est le jour déterminant.',
-      'PUIS le minimum de commande de la fiche (MOQ), puis l’arrondi VERS LE HAUT au multiple : le multiple d’achat de la fiche, sinon la palette de la fiche si « Arrondi à la palette pleine » est coché ; sinon pas d’arrondi. Un besoin déjà multiple ne prend pas un multiple de plus.',
-      'DATE LIMITE DE COMMANDE = D − délai. Les propositions suivantes ajoutent la précédente aux arrivages à son D et recommencent, jusqu’à la fin de l’horizon, douze au plus ; seule la PREMIÈRE devient une proposition d’achat.',
-      'Les ÉTATS d’une référence : PLAN NON COUVERT (une rupture est prévue sur l’horizon), SOUS LA SÉCURITÉ (le solde passe sous la sécurité, sans rupture), COUVERT (ni l’un ni l’autre). Ils se calculent sans les propositions : une référence reste « plan non couvert » tant que la commande n’est pas validée et datée.',
+      ...REGLES_MOTEUR_V2,
       'RÉGÉNÉRER remplace les propositions ouvertes qui n’engagent rien. Restent telles quelles : les commandées, les écartées, les protégées (retouchées) et les arbitrées (basculées sur un équivalent), ainsi que celles annulées avec leur bon. Une écartée masque la référence pendant P_DureeEcartJours (90 j), puis expire : le besoin est reproposé.',
       'Une référence déjà sur un bon pas encore validé (brouillon, contrôle, demande de prix, attente de validation) n’est pas reproposée : complétez ce bon. Un bon validé, envoyé ou livré partiellement est un arrivage du moteur : ce qui reste proposé est un vrai besoin.',
       'QUAND LE BON EST ANNULÉ (décision du 27/10/2026) : la proposition qu’il portait passe « Annulée avec le bon » (ANNULE_BC), reste liée au bon annulé, n’est plus ouverte, n’est ni purgée ni comptée dans les indicateurs ; la régénération suivante crée une proposition neuve si le moteur en propose une.',
       'Le calcul ne MUTUALISE PAS les équivalents : l’équivalent disponible est affiché, la bascule reste un geste explicite, motivé et tracé ; une unité, une densité ou une catégorie différentes la font refuser.',
-      'Une référence inactive se lit mais ne se commande pas : pas de bouton « Commander », pas de proposition à la génération.',
+      'Une référence inactive se lit mais ne se commande pas : pas de proposition à la génération. Pas de bouton « Commander » pour l’instant (27/10/2026) : la route qui régénère la proposition d’une seule référence reste au serveur, l’écran ne l’appelle pas.',
       'LA CONVERSION ouvre un bon BROUILLON par fournisseur (ou complète le brouillon choisi) : rien n’est engagé avant sa validation. Une référence déjà sur le bon visé voit sa ligne augmentée, au prix de cette ligne. La quantité, le prix et le colisage envoyés font foi ; la date de besoin D devient la livraison prévue.',
       '« Situation » et « Par fournisseur » sont figés à la génération du plan : régénérez pour les remettre à jour.',
-      'LE DÉTAIL S’OUVRE EN GRANDE FENÊTRE (décision du 27/10/2026) : le même tableau et la même fenêtre servent le volet « Surveillance / Alertes » du stock projeté (composants partagés), qui lit le même moteur.',
-      'LES MOTS DU BESOIN (27/10/2026) : « Plan / mois » (le plan de l’horizon ramené à 30 jours), « Réel / mois » (la consommation réelle du grand livre, 12 mois pleins), « Besoin jusqu’à livraison » (le plan d’aujourd’hui à aujourd’hui + délai), « Besoin de couverture » (le plan sur la fenêtre [D, F[), « Besoin de réapprovisionnement » (le besoin théorique). Le moteur ne lit que le PLAN DATÉ ; jamais « conso / mois » pour un besoin.',
+      'LA FENÊTRE DE SURVEILLANCE (décision du 27/10/2026) : un clic sur une ligne ouvre la même fenêtre que Stock projeté et alertes › Surveillance ; plus rien ne se déplie sous la ligne.',
     ],
     messages: [
       {

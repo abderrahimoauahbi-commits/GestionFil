@@ -469,7 +469,7 @@ interface Ref {
   prix_catalogue?: number | null
   code_devise_catalogue?: string | null
   stock_min_kg: number | null
-  couverture_min_mois: number | null
+  couverture_cible_mois: number | null
   actif: number
   [k: string]: unknown
 }
@@ -527,10 +527,10 @@ export function EtatCatalogue() {
             valeur: (r) => (r.stock_min_kg == null ? '—' : fmt.nombre(r.stock_min_kg, 0)),
           },
           {
-            entete: 'Couv. min',
+            entete: 'Couv. cible',
             numerique: true,
             valeur: (r) =>
-              r.couverture_min_mois == null ? '—' : `${fmt.nombre(r.couverture_min_mois, 1)} m`,
+              r.couverture_cible_mois == null ? '—' : `${fmt.nombre(r.couverture_cible_mois, 1)} m`,
           },
         ]}
         lignes={lignes}

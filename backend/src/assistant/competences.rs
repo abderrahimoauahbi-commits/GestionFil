@@ -205,8 +205,8 @@ pub const COMPETENCES: &[Competence] = &[
     Competence {
         nom: "references_en_tension",
         description:
-            "Les references en rupture, critiques ou sous surveillance, de la plus urgente a \
-             la moins urgente. Repond a « qu'est-ce qui manque », « ou est-ce que ca coince ».",
+            "Les references en rupture inevitable, sous la securite ou sous la couverture cible, \
+             de la plus urgente a la moins urgente. Repond a « qu'est-ce qui manque », « ou est-ce que ca coince ».",
         module: module::STOCK,
         parametres: || {
             json!({
@@ -493,8 +493,9 @@ pub async fn executer(
         }
 
         "references_en_tension" => {
-            // LA TENSION DU MOTEUR DE COUVERTURE (27/10/2026) : plan non couvert,
-            // puis sous la securite, la rupture la plus proche d'abord.
+            // LA TENSION DU MOTEUR DE COUVERTURE (v2, 27/10/2026) : rupture
+            // inevitable, sous la securite, sous la cible, la rupture la plus
+            // proche d'abord ; les signaux a part.
             let etats = crate::routes::couverture::etats(&state.db).await?;
             let limite = borne(args, "limite", 15, 60).max(0) as usize;
             let lignes: Vec<Value> = etats
@@ -506,6 +507,8 @@ pub async fn executer(
                         "code_reference": e.code_reference, "designation": e.designation,
                         "statut": e.statut, "stock_kg": e.disponible_kg,
                         "jours_couverture": e.jours_couverture, "premiere_rupture": e.premiere_rupture,
+                        "couverture_cible_j": e.couverture_cible_j, "ecart_cible_j": e.ecart_cible_j,
+                        "signaux": e.signaux,
                         "plan_non_couvert_kg": e.plan_non_couvert_kg, "delai_livraison_jours": e.delai_j,
                         "fournisseur_nom": e.fournisseur_nom,
                     })

@@ -348,9 +348,9 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
             aide="Valeur du stock physique divisée par la valeur consommée par jour. Les références chères pèsent davantage."
           />
           <Kpi
-            libelle="Plan non couvert"
-            valeur={fmt.nombre(n('nb_plan_non_couvert'), 0)}
-            ton={n('nb_plan_non_couvert') > 0 ? 'danger' : 'succes'}
+            libelle="Rupture inévitable"
+            valeur={fmt.nombre(n('nb_rupture_inevitable'), 0)}
+            ton={n('nb_rupture_inevitable') > 0 ? 'danger' : 'succes'}
           />
         </BlocKpi>
         <BlocKpi titre="Achats" Icone={ShoppingCart}>
@@ -497,7 +497,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
           sousTitre="Une référence de classe A en alerte ne se traite pas comme une classe C"
           unite="references"
           series={[
-            { cle: 'en_alerte', libelle: 'Plan non couvert' },
+            { cle: 'en_alerte', libelle: 'Rupture inévitable' },
             { cle: 'attention', libelle: 'Sous la sécurité' },
             { cle: 'ok', libelle: 'Couvert' },
           ]}

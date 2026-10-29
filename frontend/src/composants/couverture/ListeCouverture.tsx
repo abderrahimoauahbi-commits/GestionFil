@@ -14,8 +14,9 @@
  * est listée, ses kilos hors couverture sur la ligne ↳.
  *
  * Vocabulaire tenu : un déficit est un « plan non couvert à partir du … », jamais
- * une dette ; il n'est ni reporté ni rattrapé — le solde projeté ne descend pas
- * sous zéro.
+ * une dette ; le manque d'une rupture inévitable est affiché, jamais commandé.
+ * Les colonnes sont celles d'avant le moteur v2 (décision du 27/10/2026) : seuls
+ * l'état et les valeurs viennent du v2 ; le reste est dans la fenêtre de détail.
  *
  * Une ligne ↳ d'information seulement quand quelque chose est compté à part (fil
  * sur métiers, restes, fil en route à sa date), laissé hors couverture

@@ -265,20 +265,38 @@ export const STATUTS = {
     IGNOREE: d('Ignorée', 'neutre'),
   },
   /**
-   * snapshot_mrp.statut_couleur — L'ÉTAT D'UNE RÉFÉRENCE AU MOTEUR DE COUVERTURE
-   * (27/10/2026, une seule source de vérité) : plan non couvert (une rupture est
-   * prévue sur l'horizon), sous la sécurité (sans rupture), couvert. Les quatre
-   * codes de l'ancien calcul (v_stock_projete, retiré) ne restent que pour lire
-   * l'historique des photos de plan.
+   * L'ÉTAT D'UNE RÉFÉRENCE AU MOTEUR DE COUVERTURE v2 (§ 15.4, 27/10/2026, une
+   * seule source de vérité) — le plus grave l'emporte : rupture inévitable (la
+   * 1re rupture tombe avant aujourd'hui + délai), sous la sécurité (creux sous le
+   * seuil dans le délai), sous la cible (couverture actuelle < couverture cible),
+   * couvert. Les signaux sont à part (`signal_couverture`).
+   *
+   * Et snapshot_mrp.statut_couleur — L'ÉTAT D'UN MOIS de la frise : plan non
+   * couvert (une part du plan du mois n'est pas couverte), sous la sécurité,
+   * couvert. Les quatre codes de l'ancien calcul (v_stock_projete, retiré) ne
+   * restent que pour lire l'historique des photos de plan.
    */
   statut_stock: {
-    PLAN_NON_COUVERT: d('Plan non couvert', 'danger'),
-    SOUS_SECURITE: d('Sous la sécurité', 'alerte'),
+    RUPTURE_INEVITABLE: d('Rupture inévitable', 'danger'),
+    SOUS_SECURITE: d('Sous sécurité', 'alerte'),
+    SOUS_CIBLE: d('Sous cible', 'info'),
     COUVERT: d('Couvert', 'succes'),
+    PLAN_NON_COUVERT: d('Plan non couvert', 'danger'),
     RUPTURE: d('Rupture (ancien calcul)', 'danger'),
     CRITIQUE: d('Critique (ancien calcul)', 'danger'),
     ATTENTION: d('Attention (ancien calcul)', 'alerte'),
     OK: d('OK (ancien calcul)', 'succes'),
+  },
+  /**
+   * LES SIGNAUX DU MOTEUR DE COUVERTURE (§ 15.4) : indépendants de l'état, ils
+   * ne bloquent jamais. Affichés en pastilles, à côté de l'état.
+   */
+  signal_couverture: {
+    CIBLE_NON_DEFINIE: d('Cible non définie', 'alerte'),
+    SOUS_MINIMUM: d('Sous le minimum', 'alerte'),
+    RETARD_CIBLE: d('Retard sur la cible', 'alerte'),
+    HORIZON_COURT: d('Horizon court', 'neutre'),
+    DEFAUT_DONNEES: d('Donnée manquante', 'neutre'),
   },
   /** alerte.gravite — le même vocabulaire que la criticité des contrôles (v_controles). */
   criticite: {
@@ -334,7 +352,9 @@ export const SOURCE_STATUTS: Record<EntiteStatut, string> = {
   decision_machine: 'machine_decision.statut',
   demande_autorisation: 'demande_autorisation.statut',
   alerte: 'alerte.statut',
-  statut_stock: 'snapshot_mrp.statut_couleur',
+  // Les états d'un mois (la photo) ET ceux d'une référence (le moteur v2).
+  statut_stock: 'snapshot_mrp.statut_couleur+moteur:backend/src/domain/couverture.rs#etat',
+  signal_couverture: 'moteur:backend/src/domain/couverture.rs#signal',
   criticite: 'alerte.gravite',
   qualification_equivalence: 'calcule:db/pg/011_vues.sql#qualification',
   classe_abc: 'reference.classe_abc',

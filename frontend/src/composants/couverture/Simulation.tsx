@@ -19,6 +19,7 @@ import { api } from '../../api/client'
 import { ChoixRecherche } from '../ChoixRecherche'
 import { Alerte, Bouton, Champ, Chargement, Etiq } from '../ui/base'
 import { cn, fmt } from '../../lib/utils'
+import { libelleStatut } from '../../lib/statuts'
 import { CourbeSolde } from './CourbeSolde'
 import {
   CalculProposition,
@@ -46,6 +47,8 @@ interface Modif {
 }
 
 interface Saisie {
+  /** C, la couverture cible, en mois (comme la fiche article). */
+  cible: string
   delai: string
   couverture: string
   securite: string
@@ -55,7 +58,7 @@ interface Saisie {
   ajouts: Ajout[]
 }
 
-const VIDE: Saisie = { delai: '', couverture: '', securite: '', moq: '', multiple: '', modifs: {}, ajouts: [] }
+const VIDE: Saisie = { cible: '', delai: '', couverture: '', securite: '', moq: '', multiple: '', modifs: {}, ajouts: [] }
 
 const nombre = (t: string) => {
   if (t.trim() === '') return undefined
@@ -69,13 +72,14 @@ function corpsDe(s: Saisie, arrivages: Arrivage[]) {
   const entiers: [keyof Saisie, string][] = [
     ['delai', 'delai_j'],
     ['couverture', 'couverture_j'],
+    ['securite', 'jours_securite'],
   ]
   for (const [cle, champ] of entiers) {
     const n = nombre(s[cle] as string)
     if (n !== undefined) corps[champ] = Math.round(n)
   }
-  const securite = nombre(s.securite)
-  if (securite !== undefined) corps.jours_securite = securite
+  const cible = nombre(s.cible)
+  if (cible !== undefined) corps.couverture_cible_mois = cible
   const moq = nombre(s.moq)
   if (moq !== undefined) corps.moq_kg = moq
   const multiple = nombre(s.multiple)
@@ -209,6 +213,17 @@ function Espace({ reference }: { reference: string }) {
           <legend className="mb-1 text-[11.5px] text-attenue-texte">
             Réglages — vide : la valeur actuelle (entre parenthèses)
           </legend>
+          <ChampReglage
+            id="sim-cible"
+            libelle="Couverture cible (mois)"
+            valeur={saisie.cible}
+            actuel={
+              r?.couverture_cible_mois != null
+                ? `${fmt.nombre(r.couverture_cible_mois, 1)} mois = ${r.couverture_cible_j ?? '?'} j`
+                : 'non définie'
+            }
+            surChange={(v) => changer({ cible: v })}
+          />
           <ChampReglage
             id="sim-delai"
             libelle="Délai fournisseur (j)"
@@ -450,12 +465,21 @@ interface Indicateur {
 const kgDe = (n: unknown) => (typeof n === 'number' ? `${kg(n)} kg` : '—')
 
 const INDICATEURS: Indicateur[] = [
+  { libelle: 'État', valeur: (v) => libelleStatut('statut_stock', v.synthese.statut) || '—' },
+  {
+    libelle: 'Signaux',
+    valeur: (v) => (v.synthese.signaux ?? []).map((s) => libelleStatut('signal_couverture', s.code)).join(', ') || 'aucun',
+  },
+  {
+    libelle: 'Couverture cible',
+    valeur: (v) => (v.reglages?.couverture_cible_j != null ? `${v.reglages.couverture_cible_j} j` : 'non définie'),
+  },
   { libelle: 'Délai fournisseur', valeur: (v) => `${v.reglages?.delai_j ?? '—'} j` },
   { libelle: 'Arrivages comptés', valeur: (v) => kgDe(v.synthese.arrivages_comptes_kg) },
   { libelle: 'Stock y compris arrivages', valeur: (v) => kgDe(v.synthese.stock_total_projete_kg) },
   { libelle: 'Besoin jusqu’à livraison', valeur: (v) => kgDe(v.synthese.besoin_jusqu_livraison_kg) },
   {
-    libelle: 'Couverture planifiée',
+    libelle: 'Couverture actuelle',
     valeur: (v) =>
       v.synthese.couvert_tout_horizon
         ? 'tout l’horizon'
@@ -463,6 +487,11 @@ const INDICATEURS: Indicateur[] = [
           ? `${v.synthese.jours_couverture} j (au ${dateCourte(v.synthese.couvert_jusqu_au)})`
           : '—',
   },
+  {
+    libelle: 'Écart à la cible',
+    valeur: (v) => (v.synthese.ecart_cible_j != null ? `${v.synthese.ecart_cible_j} j` : '—'),
+  },
+  { libelle: 'Sécurité X', valeur: (v) => kgDe(v.situation?.securite.x_kg) },
   { libelle: 'Passage sous la sécurité', valeur: (v) => dateCourte(v.synthese.premier_passage_securite) },
   { libelle: '1re rupture', valeur: (v) => (v.synthese.premiere_rupture ? dateCourte(v.synthese.premiere_rupture) : 'aucune') },
   { libelle: 'Besoin non couvert', valeur: (v) => kgDe(v.synthese.plan_non_couvert_kg) },
@@ -470,7 +499,7 @@ const INDICATEURS: Indicateur[] = [
     libelle: 'Quantité à commander',
     valeur: (v) => (v.propositions?.[0] ? kgDe(v.propositions[0].quantite_proposee_kg) : 'rien'),
   },
-  { libelle: 'Disponible le (D)', valeur: (v) => dateCourte(v.propositions?.[0]?.date_disponibilite) },
+  { libelle: 'Réception (D)', valeur: (v) => dateCourte(v.propositions?.[0]?.date_disponibilite) },
   { libelle: 'Date limite de commande', valeur: (v) => dateCourte(v.propositions?.[0]?.date_limite_commande) },
   { libelle: 'Stock en fin d’horizon', valeur: (v) => kgDe(v.jours?.[v.jours.length - 1]?.solde_kg) },
 ]

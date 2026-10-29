@@ -14,7 +14,7 @@
 //! droit VALIDER sur le stock, en attendant ces profils [A DEFINIR].
 
 use super::json::lignes_en_json;
-use super::stock::numeroter;
+use crate::domain::numerotation::numeroter;
 use crate::auth::{rbac, rbac::module, rbac::Action, Utilisateur};
 use crate::db::{arrondi_kg, maintenant};
 use crate::error::{AppError, AppResult};
@@ -203,14 +203,168 @@ pub async fn vie(
     .bind(&c.lot)
     .fetch_all(&state.db)
     .await?;
+    // L'HISTORIQUE DU CONDITIONNEMENT (23/10/2026) : chaque mesure de reception
+    // et chaque correction, appliquee ou non, avec qui et pourquoi.
+    let conditionnement = sqlx::query(
+        "SELECT j.date_evenement, j.source, j.document,
+                j.poids_avant::float8 AS poids_avant, j.poids_mesure::float8 AS poids_mesure,
+                j.poids_apres::float8 AS poids_apres, j.bobines_palette_avant, j.bobines_palette_mesure,
+                j.bobines_palette_apres, j.applique, j.motif, u.login AS utilisateur
+           FROM lot_conditionnement_journal j
+           LEFT JOIN utilisateur u ON u.id_utilisateur = j.id_utilisateur
+          WHERE j.code_reference = $1 AND j.lot_fournisseur = $2
+          ORDER BY j.date_evenement",
+    )
+    .bind(&c.reference)
+    .bind(&c.lot)
+    .fetch_all(&state.db)
+    .await?;
     let mut v = json!({
         "lot": lignes_en_json(&lot).get(0).cloned().unwrap_or(Value::Null),
         "magasins": lignes_en_json(&lieux),
         "machines": lignes_en_json(&machines),
         "evenements": lignes_en_json(&evenements),
+        "conditionnement": lignes_en_json(&conditionnement),
     });
     user.masquer(&state.db, module::STOCK, &mut v).await?;
     Ok(Json(v))
+}
+
+// ============================================================================
+// Le conditionnement du lot (23/10/2026)
+// ============================================================================
+
+#[derive(Debug, Deserialize)]
+pub struct FiltreConditionnement {
+    pub code_reference: String,
+}
+
+/// `GET /api/lots/conditionnement?code_reference=…` — LE CONDITIONNEMENT DE
+/// CHAQUE LOT d'une reference : le poids d'une bobine et les bobines par
+/// palette qui convertissent ses palettes, bobines et kilos, d'ou ils viennent
+/// et quand. Les ecrans de saisie (mouvement, transfert, fiche hors machine)
+/// convertissent avec lui des que le lot est choisi.
+pub async fn conditionnements(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(f): Query<FiltreConditionnement>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    let rows = sqlx::query(
+        "SELECT l.code_reference, l.lot_fournisseur,
+                l.poids_bobine_kg::float8 AS poids_bobine_kg, l.bobines_par_palette,
+                l.origine_poids_bobine, l.origine_bobines_palette, l.date_conditionnement
+           FROM lot l
+          WHERE l.code_reference = $1
+          ORDER BY l.lot_fournisseur",
+    )
+    .bind(f.code_reference.trim())
+    .fetch_all(&state.db)
+    .await?;
+    let mut v = lignes_en_json(&rows);
+    user.masquer(&state.db, module::STOCK, &mut v).await?;
+    Ok(Json(v))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CorrectionConditionnement {
+    pub code_reference: String,
+    pub lot_fournisseur: String,
+    /// Le poids d'une bobine du lot, en kg. Absent : inchange.
+    #[serde(default)]
+    pub poids_bobine_kg: Option<f64>,
+    /// Les bobines par palette du lot. Absent : inchange.
+    #[serde(default)]
+    pub bobines_par_palette: Option<i64>,
+    pub motif: String,
+}
+
+/// `POST /api/lots/conditionnement` — CORRIGER LE CONDITIONNEMENT D'UN LOT
+/// (23/10/2026). Une decision sur le lot : droit VALIDER sur les lots, motif
+/// obligatoire, une ligne du journal du conditionnement (valeurs avant / apres,
+/// immuable), et le journal d'audit sur la fiche du lot. La valeur
+/// corrigee n'est plus ecrasee par une reception : elle est notee, non appliquee.
+/// Un facteur vide n'est jamais un facteur 1 : on corrige par une valeur.
+pub async fn corriger_conditionnement(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Json(c): Json<CorrectionConditionnement>,
+) -> AppResult<Json<Value>> {
+    exiger_decision_lot(&state, &user).await?;
+    let motif = texte_requis(&c.motif, "Le motif de la correction")?;
+    let poids = c.poids_bobine_kg.map(arrondi_kg);
+    if poids.is_some_and(|p| !(p > 0.0)) {
+        return Err(AppError::Invalide("Le poids d'une bobine est un nombre de kilos strictement positif.".into()));
+    }
+    if c.bobines_par_palette.is_some_and(|n| n <= 0) {
+        return Err(AppError::Invalide("Les bobines par palette sont un nombre entier strictement positif.".into()));
+    }
+    if poids.is_none() && c.bobines_par_palette.is_none() {
+        return Err(AppError::Invalide("Indiquez le poids d'une bobine ou les bobines par palette du lot.".into()));
+    }
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    lire_lot(&mut tx, &c.code_reference, &c.lot_fournisseur).await?;
+    let (poids_avant, bpp_avant, origine_poids, origine_bpp): (Option<f64>, Option<i64>, Option<String>, Option<String>) =
+        sqlx::query_as(
+            "SELECT poids_bobine_kg::float8, bobines_par_palette, origine_poids_bobine, origine_bobines_palette
+               FROM lot WHERE code_reference = $1 AND lot_fournisseur = $2",
+        )
+        .bind(&c.code_reference)
+        .bind(&c.lot_fournisseur)
+        .fetch_one(&mut *tx)
+        .await?;
+    let change_poids = poids.is_some_and(|p| poids_avant.is_none_or(|a| (a - p).abs() >= 0.00005));
+    let change_bpp = c.bobines_par_palette.is_some_and(|n| bpp_avant != Some(n));
+    if !change_poids && !change_bpp {
+        return Err(AppError::RegleMetier("Le lot porte deja ce conditionnement : rien a corriger.".into()));
+    }
+    sqlx::query(
+        "UPDATE lot
+            SET poids_bobine_kg         = CASE WHEN $3 THEN $4::numeric ELSE poids_bobine_kg END,
+                origine_poids_bobine    = CASE WHEN $3 THEN 'CORRECTION' ELSE origine_poids_bobine END,
+                bobines_par_palette     = CASE WHEN $5 THEN $6::bigint ELSE bobines_par_palette END,
+                origine_bobines_palette = CASE WHEN $5 THEN 'CORRECTION' ELSE origine_bobines_palette END,
+                date_conditionnement    = now()
+          WHERE code_reference = $1 AND lot_fournisseur = $2",
+    )
+    .bind(&c.code_reference)
+    .bind(&c.lot_fournisseur)
+    .bind(change_poids)
+    .bind(poids)
+    .bind(change_bpp)
+    .bind(c.bobines_par_palette)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO lot_conditionnement_journal
+             (code_reference, lot_fournisseur, source, document, poids_avant, poids_apres,
+              bobines_palette_avant, bobines_palette_apres, applique, motif, id_utilisateur)
+         VALUES ($1, $2, 'CORRECTION', $3, $4, $5, $6, $7, true, $8, $9)",
+    )
+    .bind(&c.code_reference)
+    .bind(&c.lot_fournisseur)
+    // D'ou venaient les valeurs corrigees : la trace de ce que la correction remplace.
+    .bind(format!(
+        "avant : poids {}, bobines par palette {}",
+        origine_poids.as_deref().unwrap_or("aucun"),
+        origine_bpp.as_deref().unwrap_or("aucune")
+    ))
+    .bind(poids_avant)
+    .bind(if change_poids { poids } else { poids_avant })
+    .bind(bpp_avant)
+    .bind(if change_bpp { c.bobines_par_palette } else { bpp_avant })
+    .bind(&motif)
+    .bind(&user.id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({
+        "code_reference": c.code_reference,
+        "lot_fournisseur": c.lot_fournisseur,
+        "poids_bobine_kg": if change_poids { poids } else { poids_avant },
+        "bobines_par_palette": if change_bpp { c.bobines_par_palette } else { bpp_avant },
+    })))
 }
 
 // ============================================================================
@@ -361,7 +515,7 @@ pub async fn decider_dormant(
     }
     let mut mouvements = Vec::new();
     if d.decision == "GARDER" {
-        sqlx::query("UPDATE lot SET date_derniere_activite = $3 WHERE code_reference = $1 AND lot_fournisseur = $2")
+        sqlx::query("UPDATE lot SET date_derniere_activite = fn_instant($3) WHERE code_reference = $1 AND lot_fournisseur = $2")
             .bind(&d.code_reference)
             .bind(&d.lot_fournisseur)
             .bind(maintenant())
@@ -382,11 +536,11 @@ pub async fn decider_dormant(
             sqlx::query(
                 "INSERT INTO mouvement (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
                                         code_motif, reference_document, observations_globales, id_utilisateur)
-                 VALUES ($1, $2, $3, 'AJUST_INV_NEG', $4, 'INVENTAIRE', $5, $6, $7)",
+                 VALUES ($1, $2, fn_jour_casablanca($3), 'AJUST_INV_NEG', $4, 'INVENTAIRE', $5, $6, $7)",
             )
             .bind(&id)
             .bind(&numero)
-            .bind(chrono::Utc::now().format("%Y-%m-%d").to_string())
+            .bind(crate::db::aujourdhui())
             .bind(&magasin)
             .bind(format!("LOT {}", d.lot_fournisseur))
             .bind(format!("{} du lot dormant {} : {motif}", if d.decision == "SOLDER" { "Solde" } else { "Destruction" }, d.lot_fournisseur))
@@ -561,7 +715,7 @@ async fn deplacer_entre_lots(
     reference_doc: &str,
     observations: &str,
 ) -> AppResult<Vec<String>> {
-    let jour = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let jour = crate::db::aujourdhui();
     let mut numeros = Vec::new();
     for (type_mvt, entree) in [("FUSION_SORTIE", false), ("FUSION_ENTREE", true)] {
         let numero = numeroter(&mut *tx, "mouvement", "numero_mouvement", "MVT").await?;
@@ -569,7 +723,7 @@ async fn deplacer_entre_lots(
         sqlx::query(
             "INSERT INTO mouvement (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
                                     code_motif, reference_document, observations_globales, id_utilisateur)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+             VALUES ($1, $2, fn_jour_casablanca($3), $4, $5, $6, $7, $8, $9)",
         )
         .bind(&id)
         .bind(&numero)
@@ -882,7 +1036,7 @@ pub async fn decider(
     user.poser_contexte(&mut tx).await?;
     let n = sqlx::query(
         "UPDATE demande_autorisation
-            SET statut = $2, id_decideur = $3, date_decision = $4, motif_decision = $5
+            SET statut = $2, id_decideur = $3, date_decision = fn_instant($4), motif_decision = $5
           WHERE id_demande = $1 AND statut = 'EN_ATTENTE'",
     )
     .bind(&id)

@@ -14,13 +14,12 @@ tout ce qui reste et on garde ce qui passe. Tant qu'une passe fait progresser,
 on recommence. Quand plus rien ne progresse, ce qui reste est une VRAIE erreur,
 pas un probleme d'ordre — et on l'affiche.
 
-Usage :
-    python charger.py                       # base locale
-    python charger.py --base autre_base
-    python charger.py --hote 192.168.1.140 --utilisateur gestionfil
+Usage (`--base` est OBLIGATOIRE : aucune base n'est choisie par defaut) :
+    python charger.py --base gestionfil_essai
+    python charger.py --base gestionfil_essai --hote 192.168.1.140 --utilisateur gestionfil
 
-    python charger.py --production            # comptes reels, referentiel a importer
-    python charger.py --production --referentiel-fige   # + la photo du 2026-09-02
+    python charger.py --base <base> --production            # comptes reels, referentiel a importer
+    python charger.py --base <base> --production --referentiel-fige   # + la photo du 2026-09-02
     python charger.py --base neuve --socle [--comptes]   # base COMPLETE depuis socle/
                                                          # (puis python migrer.py --base neuve)
 
@@ -122,7 +121,10 @@ REFERENTIEL_FIGE = ["seed_100_referentiel_reel.sql"]
 # auditer la reprise est de ne pas l'auditer.
 AUDIT = ["014_audit_operations.sql"]
 
-PSQL = os.environ.get("PSQL", r"C:\Program Files\PostgreSQL\18\bin\psql.exe")
+# Le psql de Windows s'il est la, sinon celui du PATH (Linux : serveur, CI).
+# Meme regle que migrer.py.
+_PSQL_WIN = r"C:\Program Files\PostgreSQL\18\bin\psql.exe"
+PSQL = os.environ.get("PSQL", _PSQL_WIN if os.path.exists(_PSQL_WIN) else "psql")
 
 
 def decouper(sql):
@@ -260,7 +262,23 @@ def main():
     def option(nom, defaut):
         return args[args.index(nom) + 1] if nom in args else defaut
 
-    base = option("--base", "gestionfil")
+    # `--help` NE TOUCHE A RIEN (17/10/2026). Ce script ne le connaissait pas :
+    # il ignorait l'argument et chargeait le schema dans la base par defaut.
+    if "-h" in args or "--help" in args:
+        print(__doc__)
+        return 0
+
+    # PLUS DE BASE PAR DEFAUT (17/10/2026). Le defaut etait « gestionfil », la base
+    # que CLAUDE.md interdit de toucher : un `python charger.py --help` y a lance
+    # un chargement complet, arrete a temps — le journal PostgreSQL a prouve
+    # qu'aucune instruction n'y etait arrivee. `migrer.py` refusait deja de
+    # choisir a la place de l'utilisateur ; ce script fait desormais de meme.
+    base = option("--base", None)
+    if not base:
+        print("--base est obligatoire : ce script ne choisit pas la base a votre place.")
+        print("  python charger.py --base <base> [--socle | --seeds | --production]")
+        print("  python charger.py --help")
+        return 2
     hote = option("--hote", "127.0.0.1")
     utilisateur = option("--utilisateur", "postgres")
     motdepasse = option("--motdepasse", os.environ.get("PGPASSWORD", "toor"))

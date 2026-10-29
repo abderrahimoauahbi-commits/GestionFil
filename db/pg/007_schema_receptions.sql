@@ -30,6 +30,7 @@
 CREATE TABLE reception (
     id_reception        text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
+    version             integer NOT NULL DEFAULT 1,  -- verrou optimiste (2026-10-17d)
     numero_reception    text    NOT NULL UNIQUE,
     date_reception      text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     id_bc               text    REFERENCES bon_commande(id_bc),
@@ -97,6 +98,9 @@ CREATE INDEX ix_bc_reception_regularisee
 -- -----------------------------------------------------------------------------
 -- ligne_reception
 -- -----------------------------------------------------------------------------
+-- UNE LIGNE PAR LIGNE DE BON, REFERENCE ET LOT (decision du 21/10/2026) : le meme
+-- lot pese deux fois s'additionne ; declencheur trg_ligne_reception_un_lot,
+-- migration 2026-10-21d.
 CREATE TABLE ligne_reception (
     id_ligne_reception  text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
@@ -188,6 +192,29 @@ CREATE TABLE ligne_reception (
 
 CREATE INDEX ix_ligne_reception_ref ON ligne_reception(code_reference);
 CREATE INDEX ix_ligne_reception_bc  ON ligne_reception(id_ligne_bc);
+
+-- -----------------------------------------------------------------------------
+-- etiquette_lot — une etiquette code-barres par bobine ou palette (19/10/2026)
+-- -----------------------------------------------------------------------------
+-- Migration 2026-10-19b_etiquettes_lot.sql (audit P3), qui pose aussi le
+-- declencheur d'immuabilite et la vue v_etiquette_lot que lit le scan.
+CREATE SEQUENCE seq_etiquette_lot;
+CREATE TABLE etiquette_lot (
+    code                text    NOT NULL PRIMARY KEY
+                                DEFAULT 'E' || lpad(nextval('seq_etiquette_lot')::text, 9, '0')
+                                CONSTRAINT ck_etq_code CHECK (code ~ '^E[0-9]{9}$'),
+    id_ligne_reception  text    NOT NULL
+                                REFERENCES ligne_reception(id_ligne_reception) ON DELETE CASCADE,
+    nature              text    NOT NULL CONSTRAINT ck_etq_nature CHECK (nature IN ('BOBINE', 'PALETTE')),
+    rang                integer NOT NULL CONSTRAINT ck_etq_rang CHECK (rang > 0),
+    nombre              integer NOT NULL,
+    poids_kg            numeric(18,4) CONSTRAINT ck_etq_poids CHECK (poids_kg IS NULL OR poids_kg > 0),
+    id_utilisateur_creation text NOT NULL REFERENCES utilisateur(id_utilisateur),
+    date_creation       timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT ck_etq_rang_nombre CHECK (rang <= nombre),
+    CONSTRAINT uq_etq_ligne_rang UNIQUE (id_ligne_reception, nature, rang)
+);
+CREATE INDEX ix_fk_etq_utilisateur ON etiquette_lot (id_utilisateur_creation);
 
 -- -----------------------------------------------------------------------------
 -- archive_reception  (photo qualite FIGEE - R03)

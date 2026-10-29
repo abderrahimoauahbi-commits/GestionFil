@@ -25,6 +25,10 @@ ON CONFLICT (id_frais) DO UPDATE SET
     recuperable = excluded.recuperable, commun = excluded.commun,
     methode_repartition = excluded.methode_repartition;
 
+-- Le fret international entre dans la valeur en douane (valeur CAF), qui
+-- calcule les droits attendus (migration 2026-10-19a).
+UPDATE parametres_frais SET entre_valeur_douane = 1 WHERE id_frais = 'FRET';
+
 -- Le module IMPORT. Saisir un dossier : direction, administration, assistante.
 -- CLOTURER — donc changer le CUMP — : direction et administration seulement.
 -- La reception physique passe, elle, par le module RECEPTIONS, comme toute

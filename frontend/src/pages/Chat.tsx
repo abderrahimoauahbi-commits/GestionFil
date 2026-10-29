@@ -280,18 +280,16 @@ export function Chat() {
           eteint ou un modele absent se manifestent de la meme facon : on pose
           une question, rien ne revient, et rien n'explique pourquoi. */}
       {etat && etat.joignable === false && (
-        <Carte className="mb-3 border-danger/40 bg-danger/5">
-          <CarteCorps className="text-[13px] text-texte">
-            <strong>Le moteur ne repond pas.</strong>{' '}
-            {local
-              ? "Ollama est injoignable sur le serveur. Aucune question n'aboutira tant qu'il n'a pas redemarre."
-              : "La cle d'acces manque ou a ete refusee."}
-          </CarteCorps>
-        </Carte>
+        <Alerte ton="danger" className="mb-3">
+          <strong>Le moteur ne repond pas.</strong>{' '}
+          {local
+            ? "Ollama est injoignable sur le serveur. Aucune question n'aboutira tant qu'il n'a pas redemarre."
+            : "La cle d'acces manque ou a ete refusee."}
+        </Alerte>
       )}
       {etat && etat.joignable && etat.modele_present === false && (
-        <Carte className="mb-3 border-alerte/40 bg-alerte/5">
-          <CarteCorps className="space-y-1 text-[13px] text-texte">
+        <Alerte ton="alerte" className="mb-3">
+          <div className="space-y-1">
             <div>
               <strong>Le moteur repond, mais il n'a pas le modele « {etat.modele} ».</strong> Chaque
               question echouera. Choisissez-en un autre ci-dessus, ou installez celui-ci sur le
@@ -302,8 +300,8 @@ export function Chat() {
                 Modeles presents : {etat.modeles_disponibles.join(', ')}
               </div>
             )}
-          </CarteCorps>
-        </Carte>
+          </div>
+        </Alerte>
       )}
 
       {/* LE CHOIX DU MODELE EST DANS L'ECRAN, pas dans un fichier du serveur.
@@ -463,13 +461,10 @@ export function Chat() {
 
               {/* LE BROUILLON : rien n'est enregistre tant qu'on n'a pas relu. */}
               {e.brouillon?.brouillon && (
-                <div className="mt-2 rounded-lg border border-alerte/40 bg-alerte/10 p-2">
-                  <div className="flex items-center gap-1.5 text-[12px] font-medium">
-                    <FileText className="size-3.5" />
-                    Brouillon — rien n’est enregistré
-                  </div>
-                  <p className="mt-0.5 text-[12px]">{e.brouillon.resume}</p>
+                <Alerte ton="alerte" icone={FileText} titre="Brouillon — rien n’est enregistré" className="mt-2">
+                  <p>{e.brouillon.resume}</p>
                   <Bouton
+                    variante="contour"
                     taille="sm"
                     className="mt-1.5"
                     onClick={() =>
@@ -479,7 +474,7 @@ export function Chat() {
                     Relire et valider
                     <ArrowRight />
                   </Bouton>
-                </div>
+                </Alerte>
               )}
             </div>
           </div>

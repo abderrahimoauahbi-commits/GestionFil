@@ -19,6 +19,7 @@ import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { Badge, Bouton } from '../composants/ui/base'
+import { StatutBadge } from '../composants/StatutBadge'
 import { useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 
@@ -52,22 +53,6 @@ interface Reception extends Record<string, unknown> {
   on_time: number | null
   in_full: number | null
   in_spec: number | null
-}
-
-const TON: Record<string, 'neutre' | 'info' | 'succes' | 'alerte' | 'danger'> = {
-  BROUILLON: 'neutre',
-  A_CONTROLER: 'alerte',
-  VALIDE: 'succes',
-  CLOTURE: 'info',
-  ANNULE: 'danger',
-}
-
-const LIBELLE: Record<string, string> = {
-  BROUILLON: 'En saisie',
-  A_CONTROLER: 'A controler',
-  VALIDE: 'Validee',
-  CLOTURE: 'Cloturee',
-  ANNULE: 'Annulee',
 }
 
 export function Receptions() {
@@ -167,7 +152,7 @@ export function Receptions() {
       entete: 'Statut',
       largeur: '130px',
       filtre: 'liste',
-      rendu: (r) => <Badge ton={TON[r.statut] ?? 'neutre'}>{LIBELLE[r.statut] ?? r.statut}</Badge>,
+      rendu: (r) => <StatutBadge entite="reception" code={r.statut} />,
     },
     {
       champ: 'nb_lignes',

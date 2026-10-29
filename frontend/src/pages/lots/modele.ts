@@ -55,6 +55,14 @@ export interface Lot extends Record<string, unknown> {
   alerte_derive: 'VERT' | 'ORANGE' | 'ROUGE' | null
   /** Absent quand la grille de droits masque les montants. */
   valeur_mad?: number | null
+  /** LE CONDITIONNEMENT DU LOT (23/10/2026) : ce qui convertit ses palettes, bobines et kilos. */
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
+  /** RECEPTION, HISTORIQUE, MOUVEMENT, FICHE_ARTICLE ou CORRECTION. */
+  origine_poids_bobine?: string | null
+  origine_bobines_palette?: string | null
+  date_conditionnement?: string | null
+  bobines_par_palette_catalogue?: number | null
 }
 
 export interface Compteurs {
@@ -169,14 +177,6 @@ export const designationUtile = (l: { code_reference: string; designation?: stri
 /** Un ecart signe : le « + » se lit avant le chiffre. */
 export const signe = (v: unknown, d = 1, unite = '') =>
   typeof v === 'number' && Number.isFinite(v) ? `${v > 0 ? '+' : ''}${nb(v, d)}${unite}` : '—'
-
-/** La couleur de la derive, en jetons du theme — jamais en dur. */
-export const classeDerive = (a: string | null | undefined) =>
-  a === 'ROUGE' ? 'text-danger font-semibold' : a === 'ORANGE' ? 'text-alerte font-semibold' : a === 'VERT' ? 'text-succes' : 'text-attenue-texte'
-
-/** Meme couleur, a partir de la couleur calculee par `couleurEcart`. */
-export const classeEcart = (c: 'vert' | 'orange' | 'rouge' | null) =>
-  c === 'rouge' ? 'text-danger font-semibold' : c === 'orange' ? 'text-alerte font-semibold' : c === 'vert' ? 'text-succes' : 'text-attenue-texte'
 
 export const lienFiche = (reference: string, lot: string) =>
   `/lots/fiche?reference=${encodeURIComponent(reference)}&lot=${encodeURIComponent(lot)}`

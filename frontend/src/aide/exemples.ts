@@ -6,7 +6,7 @@
  * PP FRZ-2900 Grey du plan d'achat), pour qu'on puisse suivre un cas de bout
  * en bout. Ils s'attachent a la fiche de leur ecran par sa route.
  */
-import type { Exemple } from './types'
+import type { Exemple } from './types.ts'
 
 export const EXEMPLES: Record<string, Exemple[]> = {
   /* --------------------------------------------------------- Fiches de base */
@@ -32,25 +32,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
         ['1 230,25 kg', '1 230,25 kg'],
       ],
       conclusion: 'Sans poids de bobine, une saisie en bobines est refusée : aucun facteur n’est deviné.',
-    },
-  ],
-  '/catalogue/completer': [
-    {
-      titre: 'compléter depuis le code',
-      situation: 'La référence PP-1500 Dtex-Bleu 6666-Hs n’a ni famille ni couleur interne.',
-      calcul: [
-        ['Famille proposée', '1500 Dtex'],
-        ['Couleur proposée', 'Bleu'],
-        ['Référence fournisseur proposée', '6666'],
-      ],
-      conclusion: 'On accepte ou on corrige ; la référence devient alors commandable et compte dans les besoins.',
-    },
-  ],
-  '/categories': [
-    {
-      titre: 'une famille sous sa catégorie',
-      situation: 'La famille « 2900 Dtex FRZ » se crée sous la catégorie Polypropylène.',
-      conclusion: 'Elle n’a de sens que sous sa catégorie : une famille sans catégorie est refusée.',
     },
   ],
   '/referentiels': [
@@ -89,39 +70,8 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       ],
     },
   ],
-  '/roles-bom': [
-    {
-      titre: 'une densité convertit les m² en kilos',
-      situation: 'Rôle Velours de la qualité Shaggy : 1,80 kg/m².',
-      calcul: [['10 000 m² planifiés', '10 000 × 1,80 = 18 000 kg de velours, avant perte']],
-    },
-  ],
 
   /* ------------------------------------------------------------- Production */
-  '/qualites': [
-    {
-      titre: 'traduire des m² en kilos',
-      situation: 'Qualité Shaggy, perte 5 % : velours 1,80 kg/m², trame 0,35 kg/m², latex 0,90 kg/m².',
-      calcul: [
-        ['Velours, 10 000 m²', '10 000 × 1,80 × 1,05 = 18 900 kg'],
-        ['Trame', '10 000 × 0,35 × 1,05 = 3 675 kg'],
-        ['Latex', '10 000 × 0,90 × 1,05 = 9 450 kg'],
-      ],
-      conclusion: 'Une référence en mètres linéaires exige sa densité (kg/ml), sinon le kg/m² ne se calcule pas.',
-    },
-  ],
-  '/recettes': [
-    {
-      titre: 'deux couleurs pour un rôle',
-      situation: 'Velours de la qualité Shaggy : 60 % PP-1500 Grey, 40 % PP-1500 Beige.',
-      calcul: [
-        ['PP-1500 Grey', '18 900 × 60 % = 11 340 kg'],
-        ['PP-1500 Beige', '18 900 × 40 % = 7 560 kg'],
-        ['Somme du rôle', '100 %'],
-      ],
-      conclusion: 'Pour chaque rôle, les parts font 100 % : 99 % ou 101 % est refusé.',
-    },
-  ],
   '/plans': [
     {
       titre: 'du plan aux besoins',
@@ -141,31 +91,82 @@ export const EXEMPLES: Record<string, Exemple[]> = {
   /* --------------------------------------------------------- Planification */
   '/plan-achat': [
     {
-      titre: 'PP FRZ-2900 Dtex-Grey 10575-Hs',
-      situation: 'HASIRCI, délai 65 jours, couverture 60 jours, aucun stock, aucun bon en cours.',
+      titre: 'la première proposition du moteur, pas à pas',
+      situation:
+        'Aujourd’hui 01/01/2026. Disponible 2 000 kg ; plan 100 kg par jour jusqu’au 30/06/2026 ; un bon validé de 800 kg livré le 25/01. Délai du fournisseur 10 jours, couverture d’une commande 30 jours, sécurité 5 jours ; ni minimum ni multiple.',
       calcul: [
-        ['Stock + machine + bons à l’heure', '0 kg'],
-        ['− Demande pendant le délai', '6 919 kg'],
-        ['= Stock projeté à l’arrivée', '−6 919 → compté 0'],
-        ['Sorties de la couverture', '6 703 kg'],
-        ['+ Sécurité', '3 351 kg'],
-        ['= À commander', '10 054 kg (14 palettes)'],
-        ['Montant', '10 054 × 2,670 USD = 26 844 USD = 244 634 MAD'],
+        ['Sécurité', '5 j × 100 kg/j = 500 kg'],
+        ['Le solde passe sous la sécurité', 'fin du 16/01 : 400 kg < 500 kg'],
+        ['Aujourd’hui + délai', '11/01'],
+        ['D = le plus tard des deux', '16/01 (motif « sécurité »)'],
+        ['F = D + 30 j, exclue', '15/02 : fenêtre [16/01, 15/02[, dernier jour couvert 14/02'],
+        ['Plan sur la fenêtre', '30 j × 100 = 3 000 kg'],
+        ['+ Sécurité', '500 kg'],
+        ['− S(D), solde au début du 16/01', '500 kg'],
+        ['− Arrivages après D dans la fenêtre', '800 kg (le 25/01)'],
+        ['= Besoin théorique', '2 200 kg (jour déterminant : 14/02)'],
+        ['Quantité proposée', '2 200 kg'],
+        ['À commander avant le', 'D − délai = 06/01 → TIER 2 (dans les 7 jours)'],
       ],
       conclusion:
-        'TIER 1 (rupture), mono-source : « Commander et qualifier une seconde source ». Les 6 919 kg consommés avant l’arrivée ne sont pas couverts.',
+        'Avec un minimum de commande de 2 500 kg et un multiple de 1 000 kg, la proposition monte à 3 000 kg. Avec l’arrondi à la palette de 450 kg (5 kg × 90 bobines), elle devient 2 250 kg = 5 palettes, et les 50 kg ajoutés s’affichent en complément de palette. Un arrivage le 15/02 (jour F) ne réduirait pas le besoin ; le 14/02 (F − 1), il compterait.',
+    },
+    {
+      titre: 'quand la rupture tombe avant la première arrivée possible',
+      situation: 'Même référence, mais 300 kg seulement aujourd’hui (01/01/2026) et aucun arrivage.',
+      calcul: [
+        ['Première rupture', '04/01 (couvert jusqu’au 03/01)'],
+        ['D = aujourd’hui + délai', '11/01 (motif « délai »)'],
+        ['S(D)', '0 kg : jamais négatif'],
+        ['Besoin théorique', '500 + 3 000 − 0 = 3 500 kg'],
+        ['Plan non couvert du 04/01 au 10/01', '7 × 100 = 700 kg, perdus'],
+        ['À commander avant le', '01/01, aujourd’hui → TIER 1'],
+      ],
+      conclusion:
+        'Le déficit d’avant D n’est ni reporté ni rattrapé : la commande couvre la fenêtre [11/01, 10/02[ et sa sécurité, pas les 700 kg déjà perdus. Pour eux, il reste l’arbitrage : un équivalent en stock, ou décaler la production.',
     },
   ],
   '/stock': [
     {
-      titre: 'le projeté, pas le physique',
+      titre: 'lire une ligne du stock projeté',
+      situation:
+        'Aujourd’hui 01/01/2026. Disponible 2 000 kg ; plan 100 kg par jour jusqu’au 30/06/2026 (18 100 kg) ; un bon validé de 800 kg livré le 25/01.',
       calcul: [
-        ['Physique', '1 200 kg'],
-        ['+ En-cours', '2 000 kg'],
-        ['− Besoins de l’horizon', '4 500 kg'],
-        ['= Projeté', '−1 300 kg → Rupture'],
+        ['Couvert jusqu’au', '20/01/2026 · 20 j (les 2 000 kg servent 20 jours)'],
+        ['État', 'Plan non couvert — rupture le 21/01'],
+        ['Arrivages comptés', '800 kg (le 25/01 : la couverture reprend 8 jours)'],
+        ['Plan non couvert', '18 100 − 2 000 − 800 = 15 300 kg sur l’horizon'],
+        ['À commander', '2 200 kg · avant le 06/01'],
       ],
-      conclusion: 'Une couverture d’un mois pour un délai de deux mois est le vrai signal.',
+      conclusion:
+        'L’état se lit sans la commande : la référence reste « plan non couvert » tant que le bon des 2 200 kg n’est pas validé et daté. Ce sont les chiffres de l’onglet « À commander » du plan d’achat.',
+    },
+    {
+      titre: 'les colonnes du stock projeté, sans double comptage',
+      situation:
+        'Aujourd’hui 01/01/2026. Magasin compté 2 000 kg dont un reste de 150 kg ; rien sur machine ; un bon validé de 800 kg le 25/01 ; délai fournisseur 10 j ; plan 100 kg par jour.',
+      calcul: [
+        ['Disponible (hors restes)', '2 000 − 150 = 1 850 kg'],
+        ['Sur machine', '0 kg'],
+        ['Restant', '150 kg (le reste, compté une fois)'],
+        ['Arrivages', '800 kg'],
+        ['Stock total projeté', '1 850 + 0 + 150 + 800 = 2 800 kg'],
+        ['Besoin jusqu’à livraison', 'plan du 01/01 au 10/01 inclus : 10 j × 100 = 1 000 kg'],
+      ],
+      conclusion:
+        'Le jour d’arrivée d’une commande passée aujourd’hui (le 11/01) n’est pas dans le besoin jusqu’à livraison : son arrivage compte avant son plan.',
+    },
+    {
+      titre: 'une hypothèse dans la simulation',
+      situation:
+        'Même référence : la première proposition est disponible le 16/01 (D), fenêtre [16/01, 15/02[, 2 200 kg. Hypothèse : un arrivage de 400 kg le 30/01.',
+      calcul: [
+        ['Besoin de réapprovisionnement réel', 'sécurité 500 + plan du 16/01 au 14/02 3 000 − S(D) 500 − arrivages après D 800 = 2 200 kg'],
+        ['Avec l’hypothèse', '500 + 3 000 − 500 − (800 + 400) = 1 800 kg'],
+        ['Quantité à commander', '2 200 → 1 800 kg (sans minimum ni multiple)'],
+      ],
+      conclusion:
+        'Un arrivage dans la fenêtre réduit la proposition d’autant. Rien n’est enregistré : en quittant la page, l’hypothèse disparaît.',
     },
   ],
 
@@ -177,19 +178,7 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       conclusion: 'La ligne est servie, le bon se solde. Une ligne de transport sans référence ne compte pas dans le solde.',
     },
   ],
-  '/bons-commande/nouveau': [
-    {
-      titre: 'commande et taux',
-      situation: '1 000 kg de PP-1500 Bleu à 2,50 USD/kg, validé au cours BAM du jour.',
-      calcul: [
-        ['Cours BAM proposé', '9,7068'],
-        ['Prix au kilo figé', '2,50 × 9,7068 = 24,267 MAD'],
-        ['Taux 10,05 saisi à la place', '+3,5 % : à confirmer'],
-      ],
-      conclusion: 'Celui qui saisit le bon ne le valide pas.',
-    },
-  ],
-  '/receptions': [
+  '/receptions/:id': [
     {
       titre: 'pesée et tolérance',
       situation: '1 000 kg attendus, tolérance 2 %.',
@@ -211,14 +200,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       conclusion: 'Clôturée, la réception ne se dévalide plus : on corrige par un avoir ou une facture complémentaire.',
     },
   ],
-  '/receptions/nouvelle': [
-    {
-      titre: 'compter les bobines',
-      situation: '474 bobines comptées pour 1 230 kg pesés.',
-      calcul: [['Poids réel par bobine', '1 230 ÷ 474 = 2,595 kg (+3,8 % sur 2,500)']],
-      conclusion: 'Au-delà de 3 %, la dérive du lot s’affiche ; la réception n’est pas bloquée.',
-    },
-  ],
 
   /* ----------------------------------------------------------- Importation */
   '/import/assistant': [
@@ -226,29 +207,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       titre: 'un dossier depuis le scan',
       situation: 'Liasse PDF : facture, connaissement, DUM. Le numéro est laissé vide.',
       conclusion: 'L’outil donne le rang suivant de l’année (ex. 19/26) et dépose les documents dans le dossier.',
-    },
-  ],
-  '/import': [
-    {
-      titre: 'répartir les frais',
-      situation: 'Dossier 19/26 : A 4 000 kg = 77 600 MAD, B 2 000 kg = 48 500 MAD.',
-      calcul: [
-        ['Douane 6 000 MAD, à la valeur', 'A 3 692,31 · B 2 307,69'],
-        ['Transit 2 300 MAD, au poids', 'A 1 533,33 · B 766,67'],
-        ['Transport 1 500 MAD, manuel', 'A 1 000,00 · B 500,00'],
-        ['Total des frais', 'A 6 225,64 (8,02 %) · B 3 574,36 (7,37 %)'],
-      ],
-      conclusion: 'Onglet Liquidation : corriger un montant passe le frais en manuel ; un total plus petit reste « non réparti ».',
-    },
-    {
-      titre: 'la clôture porte les frais',
-      situation: 'Ligne A : 4 010 kg reçus à 19,40 MAD/kg, 1 000 kg déjà sortis.',
-      calcul: [
-        ['Au CMUP (3 010 kg)', '6 225,64 × 3 010 ÷ 4 010 = 4 673,13 MAD'],
-        ['En écart (1 000 kg sortis)', '1 552,51 MAD'],
-        ['Nouveau CMUP de A', '19,40 + 4 673,13 ÷ 3 010 = 20,95 MAD/kg'],
-      ],
-      conclusion: 'La clôture est refusée tant qu’un frais est non réparti.',
     },
   ],
   '/retours-fournisseur': [
@@ -277,29 +235,28 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       conclusion: 'Un mouvement validé ne se corrige pas : son inverse est posté, les deux restent.',
     },
   ],
-  '/mouvements/nouveau': [
-    {
-      titre: 'une sortie hors machine',
-      situation: '12,5 kg de colle pour l’atelier, sur l’OF 2026-118, motif « atelier ».',
-      conclusion: 'La sortie part au CMUP du magasin ; un fil qui se charge sur machine passe par sa fiche, pas par ici.',
-    },
-  ],
   '/transferts': [
     {
-      titre: 'du fil en route',
-      situation: '120,5 kg de Morocco vers Polyfashions.',
+      titre: 'du fil en route, à sa date',
+      situation:
+        '120,5 kg partent de Morocco vers Polyfashions le 27/10, attendus le 30/10 (« Disponible au magasin destinataire le »).',
       calcul: [
-        ['À l’expédition', 'Morocco −120,5 kg, en route +120,5 kg'],
-        ['À la réception', 'en route −120,5 kg, Polyfashions +120,5 kg'],
+        ['À l’expédition', 'Morocco −120,5 kg ; en route +120,5 kg, comptés dans la valeur du stock'],
+        ['Plan d’achat', 'les 120,5 kg arrivent dans la couverture le 30/10'],
+        ['Le 02/11, toujours en route', '« en retard de 3 j » : hors couverture'],
+        ['« Réviser la date » au 05/11', 'comptés de nouveau, le 05/11'],
+        ['À la réception', 'en route −120,5 kg ; Polyfashions +120,5 kg au CMUP figé au départ'],
       ],
-      conclusion: 'En route, le fil compte dans la valeur et dans les besoins.',
+      conclusion:
+        'Sans date (expédié avant la règle du 27/10/2026), le transfert ne couvre rien et le contrôle C66 le signale jusqu’à ce qu’une date soit saisie.',
     },
   ],
   '/transferts/nouveau': [
     {
       titre: 'le disponible du magasin source',
       situation: 'Morocco porte 300 kg de la référence ; on tente d’en transférer 350.',
-      conclusion: 'Refusé : le disponible est celui du seul magasin source, jamais la somme des magasins.',
+      conclusion:
+        '« Dispo » passe en rouge (« dépassé ») et « Enregistrer le transfert » reste grisé : le disponible est celui du seul magasin source, jamais la somme des magasins.',
     },
   ],
   '/machines': [
@@ -365,13 +322,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       conclusion: 'Accordée par un autre responsable, elle sert une fois, pour ce lot et cette fiche.',
     },
   ],
-  '/etat-stock': [
-    {
-      titre: 'un état daté',
-      situation: 'État du stock du magasin Morocco au 30/09.',
-      conclusion: 'L’état porte sa date et ses filtres en en-tête ; les prix disparaissent pour un rôle qui ne les voit pas.',
-    },
-  ],
 
   /* ------------------------------------------------- Analyses et finance */
   '/valorisation': [
@@ -385,14 +335,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       ],
     },
   ],
-  '/landed-cost': [
-    {
-      titre: 'coût de revient d’une ligne d’import',
-      situation: 'Ligne A du dossier 19/26 : 77 600 MAD d’achat, 6 225,64 MAD de frais.',
-      calcul: [['Coefficient de frais', '6 225,64 ÷ 77 600 = 8,02 %']],
-      conclusion: 'Les écarts de prix listent ce que le CMUP n’a pas porté : positif = surcoût, négatif = gain.',
-    },
-  ],
   '/classification': [
     {
       titre: 'lire « AY »',
@@ -401,20 +343,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
         ['Y', 'consommation variable (25 % à 50 %)'],
       ],
       conclusion: 'Une référence AY se suit de près ; deux sources si possible.',
-    },
-  ],
-  '/rapports': [
-    {
-      titre: 'où va l’argent',
-      situation: 'Sur le trimestre : achats, consommation, valeur du stock, classement ABC.',
-      conclusion: 'Les montants sont masqués à qui n’a pas le droit de les voir.',
-    },
-  ],
-  '/matrice-prix': [
-    {
-      titre: 'comparer deux fournisseurs',
-      situation: 'PP-1500 Grey : 2,30 USD chez l’un, 2,45 USD chez l’autre.',
-      conclusion: 'L’écart de 0,15 USD/kg sur 10 000 kg fait 1 500 USD : l’arbitrage se lit d’un coup d’œil.',
     },
   ],
   '/historique-prix': [
@@ -433,22 +361,9 @@ export const EXEMPLES: Record<string, Exemple[]> = {
   ],
   '/tableau-de-bord': [
     {
-      titre: 'une tuile mène à sa liste',
-      situation: 'La tuile « Réceptions à contrôler » affiche 3.',
-      conclusion: 'Un clic ouvre ces 3 réceptions, locales et import comptées ensemble.',
-    },
-  ],
-  '/': [
-    {
-      titre: 'ce que vous voyez',
-      situation: 'Un magasinier voit Réceptions, Mouvements, Inventaire, Machines ; pas la Valorisation.',
-      conclusion: 'Les raccourcis suivent les droits du compte, comme le menu.',
-    },
-  ],
-  '/etats': [
-    {
-      titre: 'imprimer un bon',
-      situation: 'Le bon de sortie d’un transfert part avec le camion ; le bon de réception revient signé.',
+      titre: 'une file mène à sa liste',
+      situation: 'Sous « À traiter », la file « Réceptions à contrôler » affiche 3.',
+      conclusion: 'Un clic ouvre la liste des réceptions, où ces 3 attendent le contrôle d’un autre compte.',
     },
   ],
 
@@ -460,33 +375,11 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       conclusion: 'Sur 1 000 kg attendus, 1 030 kg passent alors sans dérogation. La modification est journalisée.',
     },
   ],
-  '/parametres': [
-    {
-      titre: 'où régler',
-      situation: 'Les seuils (tolérances, TIER, ABC) se règlent dans Configuration.',
-    },
-  ],
   '/utilisateurs': [
     {
       titre: 'masquer un champ',
       situation: 'Pour le magasinier, le CMUP est « masqué ».',
       conclusion: 'Le serveur ne l’envoie pas : il n’apparaît ni à l’écran, ni à l’impression, ni à l’export.',
-    },
-  ],
-  '/roles': [
-    {
-      titre: 'le modèle suit, le réglage à la main reste',
-      situation: 'Le rôle Magasinier passe le champ « Fil sur machine » de Lecture à Masqué. Ahmed et Karim sont magasiniers ; pour Karim, ce champ avait été réglé à la main en Écriture.',
-      calcul: [
-        ['Ahmed (suit le modèle)', 'Lecture → Masqué'],
-        ['Karim (réglé à la main)', 'reste Écriture'],
-      ],
-      conclusion: 'Pour remettre Karim au modèle : sa grille de droits → Appliquer le modèle du rôle.',
-    },
-    {
-      titre: 'supprimer un rôle',
-      situation: 'Le rôle « Acheteur » a encore 2 utilisateurs.',
-      conclusion: 'La suppression est refusée ; réaffectez les 2 comptes à un autre rôle, puis supprimez.',
     },
   ],
   '/audit': [

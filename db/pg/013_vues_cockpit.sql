@@ -12,31 +12,22 @@
 -- Ecrites en VUES et non dans le code Rust : ce sont des agregats purs, ils se
 -- relisent, et le jour de la migration PostgreSQL c'est une traduction et non
 -- une reecriture.
+--
+-- 27/10/2026 : une seule source de verite, le moteur de couverture (migration
+-- 2026-10-27e). La distribution des couvertures (v_cockpit_couverture) est
+-- retiree : les jours couverts sont ceux du moteur, calcules par la route. Les
+-- autres vues lisent v_stock_reference (lecture neutre) au lieu de
+-- v_stock_projete, et perdent le statut et les jours de couverture qu'elles en
+-- recopiaient.
 -- =============================================================================
 
 
 -- -----------------------------------------------------------------------------
--- v_cockpit_couverture — distribution des references par tranche de couverture
+-- v_cockpit_couverture — RETIREE LE 27/10/2026
 -- -----------------------------------------------------------------------------
--- Les six tranches du classeur, dans son ordre. La premiere n'est pas un
--- intervalle mais un etat : une couverture negative signifie que le projete est
--- deja sous zero, ce qui n'est pas « peu de jours » mais « plus rien ».
-DROP VIEW IF EXISTS v_cockpit_couverture CASCADE;
-CREATE VIEW v_cockpit_couverture AS
-WITH tranches(rang, libelle, borne_min, borne_max) AS (
-    VALUES (1, 'RUPTURE (<0)', NULL,  0.0),
-           (2, '0-30 j',        0.0,  30.0),
-           (3, '30-60 j',      30.0,  60.0),
-           (4, '60-90 j',      60.0,  90.0),
-           (5, '90-180 j',     90.0, 180.0),
-           (6, '>180 j',      180.0,  NULL)
-)
-SELECT t.rang, t.libelle,
-       (SELECT COUNT(*) FROM v_stock_projete sp
-         WHERE sp.jours_couverture IS NOT NULL
-           AND (t.borne_min IS NULL OR sp.jours_couverture >= t.borne_min)
-           AND (t.borne_max IS NULL OR sp.jours_couverture <  t.borne_max)) AS nb_references
-FROM tranches t;
+-- La distribution des references par tranche de couverture lisait les jours de
+-- couverture de v_stock_projete. Une seule source de verite, le moteur de
+-- couverture (migration 2026-10-27e) : les jours couverts viennent du moteur.
 
 
 -- -----------------------------------------------------------------------------
@@ -66,6 +57,10 @@ SELECT bm.annee_mois,
 -- groupe. L'economie annuelle est l'ecart multiplie par la consommation de
 -- l'annee.
 --
+-- 27/10/2026 (« deux chiffres separes ») : l'economie est une PROJECTION, AU PLAN
+-- du moteur de couverture. La vue ne rend plus que les prix ; la route
+-- (consultation::economies_au_plan) multiplie l'ecart par le plan / mois x 12.
+--
 -- CE CHIFFRE EST UNE BORNE HAUTE, ET L'ECRAN DOIT LE DIRE. Il suppose que
 -- l'equivalent tient la meme qualite, que le fournisseur suit le volume et que
 -- le delai ne se degrade pas — trois hypotheses qu'un acheteur verifie avant de
@@ -81,7 +76,7 @@ WITH groupes AS (
 mini AS (
     SELECT g.code_groupe_equiv, MIN(sp.cmup_mad) AS prix_min_mad
       FROM groupes g
-      JOIN v_stock_projete sp ON sp.code_reference = g.code_reference
+      JOIN v_stock_reference sp ON sp.code_reference = g.code_reference
      WHERE sp.cmup_mad > 0
      GROUP BY g.code_groupe_equiv
 )
@@ -93,18 +88,14 @@ SELECT sp.code_reference,
        ROUND(m.prix_min_mad, 4)                             AS prix_min_mad,
        (SELECT sp2.fournisseur_nom
           FROM groupes g2
-          JOIN v_stock_projete sp2 ON sp2.code_reference = g2.code_reference
+          JOIN v_stock_reference sp2 ON sp2.code_reference = g2.code_reference
          WHERE g2.code_groupe_equiv = g.code_groupe_equiv
            AND sp2.cmup_mad = m.prix_min_mad
-         LIMIT 1)                                           AS fournisseur_alternatif,
-       ROUND(COALESCE(sp.conso_mensuelle_kg, 0) * 12, 4)    AS conso_annuelle_kg,
-       ROUND((sp.cmup_mad - m.prix_min_mad)
-             * COALESCE(sp.conso_mensuelle_kg, 0) * 12, 2)  AS economie_annuelle_mad
-  FROM v_stock_projete sp
+         LIMIT 1)                                           AS fournisseur_alternatif
+  FROM v_stock_reference sp
   JOIN groupes g ON g.code_reference = sp.code_reference
   JOIN mini    m ON m.code_groupe_equiv = g.code_groupe_equiv
- WHERE sp.cmup_mad > m.prix_min_mad
-   AND COALESCE(sp.conso_mensuelle_kg, 0) > 0;
+ WHERE sp.cmup_mad > m.prix_min_mad;
 
 
 -- -----------------------------------------------------------------------------
@@ -118,10 +109,10 @@ CREATE VIEW v_cockpit_devise AS
 WITH budget AS (
     SELECT r.code_devise_catalogue AS code_devise,
            COUNT(*)                AS nb_references,
-           SUM(COALESCE(sp.conso_mensuelle_kg, 0) * 12
-               * COALESCE(sp.cmup_mad, 0)) AS montant_mad
+           -- Le REEL des 12 mois pleins, valeur au livre (27/10/2026).
+           SUM(sp.valeur_reel_12m_mad) AS montant_mad
       FROM reference r
-      JOIN v_stock_projete sp ON sp.code_reference = r.code_reference
+      JOIN v_stock_reference sp ON sp.code_reference = r.code_reference
      WHERE r.actif = 1
      GROUP BY r.code_devise_catalogue
 )
@@ -142,16 +133,16 @@ SELECT b.code_devise,
 -- tri d'un plan de securisation.
 DROP VIEW IF EXISTS v_cockpit_mono_source CASCADE;
 -- L'alternative doit venir d'un AUTRE fournisseur (2026-09-17i).
+-- 27/10/2026 : le statut et les jours de couverture (de v_stock_projete) sont
+-- retires ; ceux du moteur de couverture s'ajoutent cote serveur.
 CREATE VIEW v_cockpit_mono_source AS
 SELECT sp.code_reference,
        sp.designation,
        sp.fournisseur_nom,
        sp.delai_livraison_jours,
-       sp.statut,
-       ROUND(sp.jours_couverture, 1) AS jours_couverture,
-       ROUND(COALESCE(sp.conso_mensuelle_kg, 0) * 12
-             * COALESCE(sp.cmup_mad, 0), 2) AS budget_annuel_mad
-  FROM v_stock_projete sp
+       -- Le REEL des 12 mois pleins, valeur au livre (27/10/2026).
+       ROUND(sp.valeur_reel_12m_mad, 2) AS budget_annuel_mad
+  FROM v_stock_reference sp
  WHERE NOT EXISTS (
          SELECT 1
            FROM reference_groupe_equiv a
@@ -170,6 +161,8 @@ SELECT sp.code_reference,
 -- -----------------------------------------------------------------------------
 -- L'assiette du classement ABC, exposee telle quelle pour le graphique de
 -- Pareto : la barre porte la valeur, la courbe porte le cumul.
+-- 27/10/2026 : le statut (de v_stock_projete) est retire ; celui du moteur de
+-- couverture s'ajoute cote serveur.
 DROP VIEW IF EXISTS v_cockpit_pareto CASCADE;
 CREATE VIEW v_cockpit_pareto AS
 WITH valeur AS (
@@ -177,10 +170,9 @@ WITH valeur AS (
            sp.designation,
            r.classe_abc,
            r.classe_xyz,
-           sp.statut,
-           ROUND(COALESCE(sp.conso_mensuelle_kg, 0) * 12
-                 * COALESCE(sp.cmup_mad, 0), 2) AS valeur_conso_annuelle_mad
-      FROM v_stock_projete sp
+           -- Le REEL des 12 mois pleins, valeur au livre (27/10/2026).
+           ROUND(sp.valeur_reel_12m_mad, 2) AS valeur_conso_annuelle_mad
+      FROM v_stock_reference sp
       JOIN reference r ON r.code_reference = sp.code_reference
      WHERE r.actif = 1
 )

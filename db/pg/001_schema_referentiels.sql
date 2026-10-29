@@ -100,6 +100,8 @@ CREATE TABLE cours_bam (
 -- categorie_matiere
 -- -----------------------------------------------------------------------------
 CREATE TABLE categorie_matiere (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_categorie      text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     description         text,
@@ -121,6 +123,8 @@ CREATE TABLE categorie_matiere (
 -- role_bom
 -- -----------------------------------------------------------------------------
 CREATE TABLE role_bom (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_role           text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     description         text,
@@ -134,6 +138,8 @@ CREATE TABLE role_bom (
 -- est_quarantaine : destination automatique des receptions non conformes.
 -- -----------------------------------------------------------------------------
 CREATE TABLE magasin (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_magasin        text    NOT NULL PRIMARY KEY,
     nom                 text    NOT NULL,
     type                text,
@@ -157,6 +163,8 @@ CREATE TABLE magasin (
 --                  prend le prix de la premiere entree valorisee.
 -- -----------------------------------------------------------------------------
 CREATE TABLE type_mouvement (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_type_mvt       text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     signe               bigint NOT NULL CHECK (signe IN (-1, 1)),
@@ -175,6 +183,8 @@ CREATE TABLE type_mouvement (
 -- motif_mouvement
 -- -----------------------------------------------------------------------------
 CREATE TABLE motif_mouvement (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_motif          text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     categorie           text    NOT NULL,
@@ -186,6 +196,8 @@ CREATE TABLE motif_mouvement (
 -- motif_ligne  (motifs de retour R1..R6 du CDC C08)
 -- -----------------------------------------------------------------------------
 CREATE TABLE motif_ligne (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_motif_ligne    text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     categorie           text,

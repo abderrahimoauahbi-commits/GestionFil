@@ -12,10 +12,16 @@ Remplace `GESTION Fil.xlsx` (26 feuilles) par un système transactionnel. 124 r�
 .\demarrer.ps1
 ```
 
-Compile le backend, le démarre sur `:8080`, attend qu'il réponde, puis lance l'interface sur `:5173`. Signale au passage un catalogue vide ou des comptes sans mot de passe. `Ctrl+C` arrête les deux.
+**Un seul serveur**, sur `http://localhost:8080`, sert l'API **et** l'interface compilée
+(`frontend/dist`) : le script recompile l'interface seulement si son code a changé, compile le
+serveur, arrête un ancien serveur Gestion Fil resté sur le port, démarre, attend qu'il réponde et
+ouvre le navigateur. `Ctrl+C` l'arrête.
 
-> L'application a besoin de **deux serveurs**. Sans le backend, Vite répond
-> `http proxy error: connect ECONNREFUSED 127.0.0.1:8080`.
+```powershell
+.\demarrer.ps1 -Dev             # + Vite sur :5173 (rechargement à chaud, /api relayé vers :8080)
+.\demarrer.ps1 -Reconstruire    # recompiler l'interface même sans changement
+.\demarrer.ps1 -SansNavigateur
+```
 
 ## Première installation
 
@@ -61,8 +67,10 @@ Les comptes sont nominatifs (`seed_110_comptes_production.sql`) ; chacun exige u
 
 ```powershell
 cd backend;  cargo test                                  # tests unitaires (calculs purs)
-cd ..\frontend; npm test                                 # colisage, mêmes cas que la base
+cd ..\frontend; npm test                                 # node --test : colisage, statuts, nombres,
+                                                         # Code 128, indices d'aide et catalogue…
              npm run build                               # types + bundle
+             python e2e/lancer.py --cible <CARGO_TARGET_DIR>   # bout en bout (Playwright + Edge)
 cd ..;       python backend\tests\banc\banc.py --cible <CARGO_TARGET_DIR>
 ```
 
@@ -72,13 +80,51 @@ depuis un dossier vide (aucun `.env` lu), joue les scénarios métier de bout en
 sessions, concurrence, déclencheurs, masquage) puis supprime la base. Il ne touche jamais la
 base `gestionfil`. `deploiement/fabriquer-paquet.ps1` l'exige avant de fabriquer un paquet.
 
+### Vérification automatique (17/10/2026)
+
+```powershell
+git config core.hooksPath .githooks   # UNE FOIS par clone
+```
+
+Chaque `git push` rejoue alors `verifier.ps1 -Rapide` — clippy, tests Rust, lint, types, compilation
+et tests de l'interface — et s'arrête au premier échec (`git push --no-verify` pour passer outre).
+Sur GitHub, `.github/workflows/verification.yml` rejoue le tout sous Linux, **banc métier compris**,
+à chaque envoi. Le bout en bout (Playwright + Edge) reste au poste, avant publication.
+
 ---
 
 ## État et décisions
 
 - `docs/ADR-001-decisions-fondatrices.md` — les décisions du modèle de données.
 - `docs/ADR-002-regles-de-gestion-2026-10.md` — les 18 règles de gestion du 08/10/2026, où chacune est garantie et ce qui la contrôle.
+- `docs/ADR-003-reception-unifiee-gr-ir-landed-cost.md` — la réception unifiée (arrivage pegé au bon, facture fournisseur, frais d'approche).
+- `docs/matrice-mouvements.md` — les types de mouvement (sens, CMUP, coût, réversibilité), générée par `python db/pg/matrice.py`.
+- `docs/A-DECIDER-*.md` — les sujets en attente d'une décision (OF supply chain, fiche de production, analyse de consommation, verrou optimiste).
 - `docs/ecarts-cahier-des-charges.md` — la traçabilité du cahier des charges et les points en attente de décision.
+
+## Aide en ligne, guide et manuel (27/10/2026)
+
+**Une seule source : le catalogue d'aide `frontend/src/aide/`.** Une fiche par écran
+(`fiches/*.ts`, trouvée par la route de l'écran) : objectif, prérequis, droits, procédures, **tableau
+des champs** (l'intitulé EXACT de l'écran, sa description, s'il est obligatoire, ses valeurs, son
+défaut), règles, refus, écrans liés ; `exemples.ts` y ajoute des exemples chiffrés, `tutoriel.ts` le
+guide pas à pas. Elle alimente quatre lecteurs :
+
+| Lecteur | Où | Comment |
+|---|---|---|
+| Indice ⓘ d'un champ | à côté de l'intitulé, sur chaque écran | survol, clic ou tap ; **F1** dans le champ ; Échap ferme |
+| Aide de l'écran | le « ? » à côté du titre | panneau latéral (plein écran sur téléphone) |
+| Guide utilisateur | menu Aide → Guide utilisateur (`/guide-utilisateur`) | le cycle complet par rôle, filtrable |
+| Manuel imprimable | `/etats/manuel` | le guide, puis toutes les fiches, par chapitre |
+
+L'indice se pose **sans toucher aux écrans** : les primitives d'étiquette (`Etiq`, `Libelle`,
+`EnteteIndice`, en-têtes de `DataTable` et de `GrilleLignes`, `Formulaire`) le cherchent d'elles-mêmes,
+et `IndicesAutomatiques` (monté une fois dans la coquille) le pose sur les `<label>`, `<th>`, `<dt>` et
+petits titres dessinés à la main. Un champ que le catalogue ne décrit pas n'affiche rien. La recherche
+(`aide/indice.ts`) ignore casse, accents, `*`, `:` et apostrophes, puis la précision entre parenthèses,
+puis la devise et l'année. `tests/aide.test.ts` refuse une fiche dont la route n'existe pas, un
+intitulé en double, un exemple orphelin ou une étape du guide qui nomme un champ absent de sa fiche.
+**Un écran qui change d'intitulé change sa fiche** : sinon son indice disparaît.
 
 ## Droits par champ
 
@@ -98,13 +144,16 @@ Un champ **masqué** n'est pas envoyé par le serveur — il n'existe ni dans la
 ## Organisation
 
 ```
-db/          schéma, triggers, vues, contrôles, jeux de données, tests
-backend/     Rust + Axum + sqlx
-docs/        décisions d'architecture et écarts au cahier des charges
+db/pg/       schéma PostgreSQL 18, déclencheurs, vues, contrôles, migrations datées, socle
+backend/     Rust + Axum + sqlx (serveur, gestionfil-admin, gestionfil-import), banc de tests
+frontend/    React 19 + TypeScript + Tailwind 4 : web (PWA) et bureau (Tauri 2), aide en ligne
+deploiement/ scripts du serveur Ubuntu : paquet, publication, retour arrière
+docs/        décisions d'architecture, sujets à décider, écarts au cahier des charges
 ```
 
-- [db/README.md](db/README.md) — invariants garantis, vues, contrôles, migration PostgreSQL
-- [backend/README.md](backend/README.md) — API, principes, séquences types
+- [db/README.md](db/README.md) — invariants garantis, vues, contrôles C01–C66, migrations
+- [backend/README.md](backend/README.md) — organisation, principes, familles de routes
+- [deploiement/README.md](deploiement/README.md) — serveur, publication, sauvegardes, assistant
 - [docs/ADR-001](docs/ADR-001-decisions-fondatrices.md) — 12 décisions fondatrices
 - [docs/écarts](docs/ecarts-cahier-des-charges.md) — traçabilité CDC → implémentation
 

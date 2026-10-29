@@ -125,6 +125,10 @@ export const jeton = {
   effacer: () => sessionStorage.removeItem(CLE_JETON),
 }
 
+/** Le 429 de nginx (limitation de debit) : une rafale, pas une panne. */
+const erreurTropDeRequetes = () =>
+  new ErreurApi(429, 'TROP_DE_REQUETES', 'Trop de requêtes en peu de temps : patientez une seconde, puis réessayez.')
+
 async function requete<T>(
   methode: string,
   route: string,
@@ -173,6 +177,13 @@ async function requete<T>(
     try {
       donnees = JSON.parse(texte)
     } catch {
+      // LE 429 DE NGINX (limitation de debit, audit C4) arrive avec une page
+      // HTML. Sans ce cas, il tombait ici en « Le backend est-il demarre ? »,
+      // qui fait croire a une panne pour une simple rafale. Seulement s'il n'est
+      // PAS du JSON : le 429 de l'application (TROP_DE_TENTATIVES, a la
+      // connexion) porte son propre message — « reessayez dans 5 min » — qu'il
+      // ne faut pas ecraser.
+      if (reponse.status === 429) throw erreurTropDeRequetes()
       throw new ErreurApi(
         reponse.status,
         'REPONSE_INVALIDE',
@@ -243,6 +254,7 @@ async function envoyerFichier<T>(route: string, donnees: FormData): Promise<T> {
   try {
     corps = texte ? JSON.parse(texte) : null
   } catch {
+    if (reponse.status === 429) throw erreurTropDeRequetes()
     throw new ErreurApi(reponse.status, 'REPONSE_INVALIDE', `Reponse inattendue (HTTP ${reponse.status}).`)
   }
   if (!reponse.ok) {

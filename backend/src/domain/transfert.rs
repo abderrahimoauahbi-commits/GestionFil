@@ -78,7 +78,7 @@ async fn dossier(
     let entete: EnteteTransfert = sqlx::query_as(
         // VERROUILLE (audit v4) : deux expeditions simultanees du meme
         // transfert lisaient toutes deux BROUILLON.
-        "SELECT numero_transfert, date_transfert, code_magasin_source,
+        "SELECT numero_transfert, date_transfert::text AS date_transfert, code_magasin_source,
                 code_magasin_dest, statut, id_utilisateur
            FROM transfert WHERE id_transfert = $1
             FOR UPDATE",
@@ -140,7 +140,7 @@ async fn ouvrir_mouvement(
         "INSERT INTO mouvement
              (id_mouvement, numero_mouvement, code_type_mvt, code_magasin,
               code_motif, reference_document, id_utilisateur, date_mouvement)
-         VALUES ($1, $2, $3, $4, 'TRANSFERT', $5, $6, $7)"
+         VALUES ($1, $2, $3, $4, 'TRANSFERT', $5, $6, fn_jour_casablanca($7))"
     } else {
         "INSERT INTO mouvement
              (id_mouvement, numero_mouvement, code_type_mvt, code_magasin,
@@ -166,10 +166,16 @@ async fn ouvrir_mouvement(
 /// Seule la SORTIE est ecrite. La marchandise quitte le magasin source et n'est
 /// nulle part ailleurs : elle est en transit, et le restera jusqu'a ce que
 /// quelqu'un constate son arrivee.
+///
+/// LE FIL EN ROUTE EST UN ARRIVAGE (27/10/2026) : il part avec une DATE PREVUE
+/// DE DISPONIBILITE au magasin destinataire — celle passee ici, sinon celle deja
+/// saisie sur le transfert en preparation. Sans elle, la base refuse le depart
+/// (TRF-DATE) ; le moteur de couverture le compte a cette date.
 pub async fn expedier(
     db: &Db,
     user: &Utilisateur,
     id_transfert: &str,
+    date_disponibilite_prevue: Option<&str>,
 ) -> AppResult<ResultatTransfert> {
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -244,10 +250,12 @@ pub async fn expedier(
     sqlx::query(
         "UPDATE transfert
             SET statut = 'VALIDE',
-                date_sortie = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+                date_sortie = now(),
+                date_disponibilite_prevue = COALESCE(fn_jour_casablanca($2), date_disponibilite_prevue)
           WHERE id_transfert = $1",
     )
     .bind(id_transfert)
+    .bind(date_disponibilite_prevue)
     .execute(&mut *tx)
     .await?;
 
@@ -328,7 +336,7 @@ pub async fn receptionner(
         "UPDATE transfert
             SET statut = 'TERMINE',
                 id_utilisateur_reception = $2,
-                date_reception_dest = $3
+                date_reception_dest = fn_instant($3)
           WHERE id_transfert = $1",
     )
     .bind(id_transfert)

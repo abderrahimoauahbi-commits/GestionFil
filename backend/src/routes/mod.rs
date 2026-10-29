@@ -11,10 +11,12 @@ mod briefing;
 mod completion;
 pub(crate) mod auth_routes;
 mod consultation;
+pub(crate) mod couverture;
 mod devalidation;
 mod entites;
 mod factures;
 mod importation;
+mod etiquettes;
 mod lots;
 mod machines;
 pub(crate) mod json;
@@ -25,6 +27,12 @@ mod referentiels;
 mod retours;
 mod roles;
 pub(crate) mod stock;
+mod transferts;
+mod inventaires;
+mod ordres_fabrication;
+pub(crate) mod bons_commande;
+mod receptions;
+mod recherche;
 mod telechargements;
 
 use crate::state::AppState;
@@ -89,6 +97,12 @@ pub fn router(state: AppState) -> Router {
         .allow_headers([
             axum::http::header::AUTHORIZATION,
             axum::http::header::CONTENT_TYPE,
+        ])
+        // LA LISTE COUPEE SE DIT (24/10/2026) : un poste de bureau (autre origine)
+        // doit pouvoir lire ces en-tetes, sinon il ne sait pas qu'il manque des lignes.
+        .expose_headers([
+            axum::http::HeaderName::from_static("x-total-count"),
+            axum::http::HeaderName::from_static("x-liste-tronquee"),
         ]);
 
     // L'interface, quand elle est deployee a cote du serveur.
@@ -231,6 +245,16 @@ pub fn router(state: AppState) -> Router {
         .route("/api/plans/{id}/mrp", post(operations::calculer_mrp))
         .route("/api/plans/{id}/snapshot", post(operations::snapshot_mrp))
         .route("/api/plans/{id}/besoins", get(consultation::besoins_mrp))
+        // Les ordres de fabrication (22/10/2026) : cycle et consommation réelle.
+        .route("/api/ordres-fabrication",
+               get(ordres_fabrication::lister).post(ordres_fabrication::creer))
+        .route("/api/ordres-fabrication/qualites", get(ordres_fabrication::qualites))
+        .route("/api/ordres-fabrication/consommation-qualites",
+               get(ordres_fabrication::consommation_qualites))
+        .route("/api/ordres-fabrication/{id}",
+               get(ordres_fabrication::lire).patch(ordres_fabrication::modifier))
+        .route("/api/ordres-fabrication/{id}/statut", put(ordres_fabrication::changer_statut))
+        .route("/api/ordres-fabrication/{id}/consommation", get(ordres_fabrication::consommation))
         // --- Stock et mouvements ----------------------------------------------
         // Les retours fournisseur, document libre (12/10/2026).
         .route("/api/retours-fournisseur", get(retours::lister).post(retours::creer))
@@ -317,6 +341,13 @@ pub fn router(state: AppState) -> Router {
         .route("/api/machines/fiches/{id}/apercu", post(machines::apercu_fiche))
         .route("/api/machines/fiches/{id}/devalider", post(machines::devalider_fiche))
         .route("/api/machines/motifs", get(machines::lister_motifs))
+        // Les OF qu'une fiche (machine ou hors machine) peut choisir (22/10/2026).
+        .route("/api/machines/of-ouverts", get(machines::of_ouverts))
+        .route("/api/machines/of-ouverts/{id}/hors-machine", get(machines::of_hors_machine))
+        // La qualite explicite (23/10/2026) : les qualites ouvertes, et ce
+        // qu'une qualite a sorti et rendu sans OF.
+        .route("/api/machines/qualites", get(machines::qualites_ouvertes))
+        .route("/api/machines/qualites/{code}/hors-machine", get(machines::qualite_hors_machine))
         // Lire le plan d une machine, ou le corriger. La correction exige
         // PARAMETRES/ECRIRE — la direction et les super-utilisateurs — parce
         // qu une capacite fausse fausse toute la consommation qui en decoule.
@@ -341,15 +372,21 @@ pub fn router(state: AppState) -> Router {
         .route("/api/devalider", get(devalidation::documents_reversibles))
         .route("/api/devalider/{document}/{id}", post(devalidation::devalider))
         .route("/api/transferts",
-               get(stock::lister_transferts).post(stock::creer_transfert))
-        .route("/api/transferts/{id}/lignes", post(stock::ajouter_ligne_transfert))
+               get(transferts::lister_transferts).post(transferts::creer_transfert))
+        .route("/api/transferts/{id}/lignes", post(transferts::ajouter_ligne_transfert))
         .route(
             "/api/transferts/{id}",
-            get(stock::dossier_transfert)
-                .put(stock::modifier_transfert)
-                .delete(stock::annuler_transfert),
+            get(transferts::dossier_transfert)
+                .put(transferts::modifier_transfert)
+                .delete(transferts::annuler_transfert),
         )
         .route("/api/transferts/{id}/expedier", post(operations::expedier_transfert))
+        // La date prevue de disponibilite, revisable tant que le transfert roule
+        // (27/10/2026) : le moteur de couverture le compte a cette date.
+        .route(
+            "/api/transferts/{id}/date-disponibilite",
+            post(transferts::reviser_date_disponibilite),
+        )
         .route(
             "/api/transferts/{id}/receptionner",
             post(operations::receptionner_transfert),
@@ -357,10 +394,14 @@ pub fn router(state: AppState) -> Router {
         // Alias historique : l'expedition etait appelee « validation ».
         .route("/api/transferts/{id}/valider", post(operations::expedier_transfert))
         .route("/api/inventaires",
-               get(stock::lister_inventaires).post(stock::creer_inventaire))
+               get(inventaires::lister_inventaires).post(inventaires::creer_inventaire))
         .route("/api/inventaires/{id}/lignes",
-               get(stock::lignes_inventaire).put(stock::saisir_comptage))
-        .route("/api/inventaires/{id}", get(stock::lire_inventaire))
+               get(inventaires::lignes_inventaire).put(inventaires::saisir_comptage))
+        .route("/api/inventaires/ouverts", get(inventaires::inventaires_ouverts))
+        .route("/api/inventaires/candidats", get(inventaires::candidats_inventaire))
+        .route("/api/inventaires/{id}/references",
+               get(inventaires::references_inventaire).put(inventaires::choisir_references_inventaire))
+        .route("/api/inventaires/{id}", get(inventaires::lire_inventaire))
         .route("/api/inventaires/{id}/preparer", post(operations::preparer_inventaire))
         .route("/api/inventaires/{id}/valider", post(operations::valider_inventaire))
         .route("/api/inventaires/{id}/renvoyer", post(operations::renvoyer_inventaire))
@@ -368,34 +409,38 @@ pub fn router(state: AppState) -> Router {
         .route("/api/inventaires/{id}/annuler", post(operations::annuler_inventaire))
         // --- Achats et receptions ---------------------------------------------
         .route("/api/bons-commande",
-               get(stock::lister_bc).post(stock::creer_bc))
+               get(bons_commande::lister_bc).post(bons_commande::creer_bc))
         .route("/api/bons-commande/{id}",
-               patch(stock::modifier_bc).delete(stock::supprimer_bc))
+               patch(bons_commande::modifier_bc).delete(bons_commande::supprimer_bc))
         // Sans `{id}` : la liste sert AUSSI a la creation, quand le bon n'existe
         // pas encore et qu'on vient de choisir le fournisseur.
-        .route("/api/references-commandables", get(stock::references_commandables))
+        .route("/api/references-commandables", get(bons_commande::references_commandables))
         .route("/api/bons-commande/{id}/lignes",
-               get(stock::lignes_bc).post(stock::ajouter_ligne_bc))
+               get(bons_commande::lignes_bc).post(bons_commande::ajouter_ligne_bc))
         .route("/api/bons-commande/{id}/lignes/{ligne}",
-               patch(stock::modifier_ligne_bc).delete(stock::supprimer_ligne_bc))
-        .route("/api/bons-commande/{id}/statut", put(stock::changer_statut_bc))
+               patch(bons_commande::modifier_ligne_bc).delete(bons_commande::supprimer_ligne_bc))
+        .route("/api/bons-commande/{id}/statut", put(bons_commande::changer_statut_bc))
         .route("/api/receptions",
-               get(stock::lister_receptions).post(stock::creer_reception))
-        .route("/api/receptions/{id}", patch(stock::modifier_reception))
+               get(receptions::lister_receptions).post(receptions::creer_reception))
+        .route("/api/receptions/{id}", patch(receptions::modifier_reception))
         // Sans `{id}` : sert aussi a la creation, quand la reception n'existe pas
         // encore et qu'on vient de designer le bon de commande.
-        .route("/api/lignes-attendues", get(stock::lignes_attendues))
+        .route("/api/lignes-attendues", get(receptions::lignes_attendues))
         // Les dossiers d'import ouverts, pour l'en-tete d'un arrivage (ADR-003
         // phase A). Garde par RECEPTIONS : le magasinier dit quel conteneur il
         // vide sans avoir a lire les dossiers d'import.
-        .route("/api/receptions-dossiers-import", get(stock::dossiers_import_ouverts))
+        .route("/api/receptions-dossiers-import", get(receptions::dossiers_import_ouverts))
         .route("/api/receptions/{id}/lignes",
-               get(stock::lignes_reception).post(stock::ajouter_ligne_reception))
+               get(receptions::lignes_reception).post(receptions::ajouter_ligne_reception))
         .route(
             "/api/receptions/{id}/lignes/{ligne}",
-            patch(stock::modifier_ligne_reception).delete(stock::supprimer_ligne_reception),
+            patch(receptions::modifier_ligne_reception).delete(receptions::supprimer_ligne_reception),
         )
-        .route("/api/receptions/{id}/statut", put(stock::changer_statut_reception))
+        .route("/api/receptions/{id}/statut", put(receptions::changer_statut_reception))
+        // Les etiquettes de lot a code-barres (audit P3, 19/10/2026).
+        .route("/api/receptions/{id}/etiquettes",
+               get(etiquettes::lister).post(etiquettes::generer))
+        .route("/api/etiquettes/{code}", get(etiquettes::lire))
         .route("/api/receptions/{id}/valider", post(operations::valider_reception))
         .route("/api/receptions/{id}/cloturer", post(operations::cloturer_reception))
         .route("/api/receptions/{id}/facture-contexte", get(operations::contexte_facture_reception))
@@ -409,12 +454,17 @@ pub fn router(state: AppState) -> Router {
         .route("/api/factures-fournisseur/{id}",
                get(factures::lire).patch(factures::modifier).delete(factures::supprimer))
         .route("/api/factures-fournisseur/{id}/valider", post(factures::valider))
-        .route("/api/plan-achat", get(consultation::plan_achat))
+        // LA COUVERTURE DU PLAN (moteur du 26/10/2026) : le plan seul, le stock du
+        // jour, les arrivages dates, la proposition. Depuis le 27/10/2026, la seule
+        // source de verite du besoin : l'ancien calcul (`GET /api/plan-achat`,
+        // `/api/plan-achat/detail`, v_plan_achat) est retire.
+        .route("/api/couverture", get(couverture::liste))
+        .route("/api/couverture/{reference}", get(couverture::detail))
+        // L'espace « Simulation » (27/10/2026) : un POST qui ne fait que LIRE.
+        .route("/api/couverture/{reference}/simulation", post(couverture::simulation))
         .route("/api/plan-achat/generer", post(operations::generer_plan_achat))
         .route("/api/plan-achat/commander", post(operations::convertir_plan_achat))
         .route("/api/plan-achat/kpi", get(consultation::kpi_plan_achat))
-        .route("/api/plan-achat/stocks-minimums", get(consultation::stocks_minimums))
-        .route("/api/plan-achat/detail", get(consultation::detail_proposition))
         .route("/api/historique-prix", get(consultation::historique_prix))
         .route("/api/matrice-prix", get(consultation::matrice_prix))
         .route("/api/plan-achat/propositions", get(consultation::propositions_achat))
@@ -450,8 +500,13 @@ pub fn router(state: AppState) -> Router {
         .route("/api/stock", get(consultation::stock))
         .route("/api/etat-stock", get(consultation::etat_stock))
         .route("/api/stock/projete", get(consultation::stock_projete))
+        // Le besoin d'une reference, plan / au-dela du plan, et ses OF (22/10/2026).
+        .route("/api/stock/besoin", get(consultation::besoin_reference))
         .route("/api/stock/dormant", get(consultation::stock_dormant))
         .route("/api/stock/lots", get(consultation::lots))
+        // LA RECHERCHE DES REFERENTIELS (24/10/2026) : le choix d'une valeur dans une
+        // liste qui grandit, cherche par le serveur, qui dit s'il en reste.
+        .route("/api/recherche/{type}", get(recherche::rechercher))
         // Le registre des lots (02/10/2026) : vues, fiche de vie, decisions.
         .route("/api/lots", get(lots::lister))
         .route("/api/lots/compteurs", get(lots::compteurs))
@@ -461,6 +516,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/lots/dormant", post(lots::decider_dormant))
         .route("/api/lots/fusion", post(lots::fusionner))
         .route("/api/lots/identifier", post(lots::identifier))
+        // Chaque lot a son conditionnement (23/10/2026) : lu par les ecrans de
+        // saisie, corrige sur la fiche du lot.
+        .route("/api/lots/conditionnement", get(lots::conditionnements).post(lots::corriger_conditionnement))
         .route("/api/autorisations", get(lots::lister_demandes).post(lots::creer_demande))
         .route("/api/autorisations/{id}/decider", post(lots::decider))
         .route("/api/stats/lots", get(lots::statistiques))
@@ -494,7 +552,36 @@ pub fn router(state: AppState) -> Router {
         // doit etre declare apres celui qu'il precise, sinon il ne sert jamais.
         .route("/api/{entite}/{id}/retenants", get(entites::retenants))
         .route("/api/{entite}/{id}/activation", post(entites::activation))
-        .layer(TraceLayer::new_for_http())
+        // UNE REQUETE, UN IDENTIFIANT (audit C2, 17/10/2026). Chaque requete recoit
+        // un `x-request-id` — repris de nginx s'il en pose un, sinon tire ici — renvoye
+        // au client et porte par toutes les lignes de journal de la requete, avec la
+        // methode, le chemin et l'utilisateur. Une ligne par reponse dit le statut et
+        // la duree. Le chemin seul, jamais la requete complete : une recherche peut
+        // contenir un nom, un jeton ne doit jamais finir dans un journal.
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|req: &axum::extract::Request| {
+                    let id = req.headers().get("x-request-id").and_then(|v| v.to_str().ok()).unwrap_or("-");
+                    tracing::info_span!(
+                        "requete",
+                        id = %id,
+                        methode = %req.method(),
+                        chemin = %req.uri().path(),
+                        utilisateur = tracing::field::Empty,
+                    )
+                })
+                .on_response(
+                    tower_http::trace::DefaultOnResponse::new()
+                        .level(tracing::Level::INFO)
+                        .latency_unit(tower_http::LatencyUnit::Millis),
+                ),
+        )
+        .layer(tower_http::request_id::PropagateRequestIdLayer::x_request_id())
+        // Pose AVANT la trace (les couches s'executent de la derniere ajoutee a la
+        // premiere) : le span doit pouvoir lire l'identifiant.
+        .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
+            tower_http::request_id::MakeRequestUuid,
+        ))
         // UN DELAI PAR REQUETE (audit v4) : au-dela, le client recoit 408 au
         // lieu d'attendre une reponse qui ne viendra pas. Cinq minutes par
         // defaut (GESTIONFIL_DELAI_HTTP_S) : un calcul de plan ou un depot de
@@ -590,7 +677,7 @@ pub fn date_du_fait(d: Option<&str>, quoi: &str) -> crate::error::AppResult<Opti
             let jour = chrono::NaiveDate::parse_from_str(d.get(..10).unwrap_or(d), "%Y-%m-%d").map_err(|_| {
                 crate::error::AppError::Invalide(format!("{quoi} invalide : {d} (attendu AAAA-MM-JJ)"))
             })?;
-            if jour > chrono::Utc::now().date_naive() {
+            if jour > crate::db::jour_casablanca() {
                 return Err(crate::error::AppError::RegleMetier(format!("La {quoi} ne peut pas etre dans le futur.")));
             }
             Ok(Some(jour.format("%Y-%m-%d").to_string()))

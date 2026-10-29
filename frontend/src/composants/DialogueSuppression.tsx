@@ -130,6 +130,7 @@ export function DialogueSuppression({
   surFermeture,
   entite,
   id,
+  version,
   /** Ce qu'on montre a l'utilisateur : « la famille COTON », pas « COT ». */
   libelle,
   /** Rafraichissement de l'ecran appelant, une fois le geste passe. */
@@ -139,6 +140,8 @@ export function DialogueSuppression({
   surFermeture: () => void
   entite: string
   id: string
+  /** La version lue de la fiche (verrou optimiste, 19/10/2026). */
+  version?: unknown
   libelle?: string
   surSucces?: () => void
 }) {
@@ -170,7 +173,8 @@ export function DialogueSuppression({
   }
 
   const effacer = useMutation({
-    mutationFn: () => api.delete(`/api/${entite}/${encodeURIComponent(id)}`),
+    mutationFn: () =>
+      api.delete(`/api/${entite}/${encodeURIComponent(id)}?version=${encodeURIComponent(String(version ?? ''))}`),
     ...apresCoup(`${nom} supprime.`),
   })
 

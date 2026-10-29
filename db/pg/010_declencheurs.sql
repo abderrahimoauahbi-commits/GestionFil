@@ -60,6 +60,53 @@ CREATE TRIGGER trg_lmvt_of_requis
 BEFORE INSERT ON ligne_mouvement FOR EACH ROW
 EXECUTE FUNCTION fn_trg_lmvt_of_requis();
 
+-- La consommation directe ne vaut que pour un article en mode DIRECTE : le fil
+-- sort par les fiches machine (decision du 21/10/2026, migration 2026-10-21c).
+CREATE OR REPLACE FUNCTION fn_trg_lmvt_conso_directe() RETURNS trigger AS $$
+DECLARE
+    v_type text;
+    v_mode text;
+BEGIN
+    SELECT code_type_mvt INTO v_type FROM mouvement WHERE id_mouvement = NEW.id_mouvement;
+    IF v_type = 'CONSO_DIRECTE' THEN
+        SELECT mode_consommation INTO v_mode FROM reference WHERE code_reference = NEW.code_reference;
+        IF COALESCE(v_mode, 'MACHINE') <> 'DIRECTE' THEN
+            RAISE EXCEPTION 'CONSO-DIRECTE : % est en mode de consommation MACHINE : le fil sort par les fiches machine, pas par une consommation directe.', NEW.code_reference;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_lmvt_conso_directe
+BEFORE INSERT ON ligne_mouvement FOR EACH ROW
+EXECUTE FUNCTION fn_trg_lmvt_conso_directe();
+
+-- LE RETOUR D'UNE CONSOMMATION DIRECTE (22/10/2026) : un article DIRECTE, un OF
+-- (mouvement.id_of, socle 2026-10-22a), et jamais plus que ce que cet OF a sorti
+-- de cette reference et pas encore rendu ; la sortie ne se contre-passe pas tant
+-- qu'un retour en depend. Definis dans db/pg/migrations/2026-10-22d_of_machines_hors_machine.sql
+-- (ils citent l'OF, absent des fichiers d'origine) : fn_of_conso_directe_reste,
+-- fn_trg_lmvt_retour_conso (trg_lmvt_retour_conso, BEFORE INSERT ON ligne_mouvement),
+-- fn_trg_mouvement_conso_rendue (trg_mouvement_conso_rendue, BEFORE INSERT ON mouvement),
+-- et fn_bobines_voie(capacite, largeur_machine, largeur_voie) = floor(capacite x voie / largeur).
+--
+-- LA QUALITE EXPLICITE (23/10/2026, migration 2026-10-23b_qualite_explicite.sql) :
+-- trg_mouvement_qualite (BEFORE INSERT ON mouvement) — une consommation directe ou
+-- son retour porte la qualite de son OF, sans OF une qualite obligatoire ; les
+-- autres mouvements n'en portent pas. Le retour sans OF est borne par la qualite
+-- (fn_qualite_conso_directe_reste) : fn_trg_lmvt_retour_conso et
+-- fn_trg_mouvement_conso_rendue y sont redefinies. Machine : trg_machine_etat_qualite,
+-- trg_machine_decision_etat_qualite (fn_trg_machine_qualite_of) et
+-- trg_machine_decision_ligne_qualite (fn_trg_mdl_qualite : qualite nouvelle et de la
+-- periode coherentes avec leurs OF, obligatoire sur une ligne de chargement).
+--
+-- LE CONDITIONNEMENT DU LOT (23/10/2026, migration 2026-10-23a_lot_conditionnement.sql) :
+-- trg_10_lot_conditionnement_naissance (BEFORE INSERT ON lot : la fiche article),
+-- fn_lot_conditionnement_reception (appelee par le service a la validation d'une
+-- reception), fn_lot_poids_bobine / fn_lot_bobines_palette (le lot, sinon la fiche),
+-- journal immuable lot_conditionnement_journal (trg_lot_conditionnement_journal_immuable).
+
 CREATE OR REPLACE FUNCTION fn_trg_lmvt_motif_requis() RETURNS trigger AS $$
 BEGIN
     IF NEW.code_motif_ligne IS NULL
@@ -417,6 +464,46 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_transition_transfert
 BEFORE UPDATE OF statut ON transfert FOR EACH ROW
 EXECUTE FUNCTION fn_trg_transition_transfert();
+
+-- TRF-DATE (arbitrage du 27/10/2026, migration 2026-10-27d) : le fil en route
+-- est un arrivage, il porte sa date prevue de disponibilite au magasin
+-- destinataire. Obligatoire a l'expedition (passage en VALIDE), revisable tant
+-- que le transfert est en route, jamais apres sa reception ni sur un transfert
+-- abandonne ; en route, elle se revise, elle ne s'efface pas.
+-- (Sa revision est journalisee par `trg_audit_transfert_date`, qui reste dans la
+-- migration : `fn_trg_audit_modification` n'existe que par les migrations
+-- 2026-10-08d et suivantes.)
+CREATE OR REPLACE FUNCTION fn_trg_transfert_date_disponibilite() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    -- L'expédition (passage en VALIDE) exige la date.
+    IF NEW.statut = 'VALIDE'
+       AND (TG_OP = 'INSERT' OR OLD.statut IS DISTINCT FROM 'VALIDE')
+       AND NEW.date_disponibilite_prevue IS NULL THEN
+        RAISE EXCEPTION 'TRF-DATE : le transfert % ne part pas sans date prévue de disponibilité au magasin destinataire. Saisissez-la avant d''expédier.',
+            NEW.numero_transfert;
+    END IF;
+
+    IF TG_OP = 'UPDATE'
+       AND NEW.date_disponibilite_prevue IS DISTINCT FROM OLD.date_disponibilite_prevue THEN
+        -- Reçu ou abandonné : la date est figée.
+        IF OLD.statut NOT IN ('BROUILLON', 'VALIDE') THEN
+            RAISE EXCEPTION 'TRF-DATE : le transfert % est %, sa date prévue de disponibilité ne se révise plus (seulement tant qu''il est en route).',
+                NEW.numero_transfert, lower(OLD.statut);
+        END IF;
+        -- En route, on la révise, on ne l'efface pas.
+        IF OLD.statut = 'VALIDE' AND NEW.date_disponibilite_prevue IS NULL THEN
+            RAISE EXCEPTION 'TRF-DATE : le transfert % est en route : sa date prévue de disponibilité se révise, elle ne s''efface pas.',
+                NEW.numero_transfert;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_transfert_date_disponibilite
+    BEFORE INSERT OR UPDATE ON transfert
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_transfert_date_disponibilite();
 
 CREATE OR REPLACE FUNCTION fn_trg_transition_inventaire() RETURNS trigger AS $$
 BEGIN
@@ -832,9 +919,452 @@ EXECUTE FUNCTION fn_refuser('Figement refuse : une proposition figee doit porter
 
 CREATE TRIGGER trg_plan_achat_figement_statut
 BEFORE UPDATE OF figee ON plan_achat FOR EACH ROW
-WHEN (NEW.figee = 1 AND NEW.statut IN ('COMMANDE','IGNORE'))
-EXECUTE FUNCTION fn_refuser('Figement refuse : cette proposition est deja commandee ou ecartee.');
+WHEN (NEW.figee = 1 AND NEW.statut IN ('COMMANDE','IGNORE','ANNULE_BC'))
+EXECUTE FUNCTION fn_refuser('Figement refuse : cette proposition est deja commandee, ecartee ou annulee avec son bon.');
+
+-- ANNULEE AVEC LE BON (decision du 27/10/2026, 2026-10-27f) : un etat final. La
+-- proposition reste liee au bon annule ; la regeneration en cree une neuve.
+CREATE TRIGGER trg_plan_achat_annule_bc_final
+BEFORE UPDATE OF statut ON plan_achat FOR EACH ROW
+WHEN (OLD.statut = 'ANNULE_BC' AND NEW.statut IS DISTINCT FROM 'ANNULE_BC')
+EXECUTE FUNCTION fn_refuser('PA-ANNULE-BC : cette proposition a ete annulee avec son bon ; elle reste a l''historique. Regenerez le plan d''achat : le moteur en proposera une neuve s''il le faut.');
 
 -- Portes a la main :
 -- trg_lmvt_appliquer : porte a la main (010b_declencheurs_logique.sql)
 -- trg_parametre_historiser : porte a la main (010b_declencheurs_logique.sql)
+
+
+-- =============================================================================
+-- VERROU OPTIMISTE DES DOCUMENTS A WORKFLOW (A2, migration 2026-10-17d)
+-- =============================================================================
+-- Chaque modification de l'un des six documents qui passent de main en main
+-- incremente sa `version`. Le service compare la version que le client a lue a
+-- celle de la base (`domain/concurrence.rs`) : si quelqu'un est passe entre-temps,
+-- il refuse en le nommant au lieu d'ecraser sa saisie en silence.
+--
+-- La version n'est pas une donnee de saisie : quoi que le client envoie, la
+-- nouvelle est l'ancienne plus un. `trg_aa_` la fait passer avant les declencheurs
+-- metier (PostgreSQL execute les BEFORE par ordre de nom).
+CREATE OR REPLACE FUNCTION fn_trg_version_incrementer() RETURNS trigger AS $$
+BEGIN
+    NEW.version := OLD.version + 1;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_aa_version BEFORE UPDATE ON bon_commande
+FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();
+CREATE TRIGGER trg_aa_version BEFORE UPDATE ON reception
+FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();
+CREATE TRIGGER trg_aa_version BEFORE UPDATE ON inventaire
+FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();
+CREATE TRIGGER trg_aa_version BEFORE UPDATE ON transfert
+FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();
+CREATE TRIGGER trg_aa_version BEFORE UPDATE ON plan_production
+FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();
+CREATE TRIGGER trg_aa_version BEFORE UPDATE ON qualite
+FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();
+
+
+-- =============================================================================
+-- CLOTURE DE PERIODE (A3, migration 2026-10-17e)
+-- =============================================================================
+-- Recopie de la migration, au caractere pres. Le reglage P_PeriodeCloseJusqua
+-- et le controle C55 restent dans la migration, comme les autres reglages et
+-- controles venus apres C44 : sans le reglage, fn_periode_close_jusqua() rend
+-- NULL et la cloture est inerte — le schema d'origine se charge donc seul.
+
+-- ---- 1. La date metier d'une date du grand livre ----------------------------
+-- STABLE et sans bloc EXCEPTION : elle s'execute a chaque ligne ecrite, et un
+-- bloc EXCEPTION ouvrirait une sous-transaction par ligne. Un format inconnu
+-- rend NULL : la cloture ne tranche pas ce qu'elle ne sait pas lire, d'autres
+-- gardes (trg_mouvement_date_future) s'occupent des dates mal formees.
+CREATE OR REPLACE FUNCTION fn_date_metier(p text) RETURNS date AS $$
+BEGIN
+    IF p ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}' THEN
+        RETURN (p::timestamptz AT TIME ZONE 'Africa/Casablanca')::date;
+    ELSIF p ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' THEN
+        RETURN substr(p, 1, 10)::date;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- La limite courante : NULL si le reglage manque (base anterieure a cette
+-- migration rechargee partiellement) — rien n'est alors refuse.
+CREATE OR REPLACE FUNCTION fn_periode_close_jusqua() RETURNS date AS $$
+    SELECT valeur_courante::date FROM parametre
+     WHERE code_parametre = 'P_PeriodeCloseJusqua' AND actif = 1;
+$$ LANGUAGE sql STABLE;
+
+-- ---- 3. Qui peut clore, et jusqu'ou -----------------------------------------
+CREATE OR REPLACE FUNCTION fn_trg_parametre_cloture() RETURNS trigger AS $$
+DECLARE
+    v_user    text := NULLIF(current_setting('gestionfil.id_utilisateur', true), '');
+    v_role    text;
+    v_nouvelle date := NEW.valeur_courante::date;   -- format deja controle par trg_00_parametre_type
+    v_ancienne date := OLD.valeur_courante::date;
+    v_aujourdhui date := (now() AT TIME ZONE 'Africa/Casablanca')::date;
+BEGIN
+    IF v_nouvelle = v_ancienne THEN
+        RETURN NEW;
+    END IF;
+
+    -- LA DIRECTION, ET L'ADMINISTRATEUR. Sans contexte applicatif (migration,
+    -- script d'administration en psql), la garde s'efface : c'est la convention
+    -- des autres gardes par role (fn_trg_inventaire_separation).
+    IF v_user IS NOT NULL THEN
+        SELECT code_role_user INTO v_role FROM utilisateur WHERE id_utilisateur = v_user;
+        IF v_role IS NULL OR v_role NOT IN ('DIRECTION', 'ADMIN') THEN
+            RAISE EXCEPTION 'PERIODE : clore ou rouvrir une période revient à la direction.';
+        END IF;
+    END IF;
+
+    -- ON NE CLOT PAS LE JOUR MEME. Clore aujourd'hui refuserait les mouvements
+    -- de la journee en cours ; clore demain, ceux de demain sans raison.
+    IF v_nouvelle >= v_aujourdhui THEN
+        RAISE EXCEPTION 'PERIODE : on ne clôt que des jours passés ; le % n''est pas encore terminé.',
+            to_char(v_nouvelle, 'DD/MM/YYYY');
+    END IF;
+
+    -- ROUVRIR EST L'EXCEPTION, ET SE JUSTIFIE. Reculer la date redonne acces a
+    -- des mois arretes : le motif reste dans parametre_historique.
+    IF v_nouvelle < v_ancienne AND length(btrim(COALESCE(NEW.motif_modif, ''))) < 3 THEN
+        RAISE EXCEPTION 'PERIODE : rouvrir la période close jusqu''au % exige un motif.',
+            to_char(v_ancienne, 'DD/MM/YYYY');
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_parametre_cloture
+    BEFORE UPDATE OF valeur_courante ON parametre
+    FOR EACH ROW
+    WHEN (NEW.code_parametre = 'P_PeriodeCloseJusqua')
+    EXECUTE FUNCTION fn_trg_parametre_cloture();
+
+-- ---- 4. Le grand livre refuse d'ecrire dans le passe clos -------------------
+CREATE OR REPLACE FUNCTION fn_trg_mouvement_periode_close() RETURNS trigger AS $$
+DECLARE
+    v_limite date := fn_periode_close_jusqua();
+    v_jour   date := fn_date_metier(NEW.date_mouvement);
+BEGIN
+    IF v_limite IS NOT NULL AND v_jour IS NOT NULL AND v_jour <= v_limite THEN
+        RAISE EXCEPTION 'PERIODE-CLOSE : la période jusqu''au % est close, rien ne s''y écrit plus (mouvement du %). Datez-le après la clôture, ou demandez à la direction de rouvrir la période.',
+            to_char(v_limite, 'DD/MM/YYYY'), to_char(v_jour, 'DD/MM/YYYY');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_mouvement_periode_close
+    BEFORE INSERT ON mouvement
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_mouvement_periode_close();
+
+-- LES LIGNES AUSSI. `ligne_mouvement` est immuable en modification et en
+-- suppression (R03), mais une INSERTION sur un en-tete ancien reste possible :
+-- sans cette garde, on pourrait faire entrer du stock dans un mois clos en
+-- greffant une ligne a un mouvement de mars. La garantie vaut quel que soit le
+-- chemin, pas seulement celui des ecrans.
+CREATE OR REPLACE FUNCTION fn_trg_lmvt_periode_close() RETURNS trigger AS $$
+DECLARE
+    v_limite date := fn_periode_close_jusqua();
+    v_jour   date;
+BEGIN
+    IF v_limite IS NULL OR v_limite <= DATE '2000-01-01' THEN
+        RETURN NEW;    -- rien de clos : pas de lecture d'en-tete a chaque ligne
+    END IF;
+    SELECT fn_date_metier(m.date_mouvement) INTO v_jour
+      FROM mouvement m WHERE m.id_mouvement = NEW.id_mouvement;
+    IF v_jour IS NOT NULL AND v_jour <= v_limite THEN
+        RAISE EXCEPTION 'PERIODE-CLOSE : la période jusqu''au % est close ; on n''ajoute pas de ligne à un mouvement du %.',
+            to_char(v_limite, 'DD/MM/YYYY'), to_char(v_jour, 'DD/MM/YYYY');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_lmvt_periode_close
+    BEFORE INSERT ON ligne_mouvement
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_lmvt_periode_close();
+
+-- =============================================================================
+-- INVENTAIRE OUVERT : LE GEL (decision du 23/10/2026, migrations 2026-10-23g et 2026-10-24a)
+-- =============================================================================
+-- Recopie des migrations (23g sections 1 a 4, 24a sections 1 a 4, 24b sections
+-- 3 a 6 — la liste d'un tournant ou d'un cible), sans les OWNER TO. Le controle C65 reste dans les migrations, comme les autres
+-- controles venus apres C44. Tant qu'un inventaire du magasin est ouvert
+-- (BROUILLON ou VALIDE) : un GLOBAL gele tout le magasin ; un TOURNANT ou un
+-- CIBLE gele ses seules references (celles de ses lignes, a l'instant du
+-- mouvement) — sans aucune ligne, tout le magasin. Seuls passent les
+-- ajustements de sa cloture, rattaches par `mouvement.id_inventaire`
+-- (domain/inventaire.rs::cloturer).
+-- Sur les fichiers d'origine seuls (statut EN_COURS de 008), la garde est inerte :
+-- les etats BROUILLON / VALIDE viennent de 2026-10-13b.
+
+-- ---- 1. L'ajustement porte son inventaire --------------------------------------
+ALTER TABLE mouvement ADD COLUMN IF NOT EXISTS id_inventaire text REFERENCES inventaire(id_inventaire);
+CREATE INDEX IF NOT EXISTS ix_mouvement_inventaire ON mouvement(id_inventaire) WHERE id_inventaire IS NOT NULL;
+
+-- ---- 2. L'inventaire ouvert d'un magasin ---------------------------------------
+-- Au plus un (ux_inventaire_ouvert, 2026-10-13b) ; LIMIT 1 si l'index manquait.
+CREATE OR REPLACE FUNCTION fn_inventaire_ouvert(p_magasin text) RETURNS text AS $$
+    SELECT id_inventaire FROM inventaire
+     WHERE code_magasin = p_magasin AND statut IN ('BROUILLON', 'VALIDE')
+     ORDER BY date_creation LIMIT 1;
+$$ LANGUAGE sql STABLE;
+
+-- ---- 2b. L'étendue du gel d'un inventaire ---------------------------------------
+-- Vrai : le gel porte sur ses références (un tournant ou un ciblé qui a sa liste,
+-- 2026-10-24b) ; faux : sur tout le magasin (un global, ou un tournant / ciblé sans liste).
+CREATE OR REPLACE FUNCTION fn_inventaire_gel_par_reference(p_id text) RETURNS boolean AS $$
+    SELECT COALESCE(
+        (SELECT i.type_inventaire IN ('TOURNANT', 'CIBLE')
+                AND EXISTS (SELECT 1 FROM inventaire_reference s WHERE s.id_inventaire = i.id_inventaire)
+           FROM inventaire i WHERE i.id_inventaire = p_id),
+        false);
+$$ LANGUAGE sql STABLE;
+
+-- La référence est-elle comptée par cet inventaire : choisie, ou sur l'une de ses
+-- lignes (les lignes sont dans la liste ; l'union est la prudence).
+CREATE OR REPLACE FUNCTION fn_inventaire_compte_reference(p_id text, p_reference text) RETURNS boolean AS $$
+    SELECT EXISTS (SELECT 1 FROM inventaire_reference s
+                    WHERE s.id_inventaire = p_id AND s.code_reference = p_reference)
+        OR EXISTS (SELECT 1 FROM ligne_inventaire li
+                    WHERE li.id_inventaire = p_id AND li.code_reference = p_reference);
+$$ LANGUAGE sql STABLE;
+
+-- ---- 2c. Les messages ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_inventaire_type_libelle(p_type text) RETURNS text AS $$
+    SELECT CASE p_type WHEN 'GLOBAL' THEN 'global' WHEN 'TOURNANT' THEN 'tournant'
+                       WHEN 'CIBLE' THEN 'ciblé' ELSE lower(COALESCE(p_type, '?')) END;
+$$ LANGUAGE sql IMMUTABLE;
+
+-- Le gel du magasin entier : un global, ou un tournant / ciblé encore sans liste.
+CREATE OR REPLACE FUNCTION fn_inventaire_ouvert_message(p_id text) RETURNS text AS $$
+    SELECT 'INVENTAIRE-OUVERT : l''inventaire ' || i.numero_inventaire
+           || ' (' || fn_inventaire_type_libelle(i.type_inventaire) || ')'
+           || ' est ouvert sur le magasin ' || i.code_magasin
+           || CASE i.statut WHEN 'VALIDE' THEN ' (comptage validé, à clôturer)' ELSE ' (en comptage)' END
+           || CASE WHEN i.type_inventaire IN ('TOURNANT', 'CIBLE')
+                   THEN ', encore sans référence choisie (tout le magasin est gelé jusqu''à la validation de sa liste)'
+                   ELSE '' END
+           || ' : aucun mouvement de stock jusqu''à sa clôture ou son annulation.'
+      FROM inventaire i WHERE i.id_inventaire = p_id;
+$$ LANGUAGE sql STABLE;
+
+-- Le gel d'une référence : un tournant ou un ciblé qui la compte.
+CREATE OR REPLACE FUNCTION fn_inventaire_ouvert_message(p_id text, p_reference text) RETURNS text AS $$
+    SELECT 'INVENTAIRE-OUVERT : la référence ' || p_reference
+           || ' est comptée par l''inventaire ' || i.numero_inventaire
+           || ' (' || fn_inventaire_type_libelle(i.type_inventaire) || ')'
+           || ' ouvert sur le magasin ' || i.code_magasin
+           || CASE i.statut WHEN 'VALIDE' THEN ' (comptage validé, à clôturer)' ELSE ' (en comptage)' END
+           || ' : aucun mouvement de cette référence dans ce magasin jusqu''à sa clôture ou son annulation'
+           || ' (les autres références du magasin restent libres).'
+      FROM inventaire i WHERE i.id_inventaire = p_id;
+$$ LANGUAGE sql STABLE;
+
+-- ---- 3. L'en-tête : refusé seulement pour un gel du magasin entier ----------------
+CREATE OR REPLACE FUNCTION fn_trg_mouvement_inventaire_ouvert() RETURNS trigger AS $$
+DECLARE
+    v_ouvert text;
+    v_inv    record;
+BEGIN
+    -- UN MOUVEMENT RATTACHÉ À UN INVENTAIRE n'est qu'un ajustement de sa clôture.
+    IF NEW.id_inventaire IS NOT NULL THEN
+        SELECT numero_inventaire, code_magasin, statut INTO v_inv
+          FROM inventaire WHERE id_inventaire = NEW.id_inventaire;
+        IF NEW.code_type_mvt NOT IN ('AJUST_INV_POS', 'AJUST_INV_NEG')
+           OR v_inv.code_magasin IS DISTINCT FROM NEW.code_magasin
+           OR v_inv.statut IS DISTINCT FROM 'VALIDE' THEN
+            RAISE EXCEPTION 'INVENTAIRE-OUVERT : seul un ajustement (AJUST_INV_POS / AJUST_INV_NEG) du magasin de l''inventaire %, écrit à sa clôture, se rattache à lui (mouvement %, magasin %, inventaire %).',
+                COALESCE(v_inv.numero_inventaire, NEW.id_inventaire), NEW.code_type_mvt, NEW.code_magasin,
+                lower(COALESCE(v_inv.statut, 'introuvable'));
+        END IF;
+        -- Un seul ajustement vivant par sens : un second appliquerait deux fois
+        -- les écarts. Après une dévalidation, les premiers sont contre-passés.
+        IF EXISTS (SELECT 1 FROM mouvement m
+                    WHERE m.id_inventaire = NEW.id_inventaire
+                      AND m.code_type_mvt = NEW.code_type_mvt
+                      AND NOT EXISTS (SELECT 1 FROM mouvement c
+                                       WHERE c.id_mouvement_contrepasse = m.id_mouvement)) THEN
+            RAISE EXCEPTION 'INVENTAIRE-OUVERT : les ajustements % de l''inventaire % sont déjà écrits.',
+                NEW.code_type_mvt, v_inv.numero_inventaire;
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    -- L'en-tête ne porte pas de référence : un gel par référence (tournant, ciblé)
+    -- se juge sur chaque ligne (section 4).
+    v_ouvert := fn_inventaire_ouvert(NEW.code_magasin);
+    IF v_ouvert IS NOT NULL AND NOT fn_inventaire_gel_par_reference(v_ouvert) THEN
+        RAISE EXCEPTION '%', fn_inventaire_ouvert_message(v_ouvert);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_01_mouvement_inventaire_ouvert ON mouvement;
+CREATE TRIGGER trg_01_mouvement_inventaire_ouvert
+    BEFORE INSERT ON mouvement
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_mouvement_inventaire_ouvert();
+
+-- ---- 4. Les lignes : la garantie ---------------------------------------------
+-- `ligne_mouvement` est la seule écriture qui touche le stock (trg_lmvt_appliquer).
+-- Une ligne greffée à un en-tête écrit avant l'ouverture de l'inventaire serait
+-- passée sans cette garde. Pour un gel par référence, c'est ici seulement qu'il se juge.
+CREATE OR REPLACE FUNCTION fn_trg_lmvt_inventaire_ouvert() RETURNS trigger AS $$
+DECLARE
+    v_magasin text;
+    v_inv_mvt text;
+    v_signe   integer;
+    v_ouvert  text;
+    v_ecarts  bigint;
+    v_deja    bigint;
+BEGIN
+    SELECT m.code_magasin, m.id_inventaire, tm.signe
+      INTO v_magasin, v_inv_mvt, v_signe
+      FROM mouvement m
+      JOIN type_mouvement tm ON tm.code_type_mvt = m.code_type_mvt
+     WHERE m.id_mouvement = NEW.id_mouvement;
+
+    v_ouvert := fn_inventaire_ouvert(v_magasin);
+    IF v_ouvert IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    IF v_inv_mvt IS DISTINCT FROM v_ouvert THEN
+        -- UN MOUVEMENT ORDINAIRE. Gel du magasin entier : refusé. Gel par
+        -- référence : refusé si l'inventaire compte cette référence, à l'instant.
+        IF NOT fn_inventaire_gel_par_reference(v_ouvert) THEN
+            RAISE EXCEPTION '%', fn_inventaire_ouvert_message(v_ouvert);
+        END IF;
+        IF fn_inventaire_compte_reference(v_ouvert, NEW.code_reference) THEN
+            RAISE EXCEPTION '%', fn_inventaire_ouvert_message(v_ouvert, NEW.code_reference);
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    -- L'AJUSTEMENT DE LA CLÔTURE : chaque ligne est un écart de l'inventaire,
+    -- même référence, même lot, même sens, même quantité — et pas plus de fois
+    -- que l'inventaire n'en porte.
+    SELECT count(*) INTO v_ecarts
+      FROM ligne_inventaire li
+     WHERE li.id_inventaire = v_ouvert
+       AND li.code_reference = NEW.code_reference
+       AND li.lot_fournisseur IS NOT DISTINCT FROM NEW.lot_fournisseur
+       AND sign(li.ecart_kg) = v_signe
+       AND abs(abs(li.ecart_kg) - NEW.quantite_kg) < 0.00005;
+    SELECT count(*) INTO v_deja
+      FROM ligne_mouvement lm
+     WHERE lm.id_mouvement = NEW.id_mouvement
+       AND lm.code_reference = NEW.code_reference
+       AND lm.lot_fournisseur IS NOT DISTINCT FROM NEW.lot_fournisseur
+       AND abs(lm.quantite_kg - NEW.quantite_kg) < 0.00005;
+    IF v_ecarts > v_deja THEN
+        RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'INVENTAIRE-OUVERT : % kg de % (%) ne correspond à aucun écart restant de l''inventaire % : un ajustement ne porte que les écarts du comptage.',
+        NEW.quantite_kg, NEW.code_reference, COALESCE('lot ' || NEW.lot_fournisseur, 'sans lot'),
+        (SELECT numero_inventaire FROM inventaire WHERE id_inventaire = v_ouvert);
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_01_lmvt_inventaire_ouvert ON ligne_mouvement;
+CREATE TRIGGER trg_01_lmvt_inventaire_ouvert
+    BEFORE INSERT ON ligne_mouvement
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_lmvt_inventaire_ouvert();
+
+-- ---- 5. La liste d'un tournant ou d'un ciblé (2026-10-24b) --------------------
+-- Elle se choisit en brouillon, avant les lignes ; un global n'en a pas.
+CREATE OR REPLACE FUNCTION fn_trg_inventaire_reference_garde() RETURNS trigger AS $$
+DECLARE
+    v_id  text := COALESCE(NEW.id_inventaire, OLD.id_inventaire);
+    v_inv record;
+BEGIN
+    SELECT numero_inventaire, type_inventaire, statut INTO v_inv
+      FROM inventaire WHERE id_inventaire = v_id;
+    IF NOT FOUND THEN
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        END IF;
+        RAISE EXCEPTION 'INV-SELECTION : inventaire % introuvable.', v_id;
+    END IF;
+    IF v_inv.type_inventaire NOT IN ('TOURNANT', 'CIBLE') THEN
+        RAISE EXCEPTION 'INV-SELECTION : l''inventaire % est global : il compte tout le magasin, il ne choisit pas ses références.',
+            v_inv.numero_inventaire;
+    END IF;
+    IF v_inv.statut <> 'BROUILLON' THEN
+        RAISE EXCEPTION 'INV-SELECTION : l''inventaire % est % : sa liste de références ne change plus.',
+            v_inv.numero_inventaire, lower(v_inv.statut);
+    END IF;
+    IF EXISTS (SELECT 1 FROM ligne_inventaire WHERE id_inventaire = v_id) THEN
+        RAISE EXCEPTION 'INV-SELECTION : les lignes de l''inventaire % sont préparées : sa liste de références est figée (pour compter une autre liste, annulez-le et créez-en un autre).',
+            v_inv.numero_inventaire;
+    END IF;
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_inventaire_reference_garde
+    BEFORE INSERT OR UPDATE OR DELETE ON inventaire_reference
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_inventaire_reference_garde();
+
+-- (Son journal d'audit, `trg_audit_modification`, reste dans la migration :
+-- `fn_trg_audit_modification` n'existe que par les migrations 2026-10-08d et suivantes.)
+
+-- Les lignes d'un tournant ou d'un ciblé : des références de sa liste.
+CREATE OR REPLACE FUNCTION fn_trg_ligne_inventaire_selection() RETURNS trigger AS $$
+DECLARE
+    v_inv record;
+BEGIN
+    SELECT numero_inventaire, type_inventaire INTO v_inv
+      FROM inventaire WHERE id_inventaire = NEW.id_inventaire;
+    IF v_inv.type_inventaire IN ('TOURNANT', 'CIBLE')
+       AND NOT EXISTS (SELECT 1 FROM inventaire_reference s
+                        WHERE s.id_inventaire = NEW.id_inventaire
+                          AND s.code_reference = NEW.code_reference) THEN
+        IF NOT EXISTS (SELECT 1 FROM inventaire_reference s WHERE s.id_inventaire = NEW.id_inventaire) THEN
+            RAISE EXCEPTION 'INV-SELECTION : l''inventaire % (%) n''a aucune référence choisie : choisissez et validez sa liste avant de préparer ses lignes.',
+                v_inv.numero_inventaire, fn_inventaire_type_libelle(v_inv.type_inventaire);
+        END IF;
+        RAISE EXCEPTION 'INV-SELECTION : la référence % n''est pas dans la liste de l''inventaire % (%) : un inventaire tournant ou ciblé ne compte que les références choisies à sa préparation. Comptez-la dans un autre inventaire.',
+            NEW.code_reference, v_inv.numero_inventaire, fn_inventaire_type_libelle(v_inv.type_inventaire);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_ligne_inventaire_selection
+    BEFORE INSERT OR UPDATE OF code_reference, id_inventaire ON ligne_inventaire
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_ligne_inventaire_selection();
+
+-- Sans liste, pas de validation ; le type ne change plus une fois liste ou lignes posées.
+CREATE OR REPLACE FUNCTION fn_trg_inventaire_selection_validation() RETURNS trigger AS $$
+BEGIN
+    IF NEW.type_inventaire IS DISTINCT FROM OLD.type_inventaire
+       AND (EXISTS (SELECT 1 FROM inventaire_reference WHERE id_inventaire = OLD.id_inventaire)
+            OR EXISTS (SELECT 1 FROM ligne_inventaire WHERE id_inventaire = OLD.id_inventaire)) THEN
+        RAISE EXCEPTION 'INV-SELECTION : l''inventaire % a sa liste ou ses lignes : son type ne change plus.',
+            OLD.numero_inventaire;
+    END IF;
+    IF NEW.statut = 'VALIDE' AND OLD.statut = 'BROUILLON'
+       AND NEW.type_inventaire IN ('TOURNANT', 'CIBLE')
+       AND NOT EXISTS (SELECT 1 FROM inventaire_reference WHERE id_inventaire = NEW.id_inventaire) THEN
+        RAISE EXCEPTION 'INV-SELECTION : l''inventaire % (%) n''a aucune référence choisie : il ne se valide pas.',
+            NEW.numero_inventaire, fn_inventaire_type_libelle(NEW.type_inventaire);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_inventaire_selection_validation
+    BEFORE UPDATE OF statut, type_inventaire ON inventaire
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_inventaire_selection_validation();
+-- (`fn_comptage_tournant_jours`, `v_inventaire_candidat` — la proposition du
+-- tournant — et les parametres P_ComptageTournantA/B/C restent dans la migration
+-- 2026-10-24b.)
+
+-- (La vue `v_inventaire_gel`, lue par les écrans, reste dans la migration 2026-10-24a.)

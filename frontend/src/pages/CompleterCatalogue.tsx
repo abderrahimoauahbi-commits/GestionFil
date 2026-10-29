@@ -44,6 +44,8 @@ interface FamillePossible {
 
 interface LigneCompletion {
   code_reference: string
+  /** La version de la fiche (verrou optimiste, 19/10/2026). */
+  version: number
   designation: string | null
   code_categorie: string
   categorie_libelle: string | null
@@ -184,7 +186,7 @@ export function CompleterCatalogue() {
         if (v.poids_bobine_kg) charge.poids_bobine_kg = v.poids_bobine_kg
         if (v.bobines_par_palette) charge.bobines_par_palette = v.bobines_par_palette
         if (Object.keys(charge).length === 0) continue
-        await api.patch(`/api/catalogue/${encodeURIComponent(l.code_reference)}`, charge)
+        await api.patch(`/api/catalogue/${encodeURIComponent(l.code_reference)}`, { ...charge, version: l.version })
         faites += 1
       }
       return faites

@@ -21,7 +21,7 @@ import { useDroits } from '../../auth/AuthContext'
 import { BarreRepartition, CarteStat } from '../../composants/CarteStat'
 import { BarresRangees, ColonnesTemps } from '../../composants/graphiques/Graphiques'
 import { Alerte, Badge, Carte, CarteCorps, CarteEntete, CarteTitre } from '../../composants/ui/base'
-import { couleurEcart, useTolerancesLot, type CouleurEcart } from '../../lib/lots'
+import { classeNiveauEcart, couleurEcart, useTolerancesLot, type CouleurEcart } from '../../lib/lots'
 import { cn, fmt } from '../../lib/utils'
 
 type Ligne = Record<string, unknown>
@@ -32,11 +32,6 @@ const txt = (l: Ligne, c: string) => (l[c] == null ? null : String(l[c]))
 const somme = (lignes: Ligne[], c: string) => lignes.reduce((s, l) => s + (nb(l, c) ?? 0), 0)
 
 /** La couleur d'un ecart, en classe de texte : les tokens, rien d'autre. */
-const TEXTE_ECART: Record<CouleurEcart, string> = {
-  vert: 'text-succes',
-  orange: 'text-alerte',
-  rouge: 'text-danger',
-}
 
 /** La meme couleur, dans le vocabulaire des graphiques maison. */
 const ETAT_GRAPHIQUE: Record<CouleurEcart, 'bon' | 'alerte' | 'critique'> = {
@@ -62,7 +57,7 @@ function Ecart({ pct, t }: { pct: number | null; t: { orange: number; rouge: num
   const c = couleurEcart(pct, t)
   if (pct == null || c == null) return <span className="text-attenue-texte">—</span>
   return (
-    <span className={cn('font-medium tabular-nums', TEXTE_ECART[c])}>
+    <span className={cn('font-medium tabular-nums', classeNiveauEcart(c))}>
       {pct > 0 ? '+' : ''}
       {fmt.nombre(pct, 2)} %
     </span>

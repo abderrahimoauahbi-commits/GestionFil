@@ -115,8 +115,8 @@ export function AnalyseTableau() {
           {/* ---- Chiffres clés ------------------------------------------------ */}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
             <CarteStat Icone={Package} libelle="Valeur du stock" valeur={voitMontants && t ? compact(t.valeur_stock_mad) : '—'} unite="MAD" precision={`${n('nb_references')} références suivies`} ton="primaire" courbe={voitMontants && d.cout_mensuel.length >= 3 ? d.cout_mensuel.map((m) => m.cout_mad) : undefined} />
-            <CarteStat Icone={Gauge} libelle="Couverture pondérée" valeur={ind?.couverture_ponderee_jours == null ? '—' : fmt.nombre(ind.couverture_ponderee_jours, 0)} unite="jours" precision="pondérée par la valeur consommée" ton="succes" />
-            <CarteStat Icone={RefreshCcw} libelle="Rotation du stock" valeur={t ? fmt.nombre(t.rotation_annuelle, 1) : '—'} unite="× / an" precision={t ? `DIO ${fmt.nombre(t.dio_jours, 0)} jours` : undefined} ton={t && t.rotation_annuelle < 1 ? 'alerte' : 'neutre'} />
+            <CarteStat Icone={Gauge} libelle="Couverture du stock" valeur={ind?.couverture_ponderee_jours == null ? '—' : fmt.nombre(ind.couverture_ponderee_jours, 0)} unite="jours" precision="au plan — moteur de couverture, pondérée par la valeur du stock" ton="succes" aide="Jours couverts par le moteur de couverture (jusqu’à la 1re rupture du plan, sinon tout l’horizon), pondérés par la valeur en stock de chaque référence au plan." />
+            <CarteStat Icone={RefreshCcw} libelle="Rotation du stock" valeur={t ? fmt.nombre(t.rotation_annuelle, 1) : '—'} unite="× / an" precision={t ? `réel 12 mois · DIO ${fmt.nombre(t.dio_jours, 0)} jours` : undefined} ton={t && t.rotation_annuelle < 1 ? 'alerte' : 'neutre'} />
             <CarteStat Icone={Scale} libelle="Écart de pesée moyen" valeur={ind?.ecart_pesee_moyen_pct == null ? '—' : fmt.nombre(ind.ecart_pesee_moyen_pct, 2)} unite="%" precision="facturé face au pesé" ton="neutre" />
             <CarteStat Icone={Truck} libelle="Fournisseurs actifs" valeur={String(n('nb_fournisseurs_actifs'))} precision={`${n('nb_bc_ouverts')} bons ouverts`} ton="neutre" />
             <CarteStat Icone={Coins} libelle="Stock dormant" valeur={voitMontants && ind?.valeur_dormante_mad != null ? compact(ind.valeur_dormante_mad) : '—'} unite="MAD" precision={ind?.pct_valeur_dormante == null ? `${n('nb_refs_dormantes')} références` : `${fmt.nombre(ind.pct_valeur_dormante, 1)} % du stock`} ton={(ind?.pct_valeur_dormante ?? 0) > 5 ? 'alerte' : 'succes'} jauge={ind?.pct_valeur_dormante ?? undefined} />
@@ -124,7 +124,7 @@ export function AnalyseTableau() {
 
           {/* ---- Pareto | Fournisseurs ------------------------------------------- */}
           <div className="grid gap-4 xl:grid-cols-3">
-            <Bloc className="xl:col-span-2" titre="Concentration de la dépense" sousTitre={`Les ${d.pareto.length} références qui portent le budget, et la part cumulée — la ligne des 80 % marque la classe A`} lien={{ vers: '/classification', libelle: 'ABC / XYZ' }}>
+            <Bloc className="xl:col-span-2" titre="Concentration de la dépense" sousTitre={`Réel des 12 mois pleins, valeur au livre : les ${d.pareto.length} références qui portent la dépense, et la part cumulée — la ligne des 80 % marque la classe A`} lien={{ vers: '/classification', libelle: 'ABC / XYZ' }}>
               {d.pareto.length === 0 ? (
                 <Vide texte="Classification non calculée." />
               ) : !voitMontants ? (
@@ -135,7 +135,7 @@ export function AnalyseTableau() {
                 />
               )}
             </Bloc>
-            <Bloc titre="Budget par fournisseur" sousTitre="Consommation annuelle valorisée au CMUP" lien={{ vers: '/fournisseurs', libelle: 'Fournisseurs' }}>
+            <Bloc titre="Dépense par fournisseur" sousTitre="Réel des 12 mois pleins (grand livre de la consommation), valeur au livre" lien={{ vers: '/fournisseurs', libelle: 'Fournisseurs' }}>
               {voitMontants ? (
                 <BarresClassees
                   donnees={d.fournisseurs.slice(0, 8).map((f, i) => ({ cle: f.fournisseur_nom + i, libelle: f.fournisseur_nom, detail: `${f.nb_references} réf.`, valeur: f.budget_annuel_mad }))}
@@ -149,9 +149,9 @@ export function AnalyseTableau() {
 
           {/* ---- Coût matière | Couvertures --------------------------------------- */}
           <div className="grid gap-4 xl:grid-cols-3">
-            <Bloc className="xl:col-span-2" titre="Coût matière par mois" sousTitre="Ce que coûte la matière consommée, valorisée au CMUP">
+            <Bloc className="xl:col-span-2" titre="Coût matière du plan, par mois" sousTitre="Au plan : le besoin du plan en service, valorisé au CMUP — ce qui va se consommer">
               {d.cout_mensuel.length === 0 ? (
-                <Vide texte="Pas encore de consommation enregistrée." />
+                <Vide texte="Aucun besoin calculé pour le plan en service." />
               ) : !voitMontants ? (
                 <Vide texte="Montants réservés aux rôles qui voient la valeur du stock." />
               ) : (
@@ -174,27 +174,27 @@ export function AnalyseTableau() {
 
           {/* ---- ABC | Trésorerie | Lots ----------------------------------------- */}
           <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-            <Bloc titre="Classes ABC croisées au statut" sousTitre={`A ${ind?.nb_classe_a ?? 0} · B ${ind?.nb_classe_b ?? 0} · C ${ind?.nb_classe_c ?? 0} · non classées ${ind?.nb_non_classees ?? 0}`}>
+            <Bloc titre="Classes ABC croisées à l’état de couverture" sousTitre={`A ${ind?.nb_classe_a ?? 0} · B ${ind?.nb_classe_b ?? 0} · C ${ind?.nb_classe_c ?? 0} · non classées ${ind?.nb_non_classees ?? 0}`}>
               <Colonnes
                 empilees
                 hauteur={200}
                 libelles={d.abc_statut.map((x) => `Classe ${x.classe_abc}`)}
                 series={[
-                  { cle: 'ok', libelle: 'Au vert', valeurs: d.abc_statut.map((x) => x.ok), couleur: TON.succes },
-                  { cle: 'at', libelle: 'Attention', valeurs: d.abc_statut.map((x) => x.attention), couleur: TON.alerte },
-                  { cle: 'al', libelle: 'En alerte', valeurs: d.abc_statut.map((x) => x.en_alerte), couleur: TON.danger },
+                  { cle: 'ok', libelle: 'Couvert', valeurs: d.abc_statut.map((x) => x.ok), couleur: TON.succes },
+                  { cle: 'at', libelle: 'Sous la sécurité', valeurs: d.abc_statut.map((x) => x.attention), couleur: TON.alerte },
+                  { cle: 'al', libelle: 'Rupture inévitable', valeurs: d.abc_statut.map((x) => x.en_alerte), couleur: TON.danger },
                 ]}
               />
             </Bloc>
 
             {voitMontants && t && (
-              <Bloc titre="Cycle de trésorerie" sousTitre="Combien de jours l'argent reste immobilisé dans la matière">
+              <Bloc titre="Cycle de trésorerie" sousTitre="Combien de jours l'argent reste immobilisé dans la matière — au réel des 12 mois pleins">
                 <div className="grid grid-cols-2 gap-2">
                   <Tuile libelle="Stock immobilisé" valeur={compact(t.valeur_stock_mad)} unite="MAD" />
-                  <Tuile libelle="Coût matière annuel" valeur={compact(t.cout_matiere_annuel_mad)} unite="MAD" />
+                  <Tuile libelle="Coût matière (réel 12 mois)" valeur={compact(t.cout_matiere_annuel_mad)} unite="MAD" aide="Réel des 12 mois pleins : consommation et rebut du grand livre, retours déduits, valeur au livre." />
                   <Tuile libelle="Stock en jours (DIO)" valeur={fmt.nombre(t.dio_jours, 0)} unite="j" ton={t.dio_jours > 180 ? 'alerte' : undefined} />
                   <Tuile libelle="Délai fournisseur (DPO)" valeur={fmt.nombre(t.dpo_jours, 0)} unite="j" />
-                  <Tuile libelle="Matière par mois" valeur={compact(t.cout_matiere_annuel_mad / 12)} unite="MAD" />
+                  <Tuile libelle="Matière / mois (réel)" valeur={compact(t.cout_matiere_annuel_mad / 12)} unite="MAD" />
                   <Tuile libelle="Cycle (CCC)" valeur={fmt.nombre(t.ccc_jours, 0)} unite="j" ton={t.ccc_jours > 90 ? 'danger' : t.ccc_jours > 0 ? 'alerte' : 'succes'} aide="DIO + DSO − DPO. Négatif, le fournisseur finance le cycle." />
                 </div>
               </Bloc>

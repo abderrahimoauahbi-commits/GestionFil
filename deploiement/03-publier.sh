@@ -72,6 +72,13 @@ fi
 # --- 3. Bascule --------------------------------------------------------------
 dire "Arret du service"
 systemctl stop gestionfil 2>/dev/null || echo "  (n'etait pas demarre)"
+# UNE SECONDE D'ECART (17/10/2026). Le service sauvegarde en s'arretant, et
+# `systemctl stop` attend qu'il ait fini. La sauvegarde ci-dessous, lancee dans
+# la meme seconde, portait le meme nom horodate et etait REFUSEE : la publication
+# du 17/10 s'est arretee la, service coupe. Le binaire corrige attend de lui-meme
+# la seconde suivante ; mais c'est l'outil DEJA INSTALLE qui sauvegarde ici, et
+# il ne le sait pas encore. D'ou cette seconde.
+sleep 1
 
 # LA SAUVEGARDE AVANT LE REMPLACEMENT (audit v4). Le retour arriere
 # (04-revenir.sh) rend le binaire precedent, pas la base : si la version publiee

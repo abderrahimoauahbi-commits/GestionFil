@@ -57,6 +57,13 @@ pub enum AppError {
     #[error("La double authentification est obligatoire pour votre rôle : activez-la avant de continuer.")]
     DoubleAuthRequise,
 
+    /// Le serveur n'a pas pu obtenir de connexion a la base dans le delai : il est
+    /// sature, pas en panne. 503 et non 500 (17/10/2026) : le banc de charge a vu
+    /// 134 epuisements du pool affiches « erreur interne » a l'utilisateur, alors
+    /// que rien n'etait casse et qu'un nouvel essai, un instant plus tard, passait.
+    #[error("Le serveur est très sollicité en ce moment : rien n'a été enregistré. Réessayez dans un instant.")]
+    Occupe,
+
     #[error("Erreur interne")]
     Interne(#[from] anyhow::Error),
 
@@ -127,6 +134,16 @@ impl From<sqlx::Error> for AppError {
                     _ => AppError::Sqlx(e),
                 }
             }
+            // AUCUNE CONNEXION LIBRE DANS LE DELAI : la transaction n'a meme pas
+            // commence, rien n'est ecrit, et reessayer est sur.
+            sqlx::Error::PoolTimedOut => {
+                // Journalise, sinon la saturation devient invisible : avant le 503,
+                // elle s'ecrivait en « erreur interne » ; sans cette ligne, elle ne
+                // s'ecrirait plus du tout. Le contexte de la requete (id, chemin,
+                // utilisateur) suit, par le span.
+                tracing::warn!("pool de connexions epuise : requete refusee en 503");
+                AppError::Occupe
+            }
             _ => AppError::Sqlx(e),
         }
     }
@@ -164,6 +181,7 @@ impl IntoResponse for AppError {
             AppError::Conflit(_) => (StatusCode::CONFLICT, "CONFLIT"),
             AppError::SessionVerrouillee => (StatusCode::LOCKED, "SESSION_VERROUILLEE"),
             AppError::DoubleAuthRequise => (StatusCode::FORBIDDEN, "DOUBLE_AUTH_REQUISE"),
+            AppError::Occupe => (StatusCode::SERVICE_UNAVAILABLE, "SERVEUR_OCCUPE"),
             AppError::Interne(_) | AppError::Sqlx(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "ERREUR_INTERNE")
             }

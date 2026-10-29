@@ -23,9 +23,9 @@ import {
   type BarrePareto,
 } from '../composants/graphiques/Graphiques'
 import { Alerte, Carte, CarteCorps, CarteEntete, CarteTitre, Squelette } from '../composants/ui/base'
-import { fmt } from '../components/ui'
-import { cn } from '../lib/utils'
+import { cn, fmt } from '../lib/utils'
 import { couleurEcart, useTolerancesLot } from '../lib/lots'
+import { StatutBadge } from '../composants/StatutBadge'
 
 const MODULE = 'COCKPIT'
 
@@ -79,7 +79,8 @@ interface Analyse {
     fournisseur_nom: string | null
     unite_catalogue: string | null
     stock_physique_net_kg: number | null
-    conso_mensuelle_kg: number | null
+    /** Le plan ramené à un mois de 30 jours, tel que le moteur le consomme (27/10/2026). */
+    plan_mois_kg: number | null
     jours_couverture: number | null
     delai_livraison_jours: number | null
     qte_a_commander_kg: number | null
@@ -100,12 +101,6 @@ interface Analyse {
     valeur_dormante_mad?: number
     pct_valeur_dormante?: number | null
   }
-}
-
-const TON_STATUT: Record<string, string> = {
-  RUPTURE: 'bg-danger/15 text-danger',
-  CRITIQUE: 'bg-danger/10 text-danger',
-  ATTENTION: 'bg-alerte/15 text-alerte',
 }
 
 /** Un indicateur : sa valeur, son libelle, et le mot qui dit l'unite. */
@@ -287,8 +282,8 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
                     <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Couleur</th>
                     <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Fournisseur</th>
                     <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Stock (kg)</th>
-                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Conso / mois</th>
-                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Couv. (j)</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap" title="Le plan de l’horizon ramené à un mois de 30 jours (moteur de couverture)">Plan / mois</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap" title="Jours couverts jusqu’à la première rupture (moteur de couverture)">Couv. (j)</th>
                     <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Délai (j)</th>
                     <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">À commander (kg)</th>
                     <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Statut</th>
@@ -307,10 +302,10 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
                         {fmt.nombre(a.stock_physique_net_kg ?? 0, 0)}
                       </td>
                       <td className="px-2.5 py-1 text-right tabular-nums">
-                        {a.conso_mensuelle_kg == null ? '—' : fmt.nombre(a.conso_mensuelle_kg, 0)}
+                        {a.plan_mois_kg == null ? '—' : fmt.nombre(a.plan_mois_kg, 0)}
                       </td>
                       <td className="px-2.5 py-1 text-right tabular-nums">
-                        {a.jours_couverture == null ? '—' : fmt.nombre(a.jours_couverture, 0)}
+                        {a.jours_couverture == null ? 'horizon' : fmt.nombre(a.jours_couverture, 0)}
                       </td>
                       <td className="px-2.5 py-1 text-right tabular-nums">
                         {a.delai_livraison_jours ?? '—'}
@@ -319,9 +314,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
                         {a.qte_a_commander_kg == null ? '—' : fmt.nombre(a.qte_a_commander_kg, 0)}
                       </td>
                       <td className="px-2.5 py-1">
-                        <span className={cn('rounded-[3px] px-1.5 py-px text-[11px] font-medium', TON_STATUT[a.statut])}>
-                          {a.statut}
-                        </span>
+                        <StatutBadge entite="statut_stock" code={a.statut} />
                       </td>
                     </tr>
                   ))}
@@ -329,8 +322,9 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
               </table>
             </div>
             <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
-              Triées par couverture croissante : une couverture négative veut dire que les besoins
-              du plan dépassent déjà le stock et les commandes. La liste complète est au plan d’achat.
+              Moteur de couverture : le plan non couvert d’abord, puis sous la sécurité, la rupture la
+              plus proche en tête ; « 0 » veut dire une rupture dès aujourd’hui. La liste complète est
+              à l’onglet « À commander » du plan d’achat.
             </p>
           </CarteCorps>
         </Carte>
@@ -353,7 +347,11 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
             unite="j"
             aide="Valeur du stock physique divisée par la valeur consommée par jour. Les références chères pèsent davantage."
           />
-          <Kpi libelle="Ruptures" valeur={fmt.nombre(n('nb_ruptures'), 0)} ton={n('nb_ruptures') > 0 ? 'danger' : 'succes'} />
+          <Kpi
+            libelle="Rupture inévitable"
+            valeur={fmt.nombre(n('nb_rupture_inevitable'), 0)}
+            ton={n('nb_rupture_inevitable') > 0 ? 'danger' : 'succes'}
+          />
         </BlocKpi>
         <BlocKpi titre="Achats" Icone={ShoppingCart}>
           <Kpi libelle="Bons ouverts" valeur={fmt.nombre(n('nb_bc_ouverts'), 0)} />
@@ -391,7 +389,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
                 ton={(ind.pct_valeur_dormante ?? 0) > 5 ? 'alerte' : undefined}
               />
               <Kpi
-                libelle="Budget des ruptures"
+                libelle="Budget du plan non couvert"
                 valeur={fmt.nombre((ind.budget_ruptures_mad ?? 0) / 1e6, 2)}
                 unite="M MAD"
                 aide="Montant du plan d’achat pour les seules références en rupture : ce qu’il faut dépenser maintenant."
@@ -464,9 +462,9 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
 
         <BarresRangees
           titre="Distribution des couvertures"
-          sousTitre="Combien de références dans chaque tranche de jours"
+          sousTitre="Jours couverts jusqu’à la première rupture du plan (moteur de couverture)"
           unite="references"
-          maximum={6}
+          maximum={7}
           // L'ordre des tranches EST l'information : trier par effectif melangeait
           // « rupture » et « plus de 180 jours ».
           trier={false}
@@ -477,7 +475,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
             etat:
               c.rang === 1 ? ('critique' as const)
               : c.rang === 2 ? ('alerte' as const)
-              : c.rang >= 5 ? ('bon' as const)
+              : c.rang >= 6 ? ('bon' as const)
               : undefined,
           }))}
         />
@@ -495,13 +493,13 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
         />
 
         <BarresEmpilees
-          titre="Classe ABC croisee au statut"
+          titre="Classe ABC croisée à l’état de couverture"
           sousTitre="Une référence de classe A en alerte ne se traite pas comme une classe C"
           unite="references"
           series={[
-            { cle: 'en_alerte', libelle: 'Rupture ou critique' },
-            { cle: 'attention', libelle: 'Attention' },
-            { cle: 'ok', libelle: 'OK' },
+            { cle: 'en_alerte', libelle: 'Rupture inévitable' },
+            { cle: 'attention', libelle: 'Sous la sécurité' },
+            { cle: 'ok', libelle: 'Couvert' },
           ]}
           donnees={d.abc_statut.map((a) => ({
             cle: a.classe_abc,
@@ -658,7 +656,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
                           {m.delai_livraison_jours ?? '—'} j
                         </td>
                         <td className="px-2.5 py-1 text-right tabular-nums">
-                          {m.jours_couverture == null ? '—' : `${fmt.nombre(m.jours_couverture, 0)} j`}
+                          {m.jours_couverture == null ? 'horizon' : `${fmt.nombre(m.jours_couverture, 0)} j`}
                         </td>
                       </tr>
                     ))}

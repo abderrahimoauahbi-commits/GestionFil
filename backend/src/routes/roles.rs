@@ -200,7 +200,7 @@ async fn poser(tx: &mut sqlx::PgConnection, user: &Utilisateur, code: &str, s: &
         // Les utilisateurs du role suivent le modele, sauf leurs reglages manuels.
         repercutes += sqlx::query(
             "UPDATE droit_champ d
-                SET niveau = m.niveau, date_modification = $2, id_utilisateur_modif = $3
+                SET niveau = m.niveau, date_modification = fn_instant($2), id_utilisateur_modif = $3
                FROM utilisateur u, modele_droit_champ m
               WHERE u.id_utilisateur = d.id_utilisateur AND u.code_role_user = $1
                 AND m.code_role_user = $1 AND m.module = d.module AND m.champ = d.champ
@@ -215,7 +215,7 @@ async fn poser(tx: &mut sqlx::PgConnection, user: &Utilisateur, code: &str, s: &
         repercutes += sqlx::query(
             "INSERT INTO droit_champ (id_utilisateur, module, champ, niveau, date_modification,
                                       id_utilisateur_modif, origine)
-             SELECT u.id_utilisateur, m.module, m.champ, m.niveau, $2, $3, 'MODELE'
+             SELECT u.id_utilisateur, m.module, m.champ, m.niveau, fn_instant($2), $3, 'MODELE'
                FROM utilisateur u JOIN modele_droit_champ m ON m.code_role_user = u.code_role_user
               WHERE u.code_role_user = $1
              ON CONFLICT (id_utilisateur, module, champ) DO NOTHING",

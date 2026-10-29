@@ -27,6 +27,7 @@
 -- -----------------------------------------------------------------------------
 CREATE TABLE qualite (
     code_qualite        text    NOT NULL PRIMARY KEY,
+    version             integer NOT NULL DEFAULT 1,  -- verrou optimiste (2026-10-17d)
     nom                 text    NOT NULL,
     description         text,
     poids_commercial_m2 numeric(18,4)    NOT NULL DEFAULT 0 CHECK (poids_commercial_m2 >= 0),

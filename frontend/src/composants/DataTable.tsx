@@ -49,6 +49,7 @@ import { cn } from '../lib/utils'
 import { exporterCsv } from '../lib/export'
 import { TableauImprimable } from './Etat'
 import { Badge, Bouton, Champ, Chargement, EtatVide, Selecteur, Squelette } from './ui/base'
+import { IndiceChamp } from './ui/Indice'
 import { Menu, MenuContenu, MenuDeclencheur, MenuElement, MenuTitre } from './ui/surcouches'
 import {
   MenuContextuel,
@@ -66,6 +67,12 @@ export interface ColonneDT<L> {
   numerique?: boolean
   /** Masquee sous 1280 px ; reste presente dans la vue en cartes. */
   secondaire?: boolean
+  /**
+   * TOUJOURS sur la ligne complementaire ↳, avec son titre, dans l'ordre des
+   * colonnes (27/10/2026, Stock projete : une ligne principale choisie, le
+   * reste dessous), quelle que soit la largeur.
+   */
+  complement?: boolean
   largeur?: string
   triable?: boolean
   /**
@@ -110,6 +117,11 @@ interface Props<L> {
   erreur?: unknown
   cle: (ligne: L) => string
   surClic?: (ligne: L) => void
+  /**
+   * Cellules resserrees (marge laterale reduite) : pour une grille dont la ligne
+   * principale est fixee colonne par colonne (Stock projete, 27/10/2026).
+   */
+  serre?: boolean
   /** Colonne d'actions, toujours rendue en fin de ligne. */
   actions?: (ligne: L) => React.ReactNode
   /**
@@ -159,6 +171,13 @@ interface Props<L> {
    * plutot qu'un etat separe qu'il faudrait re-parametrer.
    */
   imprimable?: string
+  /**
+   * LES EN-TÊTES SUR DEUX LIGNES (27/10/2026, stock projeté) : un intitulé long
+   * (« Besoin jusqu’à livraison ») passe à la ligne au lieu d'élargir sa colonne
+   * de chiffres courts. Sans lui, la colonne tombait sur la ligne ↳ alors que
+   * ses valeurs tenaient. Défaut : sur une ligne, comme partout.
+   */
+  entetesRepliables?: boolean
 }
 
 export function DataTable<L extends Record<string, unknown>>({
@@ -169,6 +188,7 @@ export function DataTable<L extends Record<string, unknown>>({
   erreur,
   cle,
   surClic,
+  serre = false,
   actions,
   detail,
   menuContextuel,
@@ -197,6 +217,7 @@ export function DataTable<L extends Record<string, unknown>>({
   exportable,
   imprimable,
   serveur,
+  entetesRepliables = false,
 }: Props<L>) {
   const droits = useDroits(module)
   const [tri, setTri] = React.useState<SortingState>([])
@@ -331,7 +352,8 @@ export function DataTable<L extends Record<string, unknown>>({
   // ne part jamais. Une autre largeur, d'autres lignes : on repart de toutes.
   const cadreRef = React.useRef<HTMLDivElement>(null)
   const tableRef = React.useRef<HTMLTableElement>(null)
-  const [enComplement, setEnComplement] = React.useState<string[]>([])
+  const fixes = React.useMemo(() => visibles.filter((c) => c.complement).map((c) => c.champ), [visibles])
+  const [enComplement, setEnComplement] = React.useState<string[]>(fixes)
   const [largeurCadre, setLargeurCadre] = React.useState(0)
   React.useEffect(() => {
     const c = cadreRef.current
@@ -342,8 +364,8 @@ export function DataTable<L extends Record<string, unknown>>({
   }, [chargement, visibles.length])
   const page = table.getState().pagination?.pageIndex ?? 0
   React.useLayoutEffect(() => {
-    setEnComplement([])
-  }, [largeurCadre, lignes?.length, visibilite, visibles, page, filtre, filtresColonne])
+    setEnComplement(fixes)
+  }, [largeurCadre, lignes?.length, visibilite, visibles, page, filtre, filtresColonne, fixes])
   React.useLayoutEffect(() => {
     const c = cadreRef.current
     const t = tableRef.current
@@ -704,10 +726,13 @@ export function DataTable<L extends Record<string, unknown>>({
                       return (
                         <th
                           key={entete.id}
+                          data-indice-gere=""
                           style={m.largeur ? { width: m.largeur } : undefined}
                           className={cn(
-                            'bg-attenue px-2.5 py-2 text-left',
-                            'text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap',
+                            'bg-attenue py-2 text-left',
+                            serre ? 'px-1.5' : 'px-2.5',
+                            'text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte',
+                            entetesRepliables ? 'whitespace-normal align-bottom leading-tight' : 'whitespace-nowrap',
                             m.numerique && 'text-right',
                           )}
                         >
@@ -734,6 +759,11 @@ export function DataTable<L extends Record<string, unknown>>({
                             </button>
                           ) : (
                             flexRender(entete.column.columnDef.header, entete.getContext())
+                          )}
+                          {/* L'INDICE DE LA COLONNE (27/10/2026), hors du bouton de tri :
+                              il s'ouvre sans trier. Rien si l'aide de l'écran ne la décrit pas. */}
+                          {typeof entete.column.columnDef.header === 'string' && (
+                            <IndiceChamp intitule={entete.column.columnDef.header} className="ml-0.5" />
                           )}
                         </th>
                       )
@@ -768,7 +798,8 @@ export function DataTable<L extends Record<string, unknown>>({
                             className={cn(
                               // UNE LIGNE PAR RANGEE, comme un tableur : la grille
                               // defile en largeur plutot que de doubler en hauteur.
-                              'whitespace-nowrap px-2.5 align-middle',
+                              'whitespace-nowrap align-middle',
+                              serre ? 'px-1.5' : 'px-2.5',
                               m.numerique && 'text-right tabular-nums',
                             )}
                           >

@@ -85,7 +85,7 @@ pub async fn figer_recettes(db: &Db, user: &Utilisateur, id_plan: &str) -> AppRe
         )));
     }
 
-    let res = sqlx::query("UPDATE plan_qualite SET date_figee = $2 WHERE id_plan = $1")
+    let res = sqlx::query("UPDATE plan_qualite SET date_figee = fn_instant($2) WHERE id_plan = $1")
         .bind(id_plan)
         .bind(maintenant())
         .execute(&mut *tx)
@@ -146,7 +146,7 @@ pub async fn calculer(db: &Db, user: &Utilisateur, id_plan: &str) -> AppResult<R
              (id_plan, mois, rang_mois, annee_mois, code_reference, quantite_brute_kg,
               taux_perte_applique, quantite_kg, date_calcul, date_reference)
          SELECT id_plan, mois, rang_mois, annee_mois, code_reference, quantite_brute_kg,
-                taux_perte_pct, quantite_kg, $2, $3
+                taux_perte_pct, quantite_kg, fn_instant($2), fn_jour_casablanca($3)
            FROM v_besoin_mrp_calcule
           WHERE id_plan = $1",
     )
@@ -181,18 +181,45 @@ pub async fn prendre_snapshot(db: &Db, user: &Utilisateur, id_plan: &str) -> App
     user.poser_contexte(&mut tx).await?;
 
     let horodatage = maintenant();
+    // LE SOLDE ET L'ETAT DU MOTEUR DE COUVERTURE (27/10/2026) : pour chaque mois du
+    // plan EN SERVICE, le solde projete en fin de mois et l'etat du mois
+    // (`couverture::statut_mois` : PLAN_NON_COUVERT, SOUS_SECURITE, COUVERT ; une
+    // lecture de la projection, pas l'etat de la reference). Un mois hors de l'horizon (passe)
+    // ou un plan qui n'est pas en service n'a pas de projection : vide.
+    let etats = crate::routes::couverture::etats(db).await?;
+    let (mut codes, mut mois, mut soldes, mut statuts) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    if etats.id_plan.as_deref() == Some(id_plan) {
+        for code in sqlx::query_scalar::<_, String>("SELECT DISTINCT code_reference FROM besoin_mrp WHERE id_plan = $1")
+            .bind(id_plan)
+            .fetch_all(&mut *tx)
+            .await?
+        {
+            for m in etats.get(&code).map(|e| e.mois.as_slice()).unwrap_or_default() {
+                codes.push(code.clone());
+                mois.push(m.annee_mois.clone());
+                soldes.push(m.stock_fin_kg);
+                statuts.push(m.statut.to_string());
+            }
+        }
+    }
     let res = sqlx::query(
         "INSERT INTO snapshot_mrp
              (date_snapshot, id_plan, code_reference, mois, rang_mois, annee_mois,
               quantite_besoin_kg, stock_projete_kg, statut_couleur)
-         SELECT $2, bm.id_plan, bm.code_reference, bm.mois, bm.rang_mois, bm.annee_mois,
-                bm.quantite_kg, sp.stock_projete_kg, sp.statut
+         SELECT fn_instant($2), bm.id_plan, bm.code_reference, bm.mois, bm.rang_mois, bm.annee_mois,
+                bm.quantite_kg, round(p.solde_kg, 4), p.statut
            FROM besoin_mrp bm
-           LEFT JOIN v_stock_projete sp ON sp.code_reference = bm.code_reference
+           LEFT JOIN unnest($3::text[], $4::text[], $5::numeric[], $6::text[])
+                     AS p(code_reference, annee_mois, solde_kg, statut)
+                  ON p.code_reference = bm.code_reference AND p.annee_mois = bm.annee_mois
           WHERE bm.id_plan = $1",
     )
     .bind(id_plan)
     .bind(&horodatage)
+    .bind(&codes)
+    .bind(&mois)
+    .bind(&soldes)
+    .bind(&statuts)
     .execute(&mut *tx)
     .await?;
 

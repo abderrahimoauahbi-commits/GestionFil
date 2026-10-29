@@ -38,7 +38,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::json::lignes_en_json;
-use super::stock::numeroter;
+use crate::domain::numerotation::numeroter;
 use crate::domain::decision_machine as dm;
 
 // =============================================================================
@@ -115,6 +115,19 @@ pub struct LigneFiche {
     #[serde(default = "estimation")]
     pub mode_constat: String,
     pub notes: Option<String>,
+    /// L'OF de la ligne, quand l'etage est partage par deux OF. Vide : l'OF de
+    /// la fiche (22/10/2026).
+    #[serde(default)]
+    pub id_of: Option<String>,
+    /// La voie de la ligne, sa largeur en metres : une information pour le
+    /// magasinier (le nombre de bobines a manipuler), jamais une consommation.
+    #[serde(default)]
+    pub largeur_voie_m: Option<f64>,
+    /// LA QUALITE QUE LA LIGNE SERT (23/10/2026) : vide, celle de la fiche ;
+    /// avec un OF, celle de l'OF (le calcul refuse une autre) ; sans OF, elle est
+    /// obligatoire au chargement.
+    #[serde(default)]
+    pub code_qualite: Option<String>,
 }
 
 fn estimation() -> String {
@@ -131,6 +144,13 @@ pub struct NouvelleFiche {
     pub nb_bobines_etage: Option<i64>,
     pub nb_palettes: Option<i64>,
     pub numero_of: Option<String>,
+    /// L'OF choisi (22/10/2026) : PREVU ou LANCE, le defaut des lignes. Le
+    /// `numero_of` texte en prend le numero, pour l'historique.
+    #[serde(default)]
+    pub id_of: Option<String>,
+    /// La qualite par defaut des lignes, quand la fiche ne sert pas d'OF (23/10/2026).
+    #[serde(default)]
+    pub code_qualite: Option<String>,
     pub responsable: String,
     pub observations: Option<String>,
     #[serde(default)]
@@ -167,16 +187,18 @@ pub async fn lister(State(state): State<AppState>, user: Utilisateur) -> AppResu
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
     let lignes = sqlx::query(
         "SELECT m.code_machine, m.nom, m.capacite_bobines, m.nb_etages, m.code_atelier,
-                m.notes, m.actif, m.etat, m.motif_etat, m.date_etat,
+                m.notes, m.actif, m.etat, m.motif_etat, m.date_etat, m.version,
+                m.largeur_m::float8                        AS largeur_m,
                 COALESCE(SUM(e.nb_bobines), 0)::bigint     AS bobines_presentes,
                 COALESCE(SUM(e.kg), 0)::float8             AS quantite_kg,
                 COUNT(DISTINCT z.code_emplacement)::bigint AS nb_zones,
-                MAX(e.date_constat)                        AS dernier_constat
+                MAX(e.date_constat)::text                  AS dernier_constat
            FROM machine m
            LEFT JOIN machine_emplacement z ON z.code_machine = m.code_machine
            LEFT JOIN machine_etat e ON e.code_emplacement = z.code_emplacement
           GROUP BY m.code_machine, m.nom, m.capacite_bobines, m.nb_etages,
-                   m.code_atelier, m.notes, m.actif, m.etat, m.motif_etat, m.date_etat
+                   m.code_atelier, m.notes, m.actif, m.etat, m.motif_etat, m.date_etat, m.version,
+                   m.largeur_m
           ORDER BY m.nom",
     )
     .fetch_all(&state.db)
@@ -199,7 +221,7 @@ pub async fn plan(
                 COALESCE(SUM(e.nb_bobines), 0)::bigint AS bobines_presentes,
                 COALESCE(SUM(e.kg), 0)::float8         AS quantite_kg,
                 COUNT(e.code_reference)::bigint        AS nb_lots,
-                MAX(e.date_constat)                    AS dernier_constat
+                MAX(e.date_constat)::text              AS dernier_constat
            FROM machine_emplacement z
            LEFT JOIN machine_etat e ON e.code_emplacement = z.code_emplacement
           WHERE z.code_machine = $1
@@ -234,10 +256,16 @@ pub async fn etat_zone(
                 e.pourcentage::float8       AS pourcentage,
                 e.kg::float8                AS kg,
                 e.mode_constat, e.date_constat, e.responsable,
-                r.poids_bobine_kg::float8   AS poids_catalogue_kg
+                r.poids_bobine_kg::float8   AS poids_catalogue_kg,
+                -- L'OF que la ligne sert et sa voie (22/10/2026).
+                e.id_of, o.numero AS numero_of, e.largeur_voie_m::float8 AS largeur_voie_m,
+                -- La qualite que la ligne sert (23/10/2026) : la sienne, a defaut celle de son OF.
+                COALESCE(e.code_qualite, o.code_qualite) AS code_qualite, q.nom AS qualite_nom
            FROM machine_etat e
            JOIN machine_emplacement z ON z.code_emplacement = e.code_emplacement
            JOIN reference r ON r.code_reference = e.code_reference
+           LEFT JOIN ordre_fabrication o ON o.id_of = e.id_of
+           LEFT JOIN qualite q ON q.code_qualite = COALESCE(e.code_qualite, o.code_qualite)
           WHERE z.code_machine = $1 AND e.code_emplacement = $2
           ORDER BY r.designation, e.lot_fournisseur",
     )
@@ -278,11 +306,15 @@ pub async fn contenu_machine(
                 e.kg::float8                AS kg,
                 e.mode_constat, e.date_constat, e.responsable,
                 r.poids_bobine_kg::float8   AS poids_catalogue_kg,
-                c.libelle                   AS couleur
+                c.libelle                   AS couleur,
+                e.id_of, o.numero AS numero_of, e.largeur_voie_m::float8 AS largeur_voie_m,
+                COALESCE(e.code_qualite, o.code_qualite) AS code_qualite, q.nom AS qualite_nom
            FROM machine_emplacement z
            LEFT JOIN machine_etat e ON e.code_emplacement = z.code_emplacement
            LEFT JOIN reference r ON r.code_reference = e.code_reference
            LEFT JOIN couleur c ON c.code_couleur_interne = r.code_couleur_interne
+           LEFT JOIN ordre_fabrication o ON o.id_of = e.id_of
+           LEFT JOIN qualite q ON q.code_qualite = COALESCE(e.code_qualite, o.code_qualite)
           WHERE z.code_machine = $1
           -- LES ZONES VIDES RESTENT DANS LA LISTE. Un etage sans fil est une
           -- information : c'est la qu'il faut charger. Le filtrer donnerait un
@@ -318,9 +350,16 @@ pub async fn mouvements_machine(
                 l.destination, l.kg_apres::float8 AS kg_apres, l.ecart_kg::float8 AS ecart_kg,
                 l.effet_ecart, l.niveau_ecart, l.code_motif, l.motif_texte,
                 l.id_mouvement, m.numero_mouvement,
-                a.id_mouvement AS id_annulation, a.numero_mouvement AS numero_annulation
+                a.id_mouvement AS id_annulation, a.numero_mouvement AS numero_annulation,
+                -- L'ecart appartient a l'OF de la periode, l'OF sortant (22/10/2026).
+                l.id_of, onv.numero AS numero_of, l.id_of_periode, opr.numero AS numero_of_periode,
+                -- La qualite nouvelle et celle de la periode, a qui l'ecart appartient (23/10/2026).
+                COALESCE(l.code_qualite, onv.code_qualite) AS code_qualite,
+                COALESCE(l.code_qualite_periode, opr.code_qualite) AS code_qualite_periode
            FROM machine_decision d
            JOIN machine_decision_ligne l ON l.id_decision = d.id_decision
+           LEFT JOIN ordre_fabrication onv ON onv.id_of = l.id_of
+           LEFT JOIN ordre_fabrication opr ON opr.id_of = l.id_of_periode
            LEFT JOIN machine_fiche f ON f.id_fiche = d.id_fiche
            LEFT JOIN machine_emplacement e ON e.code_emplacement = d.code_emplacement
            LEFT JOIN utilisateur u ON u.id_utilisateur = d.id_utilisateur
@@ -358,9 +397,11 @@ pub async fn apercu_retrait(
         return Ok(Json(json!({ "decision": null })));
     };
     let avant = sqlx::query(
-        "SELECT code_reference, lot_fournisseur, nb_bobines, kg::float8 AS kg
-           FROM machine_decision_etat WHERE id_decision = $1 AND moment = 'AVANT'
-          ORDER BY code_reference, lot_fournisseur",
+        "SELECT s.code_reference, s.lot_fournisseur, s.nb_bobines, s.kg::float8 AS kg,
+                s.id_of, o.numero AS numero_of, COALESCE(s.code_qualite, o.code_qualite) AS code_qualite
+           FROM machine_decision_etat s LEFT JOIN ordre_fabrication o ON o.id_of = s.id_of
+          WHERE s.id_decision = $1 AND s.moment = 'AVANT'
+          ORDER BY s.code_reference, s.lot_fournisseur",
     )
     .bind(&id_decision)
     .fetch_all(&state.db)
@@ -430,8 +471,8 @@ pub async fn lister_fiches(
     let lignes = sqlx::query(
         "SELECT f.id_fiche, f.numero_fiche, f.type_fiche, f.statut, f.code_machine,
                 m.nom AS machine_nom, f.code_emplacement, z.libelle AS zone,
-                f.date_fiche, f.date_constat_precedent, f.code_magasin,
-                f.nb_bobines_etage, f.numero_of, f.responsable, f.observations,
+                f.date_fiche::text AS date_fiche, f.date_constat_precedent::text AS date_constat_precedent, f.code_magasin,
+                f.nb_bobines_etage, f.numero_of, f.id_of, f.responsable, f.observations,
                 f.date_creation, f.date_validation, f.motif_annulation,
                 (SELECT COUNT(*) FROM machine_fiche_ligne l WHERE l.id_fiche = f.id_fiche)
                     ::bigint AS nb_lignes,
@@ -474,7 +515,10 @@ pub async fn lire_fiche(
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
 
     let entete = sqlx::query(
-        "SELECT f.*, m.nom AS machine_nom, z.libelle AS zone, z.capacite_bobines
+        "SELECT f.*, m.nom AS machine_nom, z.libelle AS zone, z.capacite_bobines,
+                m.largeur_m::float8 AS largeur_m,
+                (SELECT o.numero FROM ordre_fabrication o WHERE o.id_of = f.id_of) AS numero_of_lien,
+                (SELECT q.nom FROM qualite q WHERE q.code_qualite = f.code_qualite) AS qualite_nom
            FROM machine_fiche f
            JOIN machine m ON m.code_machine = f.code_machine
            JOIN machine_emplacement z ON z.code_emplacement = f.code_emplacement
@@ -488,9 +532,14 @@ pub async fn lire_fiche(
     }
 
     let lignes = sqlx::query(
-        "SELECT l.*, r.designation, r.poids_bobine_kg::float8 AS poids_catalogue_kg
+        "SELECT l.*, r.designation, r.poids_bobine_kg::float8 AS poids_catalogue_kg,
+                -- Le poids d'une bobine DU LOT (23/10/2026) : le defaut d'un chargement.
+                fn_lot_poids_bobine(l.code_reference, l.lot_fournisseur)::float8 AS poids_lot_kg,
+                o.numero AS numero_of, q.nom AS qualite_nom
            FROM machine_fiche_ligne l
            JOIN reference r ON r.code_reference = l.code_reference
+           LEFT JOIN ordre_fabrication o ON o.id_of = l.id_of
+           LEFT JOIN qualite q ON q.code_qualite = l.code_qualite
           WHERE l.id_fiche = $1
           ORDER BY l.ligne_numero",
     )
@@ -522,8 +571,12 @@ pub async fn lire_fiche(
     .await?;
     let etats = sqlx::query(
         "SELECT s.moment, s.code_reference, r.designation, s.lot_fournisseur, s.nb_bobines,
-                s.pourcentage::float8 AS pourcentage, s.kg::float8 AS kg
+                s.pourcentage::float8 AS pourcentage, s.kg::float8 AS kg,
+                s.id_of, o.numero AS numero_of, s.largeur_voie_m::float8 AS largeur_voie_m,
+                COALESCE(s.code_qualite, o.code_qualite) AS code_qualite, q.nom AS qualite_nom
            FROM machine_decision_etat s JOIN reference r ON r.code_reference = s.code_reference
+           LEFT JOIN ordre_fabrication o ON o.id_of = s.id_of
+           LEFT JOIN qualite q ON q.code_qualite = COALESCE(s.code_qualite, o.code_qualite)
           WHERE s.id_decision = $1
           ORDER BY s.moment DESC, r.designation, s.lot_fournisseur",
     )
@@ -537,10 +590,16 @@ pub async fn lire_fiche(
                 l.kg_mouvementes::float8 AS kg_mouvementes, l.destination, l.nb_apres,
                 l.pourcentage_apres::float8 AS pourcentage_apres,
                 l.pourcentage_theorique::float8 AS pourcentage_theorique, l.kg_apres::float8 AS kg_apres,
-                l.ecart_kg::float8 AS ecart_kg, l.effet_ecart, m.libelle AS motif, l.motif_texte
+                l.ecart_kg::float8 AS ecart_kg, l.effet_ecart, m.libelle AS motif, l.motif_texte,
+                l.niveau_ecart, l.largeur_voie_m::float8 AS largeur_voie_m,
+                l.id_of, onv.numero AS numero_of, l.id_of_periode, opr.numero AS numero_of_periode,
+                COALESCE(l.code_qualite, onv.code_qualite) AS code_qualite,
+                COALESCE(l.code_qualite_periode, opr.code_qualite) AS code_qualite_periode
            FROM machine_decision_ligne l
            JOIN reference r     ON r.code_reference = l.code_reference
            JOIN machine_motif m ON m.code_motif = l.code_motif
+           LEFT JOIN ordre_fabrication onv ON onv.id_of = l.id_of
+           LEFT JOIN ordre_fabrication opr ON opr.id_of = l.id_of_periode
           WHERE l.id_decision = $1
           ORDER BY l.ligne_numero",
     )
@@ -597,6 +656,7 @@ pub async fn creer_fiche(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    let (id_of, numero_of) = of_de_la_fiche(&mut tx, &f).await?;
 
     let numero = numeroter(&mut tx, "machine_fiche", "numero_fiche", "MCH").await?;
     let id = uuid::Uuid::new_v4().to_string();
@@ -605,10 +665,10 @@ pub async fn creer_fiche(
         "INSERT INTO machine_fiche
              (id_fiche, numero_fiche, type_fiche, statut, code_machine, code_emplacement,
               date_fiche, date_constat_precedent, code_magasin, nb_bobines_etage,
-              nb_palettes, numero_of, responsable, observations, id_utilisateur)
+              nb_palettes, numero_of, responsable, observations, id_utilisateur, id_of, code_qualite)
          VALUES ($1,$2,$3,'BROUILLON',$4,$5,
-                 COALESCE($6, to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD')),
-                 $7,$8,$9,$10,$11,$12,$13,$14)",
+                 COALESCE(fn_jour_casablanca($6), (now() AT TIME ZONE 'Africa/Casablanca')::date),
+                 fn_jour_casablanca($7),$8,$9,$10,$11,$12,$13,$14,$15,$16)",
     )
     .bind(&id)
     .bind(&numero)
@@ -620,10 +680,12 @@ pub async fn creer_fiche(
     .bind(&f.code_magasin)
     .bind(f.nb_bobines_etage.or(Some(zone.capacite)))
     .bind(f.nb_palettes)
-    .bind(&f.numero_of)
+    .bind(&numero_of)
     .bind(f.responsable.trim())
     .bind(&f.observations)
     .bind(&user.id)
+    .bind(&id_of)
+    .bind(qualite_saisie(&f.code_qualite))
     .execute(&mut *tx)
     .await?;
 
@@ -662,13 +724,14 @@ pub async fn remplacer_fiche(
     if ancien != f.code_emplacement && nb_validations > 0 {
         dm::journal_changement_etage(&mut tx, &user, &id, &ancien, &f.code_emplacement).await?;
     }
+    let (id_of, numero_of) = of_de_la_fiche(&mut tx, &f).await?;
 
     sqlx::query(
         "UPDATE machine_fiche
-            SET date_fiche = COALESCE($2, date_fiche), code_magasin = $3,
+            SET date_fiche = COALESCE(fn_jour_casablanca($2), date_fiche), code_magasin = $3,
                 nb_bobines_etage = $4, nb_palettes = $5, numero_of = $6,
                 responsable = $7, observations = $8,
-                code_machine = $9, code_emplacement = $10
+                code_machine = $9, code_emplacement = $10, id_of = $11, code_qualite = $12
           WHERE id_fiche = $1",
     )
     .bind(&id)
@@ -676,11 +739,13 @@ pub async fn remplacer_fiche(
     .bind(&f.code_magasin)
     .bind(f.nb_bobines_etage)
     .bind(f.nb_palettes)
-    .bind(&f.numero_of)
+    .bind(&numero_of)
     .bind(f.responsable.trim())
     .bind(&f.observations)
     .bind(&f.code_machine)
     .bind(&f.code_emplacement)
+    .bind(&id_of)
+    .bind(qualite_saisie(&f.code_qualite))
     .execute(&mut *tx)
     .await?;
 
@@ -737,13 +802,17 @@ async fn charger_decision(
     tx: &mut sqlx::PgConnection,
     id: &str,
 ) -> AppResult<(dm::FicheDecision, Vec<dm::Saisie>, i64, String)> {
-    type Entete =
-        (String, String, String, String, Option<String>, String, Option<String>, String, i64, i64, String);
+    type Entete = (
+        String, String, String, String, Option<String>, String, Option<String>, String, i64, i64, String,
+        Option<String>, Option<f64>, Option<String>,
+    );
     let e: Entete = sqlx::query_as(
         "SELECT f.numero_fiche, f.type_fiche, f.code_machine, f.code_emplacement, f.code_magasin,
-                f.date_fiche, f.numero_of, f.responsable, f.nb_validations, z.capacite_bobines, z.libelle
+                f.date_fiche::text AS date_fiche, f.numero_of, f.responsable, f.nb_validations, z.capacite_bobines, z.libelle,
+                f.id_of, m.largeur_m::float8, f.code_qualite
            FROM machine_fiche f
            JOIN machine_emplacement z ON z.code_emplacement = f.code_emplacement
+           JOIN machine m ON m.code_machine = z.code_machine
           WHERE f.id_fiche = $1",
     )
     .bind(id)
@@ -752,17 +821,19 @@ async fn charger_decision(
     .ok_or_else(|| AppError::Introuvable(format!("fiche {id}")))?;
     type LigneLue = (
         String, String, Option<i64>, Option<f64>, Option<f64>, Option<String>, Option<f64>, i64,
-        Option<String>, Option<String>, Option<String>,
+        Option<String>, Option<String>, Option<String>, Option<String>, Option<f64>, Option<String>,
     );
     let lignes: Vec<LigneLue> = sqlx::query_as(
         "SELECT code_reference, lot_fournisseur, nb_bobines_mouvementees, poids_retenu_kg::float8,
                 pct_retirees::float8, destination, pourcentage::float8, nb_bobines_presentes,
-                code_motif, motif_texte, effet_ecart
+                code_motif, motif_texte, effet_ecart, id_of, largeur_voie_m::float8, code_qualite
            FROM machine_fiche_ligne WHERE id_fiche = $1 ORDER BY ligne_numero",
     )
     .bind(id)
     .fetch_all(&mut *tx)
     .await?;
+    let of_fiche = e.11.clone();
+    let qualite_fiche = e.13.clone();
     let saisies = lignes
         .into_iter()
         .map(|t| dm::Saisie {
@@ -777,6 +848,11 @@ async fn charger_decision(
             code_motif: t.8,
             motif_texte: t.9,
             effet_ecart: t.10,
+            // L'OF DE LA LIGNE, A DEFAUT CELUI DE LA FICHE (22/10/2026).
+            id_of: t.11.or_else(|| of_fiche.clone()),
+            largeur_voie_m: t.12,
+            // LA QUALITE DE LA LIGNE, A DEFAUT CELLE DE LA FICHE (23/10/2026).
+            code_qualite: t.13.or_else(|| qualite_fiche.clone()),
         })
         .collect();
     let f = dm::FicheDecision {
@@ -788,10 +864,154 @@ async fn charger_decision(
         code_magasin: e.4,
         date_fiche: e.5,
         numero_of: e.6,
+        largeur_machine: e.12,
         responsable: e.7,
         nb_validations: e.8,
     };
     Ok((f, saisies, e.9, e.10))
+}
+
+/// L'OF DE LA FICHE (22/10/2026) : un OF PREVU ou LANCE — la machine ne
+/// l'impose jamais, la fiche le choisit. Le `numero_of` texte en prend le
+/// numero, pour l'historique ; sans OF, il reste le texte saisi. Les OF des
+/// lignes sont verifies de meme.
+async fn of_de_la_fiche(
+    tx: &mut sqlx::PgConnection,
+    f: &NouvelleFiche,
+) -> AppResult<(Option<String>, Option<String>)> {
+    for l in &f.lignes {
+        if let Some(v) = l.largeur_voie_m {
+            if !(v > 0.0) || v >= 1000.0 {
+                return Err(AppError::Invalide(format!(
+                    "{} : la largeur de la voie est en metres, positive (ex. 1,20)",
+                    l.code_reference
+                )));
+            }
+        }
+        verifier_of(tx, l.id_of.as_deref()).await?;
+    }
+    match verifier_of(tx, f.id_of.as_deref()).await? {
+        Some(numero) => Ok((f.id_of.clone(), Some(numero))),
+        None => Ok((None, f.numero_of.clone().filter(|n| !n.trim().is_empty()))),
+    }
+}
+
+/// Un OF choisi existe et est PREVU ou LANCE ; rend son numero.
+async fn verifier_of(tx: &mut sqlx::PgConnection, id: Option<&str>) -> AppResult<Option<String>> {
+    let Some(id) = id.filter(|i| !i.is_empty()) else {
+        return Ok(None);
+    };
+    let of: Option<(String, String)> =
+        sqlx::query_as("SELECT numero, statut FROM ordre_fabrication WHERE id_of = $1")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    match of {
+        None => Err(AppError::Invalide(format!("ordre de fabrication inconnu : {id}"))),
+        Some((numero, statut)) if statut != "PREVU" && statut != "LANCE" => Err(AppError::RegleMetier(format!(
+            "l'OF {numero} est {} : une fiche ne sert qu'un OF prevu ou lance",
+            statut.to_lowercase()
+        ))),
+        Some((numero, _)) => Ok(Some(numero)),
+    }
+}
+
+/// `GET /api/machines/of-ouverts` — LES OF QU'UNE FICHE PEUT CHOISIR (22/10/2026) :
+/// prevus et lances, les plus recents d'abord. Le choix de l'atelier, jamais
+/// impose par la machine.
+pub async fn of_ouverts(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Lire).await?;
+    let lignes = sqlx::query(
+        "SELECT o.id_of, o.numero, o.statut, o.code_qualite, q.nom AS qualite_nom, o.date_of,
+                o.date_fin_prevue, o.metrage_m2::float8 AS metrage_m2
+           FROM ordre_fabrication o
+           LEFT JOIN qualite q ON q.code_qualite = o.code_qualite
+          WHERE o.statut IN ('PREVU', 'LANCE')
+          ORDER BY CASE o.statut WHEN 'LANCE' THEN 0 ELSE 1 END, o.date_of DESC, o.numero
+          LIMIT 500",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(lignes_en_json(&lignes)))
+}
+
+/// `GET /api/machines/of-ouverts/{id}/hors-machine` — CE QUE L'OF A SORTI ET
+/// RENDU des matieres hors machine, par reference (22/10/2026) : la fiche hors
+/// machine y lit ce qu'un retour peut encore rendre (la base le borne de meme,
+/// `fn_of_conso_directe_reste`). Contre-passes exclus.
+pub async fn of_hors_machine(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Lire).await?;
+    let lignes = sqlx::query(
+        "SELECT lm.code_reference, r.designation,
+                COALESCE(sum(lm.quantite_kg) FILTER (WHERE m.code_type_mvt = 'CONSO_DIRECTE'), 0)::float8 AS kg_sorti,
+                COALESCE(sum(lm.quantite_kg) FILTER (WHERE m.code_type_mvt = 'RETOUR_CONSO'), 0)::float8 AS kg_rendu,
+                fn_of_conso_directe_reste($1, lm.code_reference)::float8 AS reste_kg
+           FROM mouvement m
+           JOIN ligne_mouvement lm ON lm.id_mouvement = m.id_mouvement
+           JOIN reference r ON r.code_reference = lm.code_reference
+          WHERE m.id_of = $1
+            AND m.code_type_mvt IN ('CONSO_DIRECTE', 'RETOUR_CONSO')
+            AND NOT EXISTS (SELECT 1 FROM mouvement c WHERE c.id_mouvement_contrepasse = m.id_mouvement)
+          GROUP BY lm.code_reference, r.designation
+          ORDER BY r.designation",
+    )
+    .bind(&id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(lignes_en_json(&lignes)))
+}
+
+/// `GET /api/machines/qualites` — LES QUALITES QU'UNE CONSOMMATION PEUT SERVIR
+/// sans OF (23/10/2026) : toutes, sauf les qualites cloturees.
+pub async fn qualites_ouvertes(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Lire).await?;
+    let lignes = sqlx::query(
+        "SELECT code_qualite, nom AS qualite_nom FROM qualite
+          WHERE statut IS DISTINCT FROM 'CLOTURE'
+          ORDER BY code_qualite",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(lignes_en_json(&lignes)))
+}
+
+/// `GET /api/machines/qualites/{code}/hors-machine` — CE QUE LA QUALITE A SORTI
+/// ET RENDU SANS OF des matieres hors machine, par reference (23/10/2026) : ce
+/// qu'un retour sans OF peut encore rendre (la base le borne de meme,
+/// `fn_qualite_conso_directe_reste`). Contre-passes exclus.
+pub async fn qualite_hors_machine(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(code): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Lire).await?;
+    let lignes = sqlx::query(
+        "SELECT lm.code_reference, r.designation,
+                COALESCE(sum(lm.quantite_kg) FILTER (WHERE m.code_type_mvt = 'CONSO_DIRECTE'), 0)::float8 AS kg_sorti,
+                COALESCE(sum(lm.quantite_kg) FILTER (WHERE m.code_type_mvt = 'RETOUR_CONSO'), 0)::float8 AS kg_rendu,
+                fn_qualite_conso_directe_reste($1, lm.code_reference)::float8 AS reste_kg
+           FROM mouvement m
+           JOIN ligne_mouvement lm ON lm.id_mouvement = m.id_mouvement
+           JOIN reference r ON r.code_reference = lm.code_reference
+          WHERE m.id_of IS NULL AND m.code_qualite = $1
+            AND m.code_type_mvt IN ('CONSO_DIRECTE', 'RETOUR_CONSO')
+            AND NOT EXISTS (SELECT 1 FROM mouvement c WHERE c.id_mouvement_contrepasse = m.id_mouvement)
+          GROUP BY lm.code_reference, r.designation
+          ORDER BY r.designation",
+    )
+    .bind(&code)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(lignes_en_json(&lignes)))
+}
+
+/// Une qualite saisie : vide = aucune.
+fn qualite_saisie(q: &Option<String>) -> Option<&str> {
+    q.as_deref().map(str::trim).filter(|q| !q.is_empty())
 }
 
 fn refuser_conso(type_fiche: &str) -> AppResult<()> {
@@ -844,6 +1064,9 @@ pub async fn apercu_fiche(
         "capacite": calc.capacite,
         "bobines_apres": calc.bobines_apres,
         "blocages": blocages,
+        // CE QUI SE SIGNALE SANS BLOQUER : les voies (C63, 22/10/2026).
+        "signaux": calc.signaux,
+        "largeur_machine": calc.largeur_machine,
         "derogations": derogations,
     })))
 }
@@ -937,7 +1160,7 @@ async fn retirer_fiche(
         sqlx::query(
             "UPDATE machine_fiche
                 SET statut = 'ANNULE', motif_annulation = $2,
-                    date_annulation = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+                    date_annulation = now()
               WHERE id_fiche = $1 AND statut = 'BROUILLON'",
         )
         .bind(id)
@@ -1045,7 +1268,7 @@ async fn resoudre_zone(db: &crate::db::Db, machine: &str, zone: &str) -> AppResu
 
 async fn dernier_constat(db: &crate::db::Db, zone: &str) -> AppResult<Option<String>> {
     Ok(sqlx::query_scalar::<_, Option<String>>(
-        "SELECT MAX(date_constat) FROM machine_etat WHERE code_emplacement = $1",
+        "SELECT MAX(date_constat)::text FROM machine_etat WHERE code_emplacement = $1",
     )
     .bind(zone)
     .fetch_one(db)
@@ -1163,8 +1386,9 @@ async fn ecrire_lignes(
                   nb_bobines_mouvementees, kg_mouvementes, nb_palettes,
                   nb_bobines_presentes, poids_unitaire_kg, pourcentage, total_kg,
                   mode_constat, notes, lot_force, motif_lot_force,
-                  poids_retenu_kg, pct_retirees, destination, code_motif, motif_texte, effet_ecart)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)",
+                  poids_retenu_kg, pct_retirees, destination, code_motif, motif_texte, effet_ecart,
+                  id_of, largeur_voie_m, code_qualite)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)",
         )
         .bind(id)
         .bind(i as i64 + 1)
@@ -1192,6 +1416,9 @@ async fn ecrire_lignes(
         .bind(l.code_motif.as_deref().filter(|m| !m.is_empty()))
         .bind(l.motif_texte.as_deref().map(str::trim).filter(|m| !m.is_empty()))
         .bind(l.effet_ecart.as_deref().filter(|e| !e.is_empty()))
+        .bind(l.id_of.as_deref().filter(|o| !o.is_empty()))
+        .bind(l.largeur_voie_m.filter(|v| *v > 0.0))
+        .bind(qualite_saisie(&l.code_qualite))
         .execute(&mut *tx)
         .await?;
     }
@@ -1237,7 +1464,22 @@ pub struct MachineSaisie {
     pub nom: String,
     pub code_atelier: Option<String>,
     pub notes: Option<String>,
+    /// La largeur de la machine en metres (CRM1 : 4,20), facultative et
+    /// positive : d'elle vient le nombre de bobines d'une voie (22/10/2026).
+    /// ABSENTE, la correction la garde (un ecran qui ne la connait pas ne
+    /// l'efface pas) ; `null`, elle s'efface.
+    #[serde(default, deserialize_with = "valeur_ou_null")]
+    pub largeur_m: Option<Option<f64>>,
     pub zones: Vec<ZoneSaisie>,
+    /// La version lue avec la machine (verrou optimiste, groupe 3, 20/10/2026) :
+    /// exigee a la modification, ignoree a la creation.
+    #[serde(default)]
+    pub version: Option<i64>,
+}
+
+/// Distingue un champ absent (`None`) d'un champ `null` (`Some(None)`).
+fn valeur_ou_null<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<f64>>, D::Error> {
+    Option::<f64>::deserialize(d).map(Some)
 }
 
 /// Une zone validee, prete a etre ecrite.
@@ -1256,6 +1498,14 @@ struct ZonePrete {
 fn preparer(code_machine: &str, m: &MachineSaisie) -> AppResult<Vec<ZonePrete>> {
     if m.nom.trim().is_empty() {
         return Err(AppError::Invalide("le nom de la machine est requis".into()));
+    }
+    if let Some(Some(l)) = m.largeur_m {
+        // numeric(6,3) : au plus 999,999 m.
+        if !(l > 0.0) || l >= 1000.0 {
+            return Err(AppError::Invalide(
+                "la largeur de la machine est en metres, positive (ex. 4,20) ; laissez-la vide si elle n'est pas connue".into(),
+            ));
+        }
     }
     if m.zones.is_empty() {
         return Err(AppError::Invalide(
@@ -1406,9 +1656,9 @@ pub async fn creer_machine(
     sqlx::query(
         // `actif` est une colonne GENEREE depuis `etat` : l'ecrire echouerait.
         "INSERT INTO machine (code_machine, nom, capacite_bobines, nb_etages,
-                              code_atelier, notes, etat, date_etat)
+                              code_atelier, notes, etat, date_etat, largeur_m)
          VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE',
-                 to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'))",
+                 now(), round($7::numeric, 3))",
     )
     .bind(&code)
     .bind(m.nom.trim())
@@ -1416,6 +1666,7 @@ pub async fn creer_machine(
     .bind(nb_etages)
     .bind(&m.code_atelier)
     .bind(&m.notes)
+    .bind(m.largeur_m.flatten())
     .execute(&mut *tx)
     .await?;
 
@@ -1505,8 +1756,15 @@ pub async fn modifier_machine(
         }
     }
 
+    let version = crate::domain::concurrence::exigee(m.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // La premiere ecriture prend la machine a la version lue : deux corrections
+    // simultanees de ses zones, la seconde est refusee en nommant la premiere.
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "machine", "code_machine", &code, Some(version), "Cette machine",
+    )
+    .await?;
 
     // Les zones retirees — vides, on vient de le verifier. CELLES QUI ONT UN
     // PASSE SE DESACTIVENT (audit v4) : fiches, decisions, consommation et
@@ -1565,7 +1823,8 @@ pub async fn modifier_machine(
     sqlx::query(
         "UPDATE machine
             SET nom = $2, capacite_bobines = $3, nb_etages = $4,
-                code_atelier = $5, notes = $6
+                code_atelier = $5, notes = $6,
+                largeur_m = CASE WHEN $8 THEN round($7::numeric, 3) ELSE largeur_m END
           WHERE code_machine = $1",
     )
     .bind(&code)
@@ -1574,15 +1833,19 @@ pub async fn modifier_machine(
     .bind(nb_etages)
     .bind(&m.code_atelier)
     .bind(&m.notes)
+    .bind(m.largeur_m.flatten())
+    .bind(m.largeur_m.is_some())
     .execute(&mut *tx)
     .await?;
 
+    let version = crate::domain::concurrence::version_actuelle(&mut tx, "machine", "code_machine", &code).await?;
     tx.commit().await?;
     Ok(Json(json!({
         "code_machine": code,
         "capacite_bobines": capacite,
         "nb_etages": nb_etages,
         "zones": zones.len(),
+        "version": version,
     })))
 }
 
@@ -1591,6 +1854,9 @@ pub struct ChangementEtat {
     /// ACTIVE, PANNE, SOMMEIL ou RETIREE.
     pub etat: String,
     pub motif: Option<String>,
+    /// La version lue avec la machine (groupe 3, 20/10/2026).
+    #[serde(default)]
+    pub version: Option<i64>,
 }
 
 /// `PATCH /api/machines/{code}/etat` — declarer une machine en panne, en
@@ -1643,13 +1909,15 @@ pub async fn changer_etat(
             .await?;
     let (nom, ancien) = machine.ok_or_else(|| AppError::Introuvable(format!("machine {code}")))?;
 
+    let version = crate::domain::concurrence::exigee(c.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    // Sous verrou : une fiche ne doit pas se valider entre le controle et le retrait.
-    sqlx::query("SELECT 1 FROM machine WHERE code_machine = $1 FOR UPDATE")
-        .bind(&code)
-        .execute(&mut *tx)
-        .await?;
+    // Sous verrou, a la version lue : une fiche ne doit pas se valider entre le
+    // controle et le retrait, et deux changements d'etat ne s'ecrasent pas.
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "machine", "code_machine", &code, Some(version), "Cette machine",
+    )
+    .await?;
     if etat == "RETIREE" {
         // Les brouillons d'abord (F15) : valides apres le retrait, ils poseraient
         // du fil sur une machine hors parc.
@@ -1689,8 +1957,7 @@ pub async fn changer_etat(
     sqlx::query(
         "UPDATE machine
             SET etat = $2, motif_etat = NULLIF($3, ''),
-                date_etat = to_char(now() AT TIME ZONE 'UTC',
-                                    'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+                date_etat = now()
           WHERE code_machine = $1",
     )
     .bind(&code)
@@ -1698,10 +1965,12 @@ pub async fn changer_etat(
     .bind(&motif)
     .execute(&mut *tx)
     .await?;
+    let version = crate::domain::concurrence::version_actuelle(&mut tx, "machine", "code_machine", &code).await?;
     tx.commit().await?;
 
     Ok(Json(json!({
         "code_machine": code,
+        "version": version,
         "etat_precedent": ancien,
         "etat": etat,
         "motif": if motif.is_empty() { Value::Null } else { Value::from(motif) },
@@ -1722,9 +1991,11 @@ pub async fn supprimer_machine(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(code): Path<String>,
+    Query(q): Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PARAMETRES, Action::Ecrire)
         .await?;
+    let version = super::entites::version_exigee(q.version.map(Value::String).as_ref())?;
 
     let code = code.trim().to_uppercase();
     let nom: Option<(String,)> =
@@ -1764,6 +2035,10 @@ pub async fn supprimer_machine(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "machine", "code_machine", &code, Some(version), "Cette machine",
+    )
+    .await?;
     sqlx::query("DELETE FROM machine_emplacement WHERE code_machine = $1")
         .bind(&code)
         .execute(&mut *tx)

@@ -11,15 +11,27 @@
  *
  * UNE LIGNE DEJA RECUE EST FIGEE : elle est entree en stock a ce prix. La
  * changer apres coup ferait diverger la facture du stock sans que rien ne le
- * dise ; on solde, on ne corrige pas.
+ * dise ; on solde, on ne corrige pas. FIGEE TOUT ENTIERE A L'ECRAN (24/10/2026) :
+ * lot, couleur, bobines et palettes aussi — sur une ligne liee, toucher les
+ * bobines recalculait le poids net, que la base refuse (IMPORT-FIGEE).
+ *
+ * UNE LIGNE, UNE RANGEE (24/10/2026). Quand la largeur mesuree du tableau le
+ * permet (1366 px barre laterale ouverte, et au-dela), TOUS les champs d'une
+ * ligne tiennent sur sa rangee : reference, bon, lot, couleur, unite, poids,
+ * bobines, palettes, prix, remise, montant et le RAPPROCHEMENT (prix contre le
+ * bon, poids contre le recu) ; chaque case a la largeur de son contenu, la
+ * reference prend le reste. Trop etroit seulement, la rangee complementaire ↳
+ * (lot, couleur, unite, colis, remise, cout) revient ; elle ne s'ouvre
+ * d'elle-meme que pour une ligne en saisie ou incomplete.
  */
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Link2,
   Lock,
   Plus,
@@ -50,12 +62,15 @@ import { ChampReference } from '../../composants/ChampReference'
 import { cn, fmt } from '../../lib/utils'
 import {
   type Conditionnement,
+  controleColisage,
   depuisBobines,
   depuisKg,
   depuisPalettes,
   pourChamp,
 } from '../../lib/conditionnement'
 import { AvisColisage } from '../../composants/AvisColisage'
+import { useTolerancesColisage } from '../../lib/lots'
+import { useGardeSaisie } from '../../hooks/useGardeSaisie'
 import { echec, nombre, useRafraichir } from './dialogues'
 import { UNITE, type DossierComplet, type Ligne } from './types'
 
@@ -63,6 +78,42 @@ const MODULE = 'IMPORT'
 const th = 'px-1.5 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
 const td = 'px-1.5 py-1'
 const champ = 'h-7 px-1.5 text-[12.5px]'
+/* SUR UNE SEULE RANGEE (24/10/2026) : des cases a la largeur de leur contenu. */
+const th1 = 'px-1 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
+const td1 = 'px-1 py-1'
+const champ1 = 'h-7 px-1 text-[12px]'
+/**
+ * La largeur de chaque colonne, en pixels, rembourrage compris : poids et prix
+ * ~8 caracteres, bobines et palettes ~5, lot ~12, codes couleur courts, le bon
+ * par son numero. La reference prend le reste, jamais moins de REF_MIN.
+ */
+const COL = {
+  num: 24, bc: 124, lot: 104, codeCouleur: 48, couleur: 84, unite: 50, poids: 70,
+  bobines: 50, palettes: 42, prix: 64, remise: 44, montant: 80, controle: 76, actions: 54,
+}
+const REF_MIN = 150
+const SEUIL_UNE_RANGEE = Object.values(COL).reduce((t, x) => t + x, 0) + REF_MIN
+
+/**
+ * La largeur d'un element, suivie a chaque redimensionnement (fenetre, barre
+ * laterale). Par une ref-fonction : le tableau n'existe qu'une fois la facture
+ * lue, apres le premier rendu.
+ */
+function useLargeur() {
+  const [largeur, setLargeur] = useState(0)
+  const observateur = useRef<ResizeObserver | null>(null)
+  const ref = useCallback((el: HTMLElement | null) => {
+    observateur.current?.disconnect()
+    observateur.current = null
+    if (!el) return
+    setLargeur(el.clientWidth)
+    if (typeof ResizeObserver === 'undefined') return
+    const o = new ResizeObserver(() => setLargeur(el.clientWidth))
+    o.observe(el)
+    observateur.current = o
+  }, [])
+  return [ref, largeur] as const
+}
 
 interface RefCatalogue {
   code_reference: string
@@ -83,7 +134,15 @@ interface LigneBcOuverte {
   code_reference: string
   quantite_restante_kg: number
   prix_kg_devise: number
+  /** La devise du bon : le prix ne se compare qu'a devise egale. */
+  code_devise?: string
 }
+
+/**
+ * Une ligne telle que le serveur la rend, avec le prix et la devise de sa
+ * ligne de bon, meme soldee (24/10/2026). Le prix est masque selon les droits.
+ */
+type LigneServeur = Ligne & { prix_kg_devise?: number | null; devise_bc?: string | null }
 
 /** Une ligne telle qu'on la saisit : des chaines, comme les champs. */
 interface LigneEdit {
@@ -235,6 +294,12 @@ export function FactureImport() {
   const [lignes, setLignes] = useState<LigneEdit[]>([])
   const [toutes, setToutes] = useState(false)
   const [ouverte, setOuverte] = useState<string | null>(null)
+  /** La rangee ↳ ouverte ou fermee a la main ; sans choix, elle suit la ligne. */
+  const [deplies, setDeplies] = useState<Record<string, boolean>>({})
+  const tolerances = useTolerancesColisage()
+  // UNE LIGNE, UNE RANGEE quand la largeur mesuree du tableau le permet.
+  const [refTableau, largeurTableau] = useLargeur()
+  const uneRangee = largeurTableau >= SEUIL_UNE_RANGEE
   useEffect(() => {
     if (!d) return
     setEntete(enteteInitial())
@@ -312,6 +377,8 @@ export function FactureImport() {
    * reperent les erreurs de recopie.
    */
   const majColis = (l: LigneEdit, source: 'poids' | 'palettes' | 'bobines', valeur: string) => {
+    // Une ligne recue ne bouge plus, pas meme par le calcul lie.
+    if (l.recue) return
     const champ =
       source === 'poids' ? 'poids_net_kg' : source === 'palettes' ? 'nb_palettes' : 'nb_bobines'
     if (!l.lie) return majLigne(l.cle, { [champ]: valeur })
@@ -359,6 +426,32 @@ export function FactureImport() {
   const modifie = nouvelle || enteteModifie || lignesModifiees.length > 0
   const enteteComplet = entete.code_fournisseur && entete.numero_facture.trim() && entete.date_facture && entete.code_devise && nombre(entete.taux_change) > 0
     && !tauxDirham && (!tauxEloigne || tauxConfirmeOk)
+  /* CE QUI EMPECHE D'ENREGISTRER, ECRIT EN CLAIR dans la barre du bas : un
+     bouton grise sans raison laisse chercher. */
+  const raisonBlocage = !modifie
+    ? 'Rien à enregistrer.'
+    : !entete.code_fournisseur
+      ? 'Choisissez le fournisseur.'
+      : !entete.numero_facture.trim()
+        ? 'Saisissez le n° de facture.'
+        : !entete.date_facture
+          ? 'Saisissez la date de la facture.'
+          : !entete.code_devise
+            ? 'Choisissez la devise.'
+            : !(nombre(entete.taux_change) > 0)
+              ? 'Saisissez le taux de change.'
+              : tauxDirham
+                ? `Taux 1 refusé : c’est le taux du dirham, pas celui du ${entete.code_devise}.`
+                : tauxEloigne && !tauxConfirmeOk
+                  ? 'Taux éloigné de la référence : confirmez-le dans l’en-tête.'
+                  : !enteteComplet
+                    ? 'En-tête incomplet.'
+                  : incompletes.length > 0
+                    ? `${incompletes.length} ligne(s) incomplète(s) : référence, poids et prix.`
+                    : null
+  // LA GARDE DE SAISIE : une facture commencee ne se perd pas d'un clic.
+  const touche = enteteModifie || lignesModifiees.length > 0 || incompletes.length > 0
+  const quitter = useGardeSaisie(ecrire && touche)
 
   /** L'identifiant d'une facture creee pendant l'enregistrement en cours. */
   const creeeRef = useRef<string | null>(null)
@@ -378,18 +471,33 @@ export function FactureImport() {
         taux_confirme: tauxConfirmeOk,
       }
       let id = idFacture
+      // LE VERROU OPTIMISTE (20/10/2026). La facture et ses lignes passent par
+      // la version de la FACTURE, lue avec ce que l'ecran affiche (le formulaire
+      // se recharge avec elle) ; chaque reponse rend celle que l'enregistrement
+      // suivant presente. Une facture nouvelle se cree sous la version du DOSSIER.
+      type AvecVersion = { version?: number }
+      let v = facture?.version
+      const suivre = (r: AvecVersion) => {
+        v = r.version ?? v
+      }
       if (nouvelle) {
-        id = (await api.post<{ id_facture: string }>(`/api/import/dossiers/${idDossier}/factures`, corpsEntete)).id_facture
+        const r = await api.post<{ id_facture: string; version?: number }>(`/api/import/dossiers/${idDossier}/factures`, {
+          ...corpsEntete,
+          version: d?.dossier.version,
+        })
+        id = r.id_facture
+        v = r.version
         creeeRef.current = id
       } else if (enteteModifie) {
-        await api.patch(`/api/import/factures/${id}`, corpsEntete)
+        suivre(await api.patch<AvecVersion>(`/api/import/factures/${id}`, { ...corpsEntete, version: v }))
       }
       // Les suppressions d'abord : une ligne retiree ne doit pas bloquer le
       // controle des totaux des suivantes.
-      for (const l of lignesModifiees.filter((x) => x.supprimee)) await api.delete(`/api/import/lignes/${l.id_ligne}`)
+      for (const l of lignesModifiees.filter((x) => x.supprimee))
+        suivre(await api.delete<AvecVersion>(`/api/import/lignes/${l.id_ligne}?version=${v ?? ''}`))
       for (const l of lignesModifiees.filter((x) => !x.supprimee)) {
-        if (l.id_ligne) await api.patch(`/api/import/lignes/${l.id_ligne}`, corpsLigne(l))
-        else await api.post(`/api/import/factures/${id}/lignes`, corpsLigne(l))
+        if (l.id_ligne) suivre(await api.patch<AvecVersion>(`/api/import/lignes/${l.id_ligne}`, { ...corpsLigne(l), version: v }))
+        else suivre(await api.post<AvecVersion>(`/api/import/factures/${id}/lignes`, { ...corpsLigne(l), version: v }))
       }
       return id
     },
@@ -410,13 +518,17 @@ export function FactureImport() {
   })
 
   const supprimer = useMutation({
-    mutationFn: () => api.delete(`/api/import/factures/${idFacture}`),
+    mutationFn: () => api.delete(`/api/import/factures/${idFacture}?version=${facture?.version ?? ''}`),
     onSuccess: () => {
       toast.success('Facture supprimée')
       rafraichir()
       ouvrir(`/import/${idDossier}?onglet=factures`)
     },
-    onError: echec,
+    // Un refus (409 compris) relit la facture : ses changements s'affichent.
+    onError: (e) => {
+      echec(e)
+      rafraichir()
+    },
   })
 
   if (q.isLoading) return <Chargement texte="Lecture de la facture…" />
@@ -442,25 +554,54 @@ export function FactureImport() {
   const maj = (k: keyof typeof entete) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setEntete((x) => ({ ...x, [k]: e.target.value }))
 
+  const ecartImprime = entete.montant_devise !== '' ? totalDevise - nombre(entete.montant_devise) : null
+  const ecartColis = (entete.nb_palettes !== '' && nombre(entete.nb_palettes) !== totalPalettes) || (entete.nb_bobines !== '' && nombre(entete.nb_bobines) !== totalBobines)
+  const totalRecu = lignesServeur.reduce((t, l) => t + l.quantite_recue_kg, 0)
+  /* UNE FACTURE QUI A FAIT ENTRER DE LA MARCHANDISE garde son fournisseur, sa
+     devise, son taux et son montant : la base refuse d'y toucher (IMPORT-FIGEE).
+     L'ecran ne les offre donc plus. */
+  const factureRecue = lignesServeur.some((l) => l.quantite_recue_kg > 0)
+  const titreFige = factureRecue ? 'Facture déjà reçue : fournisseur, devise, taux et montant ne bougent plus.' : undefined
+  const supprimable = ecrire && !nouvelle && !factureRecue
+  const nbAjoutees = lignesModifiees.filter((l) => !l.id_ligne).length
+  const nbRetirees = lignesModifiees.filter((l) => l.supprimee).length
+  const nbCorrigees = lignesModifiees.length - nbAjoutees - nbRetirees
+
+  /**
+   * LE RAPPROCHEMENT DE LA LIGNE, sur sa rangee : le prix facture contre celui
+   * du bon, le poids facture contre le poids recu (des qu'il y a une
+   * reception). Rien ne bloque : l'ecart se lit avant d'enregistrer, comme sur
+   * la facture fournisseur.
+   *
+   * LE PRIX DU BON VIENT DU SERVEUR (24/10/2026) : chaque ligne enregistree
+   * porte celui de sa ligne de bon, meme soldee — l'ecart ne disparait plus
+   * quand le bon est servi. Une ligne en saisie, ou rattachee a un autre bon
+   * que celui enregistre, le lit dans les lignes de bon ouvertes.
+   */
+  const controleLigne = (l: LigneEdit, s?: LigneServeur) => {
+    const duServeur = s && l.id_ligne_bc && s.id_ligne_bc === l.id_ligne_bc && typeof s.prix_kg_devise === 'number'
+      ? { prix_kg_devise: s.prix_kg_devise, code_devise: s.devise_bc ?? undefined }
+      : undefined
+    const bc = duServeur ?? (l.id_ligne_bc ? qBc.data?.find((b) => b.id_ligne_bc === l.id_ligne_bc) : undefined)
+    const prix = nombre(l.prix_unitaire_devise)
+    const memeDevise = !bc?.code_devise || bc.code_devise === entete.code_devise
+    const prixBc = bc && typeof bc.prix_kg_devise === 'number' && l.unite === 'kg' && memeDevise ? bc.prix_kg_devise : null
+    const ecartPrix = prixBc && prix > 0 ? (prix / prixBc - 1) * 100 : null
+    const recu = s && s.quantite_recue_kg > 0 ? s.quantite_recue_kg : null
+    const ecartKg = recu != null ? nombre(l.poids_net_kg) - recu : null
+    return { prixBc, ecartPrix, recu, ecartKg }
+  }
+
   return (
     <div className="space-y-3 pb-4">
       <EnTetePage
         titre={nouvelle ? 'Nouvelle facture' : `Facture ${facture!.numero_facture}`}
         description={`Dossier ${d.dossier.numero}${facture ? ` · ${facture.fournisseur_nom}` : ''}`}
         actions={
-          <>
-            <Bouton variante="contour" onClick={() => ouvrir(`/import/${idDossier}?onglet=factures`)}>
-              <ArrowLeft />
-              Factures du dossier {d.dossier.numero}
-            </Bouton>
-            {ecrire && (
-              <Bouton disabled={!modifie || !enteteComplet || incompletes.length > 0} chargement={enregistrer.isPending}
-                onClick={() => enregistrer.mutate()}>
-                <Save />
-                Enregistrer
-              </Bouton>
-            )}
-          </>
+          <Bouton variante="contour" onClick={() => quitter(() => ouvrir(`/import/${idDossier}?onglet=factures`))}>
+            <ArrowLeft />
+            Factures du dossier {d.dossier.numero}
+          </Bouton>
         }
       />
       {clos && <Alerte ton="succes">Dossier clôturé : la facture est en lecture seule.</Alerte>}
@@ -474,7 +615,9 @@ export function FactureImport() {
           </Badge>}
         </CarteEntete>
         <CarteCorps>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {/* DEUX RANGEES : le document (qui, quel numero, quand, en quoi), puis
+              ce qu'il imprime (engagement, montant, colis). */}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
             <div className="col-span-2">
               <Etiq obligatoire htmlFor="ch-factureimport-1">Fournisseur</Etiq>
               <Selecteur id="ch-factureimport-1" value={entete.code_fournisseur}
@@ -487,7 +630,7 @@ export function FactureImport() {
                   setEntete((x) => ({ ...x, code_fournisseur: code, id_engagement: '', code_devise: devise ?? x.code_devise,
                     taux_change: devise === 'MAD' ? '1' : devise && devise !== x.code_devise ? '' : x.taux_change }))
                 }}
-                disabled={!ecrire || lignesServeur.some((l) => l.quantite_recue_kg > 0)}>
+                disabled={!ecrire || factureRecue} title={titreFige}>
                 <option value="">Choisir…</option>
                 {(qFournisseurs.data ?? []).map((x) => (
                   <option key={x.code_fournisseur} value={x.code_fournisseur}>{x.nom}</option>
@@ -504,7 +647,7 @@ export function FactureImport() {
             </div>
             <div>
               <Etiq htmlFor="ch-factureimport-4">Devise</Etiq>
-              <Selecteur id="ch-factureimport-4" value={entete.code_devise} disabled={!ecrire}
+              <Selecteur id="ch-factureimport-4" value={entete.code_devise} disabled={!ecrire || factureRecue} title={titreFige}
                 onChange={(e) => setEntete((x) => ({ ...x, code_devise: e.target.value,
                   taux_change: e.target.value === 'MAD' ? '1' : e.target.value === x.code_devise ? x.taux_change : '' }))}>
                 <option value="">Choisir…</option>
@@ -512,6 +655,19 @@ export function FactureImport() {
                   <option key={x.code_devise}>{x.code_devise}</option>
                 ))}
               </Selecteur>
+            </div>
+            <div>
+              <Etiq obligatoire htmlFor="ch-factureimport-6">Taux de change</Etiq>
+              <Champ id="ch-factureimport-6" inputMode="decimal" value={entete.taux_change} onChange={maj('taux_change')} disabled={!ecrire || factureRecue} title={titreFige}
+                className={cn('text-right tabular-nums', (tauxDirham || (tauxEloigne && !tauxConfirmeOk)) && 'border-alerte')} />
+              {tauxDirham ? (
+                <p className="mt-1 text-[11px] text-danger">Taux 1 : c’est le taux du dirham, pas celui du {entete.code_devise}.</p>
+              ) : reference ? (
+                <p className={cn('mt-1 text-[11px] tabular-nums', tauxEloigne ? 'text-alerte' : 'text-attenue-texte')}>
+                  {qTaux.data?.source} : {fmt.nombre(reference, 4)}
+                  {tauxSaisi > 0 && Math.abs(ecartTaux) > 0.00005 && ` · écart ${ecartTaux > 0 ? '+' : ''}${fmt.nombre(ecartTaux * 100, 1)} %`}
+                </p>
+              ) : null}
             </div>
             <div className="col-span-2">
               <Etiq htmlFor="ch-factureimport-5">Engagement d’importation</Etiq>
@@ -527,31 +683,16 @@ export function FactureImport() {
               </Selecteur>
             </div>
             <div>
-              <Etiq obligatoire htmlFor="ch-factureimport-6">Taux de change</Etiq>
-              <Champ id="ch-factureimport-6" inputMode="decimal" value={entete.taux_change} onChange={maj('taux_change')} disabled={!ecrire}
-                className={cn((tauxDirham || (tauxEloigne && !tauxConfirmeOk)) && 'border-alerte')} />
-              {tauxDirham ? (
-                <p className="mt-1 text-[11px] text-danger">Taux 1 : c’est le taux du dirham, pas celui du {entete.code_devise}.</p>
-              ) : reference ? (
-                <p className="mt-1 text-[11px] text-attenue-texte">
-                  {qTaux.data?.source} : {fmt.nombre(reference, 4)}
-                  {tauxSaisi > 0 && Math.abs(ecartTaux) > 0.00005 && ` · écart ${ecartTaux > 0 ? '+' : ''}${fmt.nombre(ecartTaux * 100, 1)} %`}
-                </p>
-              ) : null}
+              <Etiq htmlFor="ch-factureimport-7">Montant imprimé ({entete.code_devise})</Etiq>
+              <Champ id="ch-factureimport-7" inputMode="decimal" className="text-right tabular-nums" value={entete.montant_devise} onChange={maj('montant_devise')} disabled={!ecrire || factureRecue} title={titreFige} />
             </div>
             <div>
-              <Etiq htmlFor="ch-factureimport-7">Montant imprimé ({entete.code_devise})</Etiq>
-              <Champ id="ch-factureimport-7" inputMode="decimal" value={entete.montant_devise} onChange={maj('montant_devise')} disabled={!ecrire} />
+              <Etiq htmlFor="ch-factureimport-8">Palettes imprimées</Etiq>
+              <Champ id="ch-factureimport-8" inputMode="numeric" className="text-right tabular-nums" value={entete.nb_palettes} onChange={maj('nb_palettes')} disabled={!ecrire} />
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <Etiq htmlFor="ch-factureimport-8">Palettes</Etiq>
-                <Champ id="ch-factureimport-8" inputMode="numeric" value={entete.nb_palettes} onChange={maj('nb_palettes')} disabled={!ecrire} />
-              </div>
-              <div>
-                <Etiq htmlFor="ch-factureimport-9">Bobines</Etiq>
-                <Champ id="ch-factureimport-9" inputMode="numeric" value={entete.nb_bobines} onChange={maj('nb_bobines')} disabled={!ecrire} />
-              </div>
+            <div>
+              <Etiq htmlFor="ch-factureimport-9">Bobines imprimées</Etiq>
+              <Champ id="ch-factureimport-9" inputMode="numeric" className="text-right tabular-nums" value={entete.nb_bobines} onChange={maj('nb_bobines')} disabled={!ecrire} />
             </div>
           </div>
           {tauxEloigne && !tauxDirham && reference && (
@@ -590,7 +731,7 @@ export function FactureImport() {
                   <Plus />
                   Ligne hors ERP
                 </Bouton>
-                <Bouton taille="sm" onClick={() => setLignes((ls) => [...ls, ligneVide()])}>
+                <Bouton taille="sm" variante="contour" onClick={() => setLignes((ls) => [...ls, ligneVide()])}>
                   <Plus />
                   Ligne
                 </Bouton>
@@ -602,230 +743,448 @@ export function FactureImport() {
           {!entete.code_fournisseur && (
             <p className="px-3 pt-2 text-[12px] text-alerte">Choisissez d'abord le fournisseur : il décide des références et des bons proposés.</p>
           )}
-          <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
-            {/* PAS DE DEFILEMENT HORIZONTAL (10/10/2026) : 92 rem de colonnes a
-                1366 px. La ligne principale porte reference, bon, poids, prix et
-                montant ; le reste passe sur la ligne complementaire, dessous. */}
-            <table className="w-full text-[12.5px]">
-              <thead>
+          {/* PAS DE DEFILEMENT HORIZONTAL (10/10/2026). UNE LIGNE, UNE RANGEE
+              QUAND ELLE Y TIENT (24/10/2026) : chaque case a la largeur de ce
+              qu'elle attend, la reference prend le reste ; la largeur MESUREE
+              du tableau decide. Trop etroit : le secondaire passe sur la rangee
+              ↳, repliee pour une ligne complete. */}
+          <div ref={refTableau}>
+          <table className="w-full table-fixed text-[12.5px]">
+            {uneRangee ? (
+              <colgroup>
+                <col style={{ width: COL.num }} />
+                <col />
+                <col style={{ width: COL.bc }} />
+                <col style={{ width: COL.lot }} />
+                <col style={{ width: COL.codeCouleur }} />
+                <col style={{ width: COL.couleur }} />
+                <col style={{ width: COL.unite }} />
+                <col style={{ width: COL.poids }} />
+                <col style={{ width: COL.bobines }} />
+                <col style={{ width: COL.palettes }} />
+                <col style={{ width: COL.prix }} />
+                <col style={{ width: COL.remise }} />
+                <col style={{ width: COL.montant }} />
+                <col style={{ width: COL.controle }} />
+                <col style={{ width: COL.actions }} />
+              </colgroup>
+            ) : (
+              <colgroup>
+                <col className="w-8" />
+                <col />
+                <col className="w-56" />
+                <col className="w-24" />
+                <col className="w-24" />
+                <col className="w-28" />
+                <col className="w-40" />
+                <col className="w-16" />
+              </colgroup>
+            )}
+            <thead>
+              {uneRangee ? (
                 <tr className="border-b border-bordure">
-                  <th className={cn(th, 'w-8 text-right')}>#</th>
-                  <th className={cn(th, 'min-w-56 text-left')}>Référence / désignation</th>
-                  <th className={cn(th, 'w-72 text-left')}>Bon de commande</th>
-                  <th className={cn(th, 'w-28 text-right')}>Poids net kg</th>
-                  <th className={cn(th, 'w-24 text-right')}>Prix unit.</th>
-                  <th className={cn(th, 'w-28 text-right')}>Montant</th>
-                  {ecrire && <th className={cn(th, 'w-8')} />}
+                  <th className={cn(th1, 'text-right')}>#</th>
+                  <th className={cn(th1, 'text-left')}>Référence / désignation</th>
+                  <th className={cn(th1, 'text-left')}>Bon de commande</th>
+                  <th className={cn(th1, 'text-left')}>Lot</th>
+                  <th className={cn(th1, 'text-left')} title="Code couleur">Code</th>
+                  <th className={cn(th1, 'text-left')} title="Libellé couleur">Coul.</th>
+                  <th className={cn(th1, 'text-left')} title="Unité facturée">Unité</th>
+                  <th className={cn(th1, 'text-right')} title="Poids net en kg (et quantité facturée hors kg)">Poids kg</th>
+                  <th className={cn(th1, 'text-right')} title="Bobines">Bob.</th>
+                  <th className={cn(th1, 'text-right')} title="Palettes">Pal.</th>
+                  <th className={cn(th1, 'text-right')}>Prix unit.</th>
+                  <th className={cn(th1, 'text-right')} title="Remise du fournisseur, en %">Rem. %</th>
+                  <th className={cn(th1, 'text-right')}>Montant</th>
+                  <th className={cn(th1, 'text-left')} title="Prix facturé contre le bon ; poids facturé contre le reçu">Contrôle</th>
+                  <th className={th1} />
                 </tr>
-              </thead>
-              <tbody>
-                {lignes.map((l, i) => {
-                  if (l.supprimee) return null
-                  const s = l.id_ligne ? serveur(l.id_ligne) : undefined
-                  const fige = !ecrire || l.recue
-                  const erp = l.type_ligne === 'ERP'
-                  const bcOptions = (qBc.data ?? []).filter((b) => !l.code_reference || b.code_reference === l.code_reference)
-                  const bcConnu = !l.id_ligne_bc || bcOptions.some((b) => b.id_ligne_bc === l.id_ligne_bc)
-                  const detail = ouverte === l.cle && s && coutVisible
-                  return (
-                    <Fragment key={l.cle}>
-                      <tr className={cn('align-top', !ligneComplete(l) && (l.code_reference || l.libelle) && 'bg-alerte/5')}>
-                        <td className={cn(td, 'pt-2 text-right tabular-nums text-attenue-texte')}>
-                          {i + 1}
-                          {l.recue && <Lock className="ml-auto mt-1 size-3" aria-label="Déjà reçue" />}
-                        </td>
-                        <td className={td}>
-                          {erp ? (
-                            /* LES REFERENCES DU FOURNISSEUR D'ABORD : proposer
-                               tout le catalogue pour une facture Hasirci, c'est
-                               inviter a choisir le Red d'Ozkaralar. La case
-                               « toutes » ouvre le reste quand il le faut. */
-                            <ChampReference
-                              valeur={l.code_reference}
-                              fournisseur={toutes ? undefined : entete.code_fournisseur}
-                              surChoix={(r) => choisirReference(l, r as RefCatalogue)}
-                              desactive={fige}
-                              placeholder="Référence — tapez…"
-                              ariaLabel="Référence de la ligne"
-                            />
-                          ) : (
-                            <Champ className={champ} value={l.libelle} disabled={fige} placeholder="Hors ERP — pièce, autre…"
-                              onChange={(e) => majLigne(l.cle, { libelle: e.target.value })} />
-                          )}
-                        </td>
-                        <td className={td}>
-                          {erp ? (
-                            <Selecteur className={champ} value={l.id_ligne_bc} disabled={fige} aria-label="Bon de commande de la ligne"
-                              onChange={(e) => choisirBc(l, e.target.value)}>
-                              <option value="">Libre — sans BC</option>
-                              {!bcConnu && <option value={l.id_ligne_bc}>{l.numero_bc || 'bon lié'}</option>}
-                              {bcOptions.map((b) => (
-                                <option key={b.id_ligne_bc} value={b.id_ligne_bc}>
-                                  {b.numero_bc} · l.{b.ligne_numero} · reste {fmt.nombre(b.quantite_restante_kg, 0)} kg
-                                </option>
-                              ))}
-                            </Selecteur>
-                          ) : (
-                            <span className="text-[11px] italic text-attenue-texte">porte sa part de frais</span>
-                          )}
-                        </td>
-                        <td className={td}>
-                          {erp ? (
-                            <Champ className={cn(champ, 'text-right')} inputMode="decimal" aria-label="Poids net en kilos" value={l.poids_net_kg} disabled={fige}
-                              onChange={(e) => majColis(l, 'poids', e.target.value)} />
-                          ) : <span className="block text-right text-attenue-texte">—</span>}
-                        </td>
-                        <td className={td}>
-                          <Champ className={cn(champ, 'text-right')} inputMode="decimal" aria-label="Prix unitaire en devise" value={l.prix_unitaire_devise} disabled={fige}
-                            onChange={(e) => majLigne(l.cle, { prix_unitaire_devise: e.target.value })} />
-                        </td>
-                        <td className={cn(td, 'pt-2 text-right font-medium tabular-nums')}>{fmt.nombre(montantLigne(l), 2)}</td>
-                        {ecrire && (
-                          <td className={cn(td, 'pt-1.5')}>
-                            {!l.recue && (
-                              <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10" aria-label="Retirer la ligne"
-                                onClick={() => (l.id_ligne ? majLigne(l.cle, { supprimee: true }) : setLignes((ls) => ls.filter((x) => x.cle !== l.cle)))}>
-                                <Trash2 />
-                              </Bouton>
-                            )}
-                          </td>
+              ) : (
+                <tr className="border-b border-bordure">
+                  <th className={cn(th, 'text-right')}>#</th>
+                  <th className={cn(th, 'text-left')}>Référence / désignation</th>
+                  <th className={cn(th, 'text-left')}>Bon de commande</th>
+                  <th className={cn(th, 'text-right')}>Poids net kg</th>
+                  <th className={cn(th, 'text-right')}>Prix unit.</th>
+                  <th className={cn(th, 'text-right')}>Montant</th>
+                  <th className={cn(th, 'text-left')} title="Prix facturé contre le bon ; poids facturé contre le reçu">Contrôle</th>
+                  <th className={th} />
+                </tr>
+              )}
+            </thead>
+            <tbody>
+              {lignes.map((l, i) => {
+                if (l.supprimee) return null
+                const s = l.id_ligne ? serveur(l.id_ligne) : undefined
+                const fige = !ecrire || l.recue
+                const erp = l.type_ligne === 'ERP'
+                const bcOptions = (qBc.data ?? []).filter((b) => !l.code_reference || b.code_reference === l.code_reference)
+                const bcConnu = !l.id_ligne_bc || bcOptions.some((b) => b.id_ligne_bc === l.id_ligne_bc)
+                const bcChoisi = bcOptions.find((b) => b.id_ligne_bc === l.id_ligne_bc)
+                const detail = ouverte === l.cle && s && coutVisible
+                const colis = controleColisage(l.poids_net_kg, l.nb_bobines, l.nb_palettes, condDe(l.code_reference), tolerances)
+                // LA RANGEE ↳ S'OUVRE D'ELLE-MEME pour une ligne en saisie, incomplete
+                // ou dont le colisage cloche ; le choix de l'utilisateur prime.
+                // Sur une seule rangee, il n'y en a plus.
+                const deplie = !uneRangee && (deplies[l.cle] ?? (!fige && (!l.id_ligne || !ligneComplete(l) || colis.niveau !== 'ok')))
+                const c = controleLigne(l, s)
+                const calcule = [
+                  s?.pct_dossier != null && `${fmt.nombre(s.pct_dossier, 2)} % du dossier`,
+                  coutVisible && s?.cout_revient_unitaire_dhs != null &&
+                    `revient ${fmt.nombre(s.cout_revient_unitaire_dhs, 4)} DH/${s.type_ligne === 'HORS_ERP' ? 'pce' : UNITE[s.unite]}`,
+                ]
+                const resume = (uneRangee ? calcule : [
+                  l.lot_fournisseur && `lot ${l.lot_fournisseur}`,
+                  [l.code_couleur, l.libelle_couleur].filter(Boolean).join(' '),
+                  erp && l.unite !== 'kg' && `${l.quantite || '—'} ${UNITE[l.unite]}`,
+                  (nombre(l.nb_bobines) > 0 || nombre(l.nb_palettes) > 0) &&
+                    `${fmt.entier(nombre(l.nb_bobines))} bob. · ${fmt.entier(nombre(l.nb_palettes))} pal.`,
+                  nombre(l.remise) > 0 && `remise ${fmt.nombre(nombre(l.remise), 2)} %`,
+                  ...calcule,
+                ]).filter(Boolean) as string[]
+                const tdx = uneRangee ? td1 : td
+                const chp = uneRangee ? champ1 : champ
+
+                // ---- Les cases, une fois : sur la rangee principale ou sur ↳ ----
+                const caseLot = (
+                  <Champ className={chp} aria-label="Lot de la ligne" value={l.lot_fournisseur} disabled={fige}
+                    title={l.lot_fournisseur || undefined} onChange={(e) => majLigne(l.cle, { lot_fournisseur: e.target.value })} />
+                )
+                const caseCodeCouleur = (
+                  <Champ className={chp} aria-label="Code couleur de la ligne" value={l.code_couleur} disabled={fige || !erp} placeholder="7612"
+                    title={l.code_couleur || undefined} onChange={(e) => majLigne(l.cle, { code_couleur: e.target.value })} />
+                )
+                const caseCouleur = (
+                  <Champ className={chp} aria-label="Libellé couleur de la ligne" value={l.libelle_couleur} disabled={fige || !erp} placeholder="RED"
+                    title={l.libelle_couleur || undefined} onChange={(e) => majLigne(l.cle, { libelle_couleur: e.target.value })} />
+                )
+                const caseUnite = erp ? (
+                  <Selecteur className={chp} value={l.unite} disabled={fige} aria-label="Unité facturée"
+                    onChange={(e) => majLigne(l.cle, { unite: e.target.value as LigneEdit['unite'] })}>
+                    <option value="kg">kg</option>
+                    <option value="ml">{uneRangee ? 'm' : 'mètre'}</option>
+                    <option value="piece">{uneRangee ? 'pce' : 'pièce'}</option>
+                  </Selecteur>
+                ) : (
+                  <span className="block pt-1 text-[12px] text-attenue-texte">{uneRangee ? 'pce' : 'pièce'}</span>
+                )
+                const caseQuantite = (
+                  <Champ className={cn(chp, 'text-right')} inputMode="decimal" aria-label="Quantité facturée" value={l.quantite} disabled={fige}
+                    placeholder={uneRangee && erp ? `qté ${UNITE[l.unite]}` : undefined}
+                    onChange={(e) => majLigne(l.cle, { quantite: e.target.value })} />
+                )
+                const casePoids = (
+                  <Champ className={cn(chp, 'text-right')} inputMode="decimal" aria-label="Poids net en kilos" value={l.poids_net_kg} disabled={fige}
+                    onChange={(e) => majColis(l, 'poids', e.target.value)} />
+                )
+                const caseBobines = (
+                  <Champ className={cn(chp, 'text-right')} inputMode="numeric" aria-label="Bobines de la ligne" value={l.nb_bobines} disabled={fige}
+                    onChange={(e) => majColis(l, 'bobines', e.target.value)} />
+                )
+                const casePalettes = (
+                  <Champ className={cn(chp, 'text-right')} inputMode="numeric" aria-label="Palettes de la ligne" value={l.nb_palettes} disabled={fige}
+                    onChange={(e) => majColis(l, 'palettes', e.target.value)} />
+                )
+                const boutonLien = !fige && (
+                  <button type="button" onClick={() => majLigne(l.cle, { lie: !l.lie })}
+                    title={l.lie
+                      ? 'Poids, bobines et palettes se repondent — cliquez pour saisir chacun separement'
+                      : 'Calcul detache — cliquez pour relier les trois'}
+                    aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+                    className={cn('shrink-0 rounded-[var(--radius)] p-1',
+                      l.lie ? 'text-primaire hover:bg-primaire/10' : 'text-alerte hover:bg-alerte/10')}>
+                    {l.lie ? <Link2 className="size-3.5" /> : <Unlink2 className="size-3.5" />}
+                  </button>
+                )
+                const caseRemise = (
+                  <Champ className={cn(chp, 'text-right')} inputMode="decimal" value={l.remise} disabled={fige} placeholder="0"
+                    aria-label="Remise du fournisseur en pourcentage"
+                    onChange={(e) => majLigne(l.cle, { remise: e.target.value })} />
+                )
+                const boutonRetirer = ecrire && !l.recue && (
+                  <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10" aria-label="Retirer la ligne"
+                    onClick={() => (l.id_ligne ? majLigne(l.cle, { supprimee: true }) : setLignes((ls) => ls.filter((x) => x.cle !== l.cle)))}>
+                    <Trash2 />
+                  </Bouton>
+                )
+                const nbColonnes = uneRangee ? 15 : 8
+                return (
+                  <Fragment key={l.cle}>
+                    <tr className={cn('align-top', !deplie && !detail && !(uneRangee && colis.niveau !== 'ok') && 'border-b border-bordure/60',
+                      !ligneComplete(l) && (l.code_reference || l.libelle) && 'bg-alerte/5')}>
+                      <td className={cn(tdx, 'pt-2 text-right tabular-nums text-attenue-texte')}>
+                        {i + 1}
+                        {l.recue && <Lock className="ml-auto mt-1 size-3" aria-label="Déjà reçue" />}
+                      </td>
+                      <td className={cn(tdx, 'min-w-0')}>
+                        {erp ? (
+                          /* LES REFERENCES DU FOURNISSEUR D'ABORD : proposer
+                             tout le catalogue pour une facture Hasirci, c'est
+                             inviter a choisir le Red d'Ozkaralar. La case
+                             « toutes » ouvre le reste quand il le faut. */
+                          <ChampReference
+                            valeur={l.code_reference}
+                            fournisseur={toutes ? undefined : entete.code_fournisseur}
+                            surChoix={(r) => choisirReference(l, r as RefCatalogue)}
+                            desactive={fige}
+                            placeholder="Référence — tapez…"
+                            ariaLabel="Référence de la ligne"
+                          />
+                        ) : (
+                          <Champ className={chp} value={l.libelle} disabled={fige} placeholder="Hors ERP — pièce, autre…"
+                            aria-label="Désignation de la ligne hors ERP"
+                            onChange={(e) => majLigne(l.cle, { libelle: e.target.value })} />
                         )}
-                      </tr>
-                      {/* LA LIGNE COMPLEMENTAIRE de la ligne de facture. */}
-                      <tr className="border-b border-bordure/60 align-top">
-                        <td />
-                        <td colSpan={4} className={cn(td, 'pb-2')}>
-                          <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
-                            <div className="flex w-36 flex-col gap-0.5">
-                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Lot</span>
-                              <Champ className={champ} aria-label="Lot de la ligne" value={l.lot_fournisseur} disabled={!ecrire} onChange={(e) => majLigne(l.cle, { lot_fournisseur: e.target.value })} />
-                            </div>
-                            <div className="flex w-28 flex-col gap-0.5">
-                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Code couleur</span>
-                              <Champ className={champ} value={l.code_couleur} disabled={!ecrire || !erp} placeholder="7612" onChange={(e) => majLigne(l.cle, { code_couleur: e.target.value })} />
-                            </div>
-                            <div className="flex w-32 flex-col gap-0.5">
-                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Libellé couleur</span>
-                              <Champ className={champ} value={l.libelle_couleur} disabled={!ecrire || !erp} placeholder="RED" onChange={(e) => majLigne(l.cle, { libelle_couleur: e.target.value })} />
-                            </div>
-                            <div className="flex w-28 flex-col gap-0.5">
-                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Unité</span>
-                              {erp ? (
-                            <Selecteur className={champ} value={l.unite} disabled={fige}
-                              onChange={(e) => majLigne(l.cle, { unite: e.target.value as LigneEdit['unite'] })}>
-                              <option value="kg">kg</option>
-                              <option value="ml">mètre</option>
-                              <option value="piece">pièce</option>
-                            </Selecteur>
-                          ) : (
-                            <span className="text-[12px] text-attenue-texte">pièce</span>
-                          )}
-                            </div>
-                            <div className="flex w-24 flex-col gap-0.5">
-                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Qté</span>
-                              {erp && l.unite === 'kg' ? (
-                            <span className="block pt-1 text-right tabular-nums text-attenue-texte">= poids</span>
-                          ) : (
-                            <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={l.quantite} disabled={fige}
-                              onChange={(e) => majLigne(l.cle, { quantite: e.target.value })} />
-                          )}
-                            </div>
-                            <div className="flex w-24 flex-col gap-0.5">
-                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Bobines</span>
-                              <Champ className={cn(champ, 'text-right')} inputMode="numeric" aria-label="Bobines de la ligne" value={l.nb_bobines} disabled={!ecrire} onChange={(e) => majColis(l, 'bobines', e.target.value)} />
-                            </div>
-                            <div className="flex w-36 flex-col gap-0.5">
-                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Palettes</span>
-                              <div className="flex items-center gap-1">
-                            <Champ className={cn(champ, 'text-right')} inputMode="numeric" aria-label="Palettes de la ligne" value={l.nb_palettes} disabled={!ecrire} onChange={(e) => majColis(l, 'palettes', e.target.value)} />
-                            {ecrire && (
-                              <button type="button" onClick={() => majLigne(l.cle, { lie: !l.lie })}
-                                title={l.lie
-                                  ? 'Poids, bobines et palettes se repondent — cliquez pour saisir chacun separement'
-                                  : 'Calcul detache — cliquez pour relier les trois'}
-                                aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
-                                className={cn('shrink-0 rounded-[var(--radius)] p-1',
-                                  l.lie ? 'text-primaire hover:bg-primaire/10' : 'text-alerte hover:bg-alerte/10')}>
-                                {l.lie ? <Link2 className="size-3.5" /> : <Unlink2 className="size-3.5" />}
-                              </button>
-                            )}
+                        {/* Repliee, la rangee ↳ laisse son resume sous la reference ;
+                            sur une seule rangee, il ne reste que le calcule. */}
+                        {!deplie && resume.length > 0 && (
+                          <div className="mt-0.5 truncate text-[11px] text-attenue-texte" title={resume.join(' · ')}>
+                            {uneRangee ? '' : '↳ '}{resume.join(' · ')}
                           </div>
-                          <AvisColisage className="max-w-[18rem]" kg={l.poids_net_kg} bobines={l.nb_bobines}
-                            palettes={l.nb_palettes} cond={condDe(l.code_reference)} />
+                        )}
+                      </td>
+                      <td className={tdx}>
+                        {erp ? (
+                          <Selecteur className={cn(chp, 'w-full')} value={l.id_ligne_bc} disabled={fige} aria-label="Bon de commande de la ligne"
+                            title={bcChoisi ? `${bcChoisi.numero_bc} · ligne ${bcChoisi.ligne_numero} · reste ${fmt.nombre(bcChoisi.quantite_restante_kg, 0)} kg` : l.numero_bc || undefined}
+                            onChange={(e) => choisirBc(l, e.target.value)}>
+                            <option value="">Libre — sans BC</option>
+                            {!bcConnu && <option value={l.id_ligne_bc}>{l.numero_bc || 'bon lié'}</option>}
+                            {bcOptions.map((b) => (
+                              <option key={b.id_ligne_bc} value={b.id_ligne_bc}>
+                                {/* Sur une rangee, le bon choisi ne montre que son numero
+                                    (le reste est dans la bulle) ; la liste garde le reste. */}
+                                {uneRangee && b.id_ligne_bc === l.id_ligne_bc
+                                  ? b.numero_bc
+                                  : `${b.numero_bc} · l.${b.ligne_numero} · reste ${fmt.nombre(b.quantite_restante_kg, 0)} kg`}
+                              </option>
+                            ))}
+                          </Selecteur>
+                        ) : (
+                          <span className="block pt-1.5 text-[11px] italic text-attenue-texte" title="Une ligne hors ERP porte sa part de frais">
+                            {uneRangee ? 'hors ERP' : 'porte sa part de frais'}
+                          </span>
+                        )}
+                      </td>
+                      {uneRangee && (
+                        <>
+                          <td className={tdx}>{caseLot}</td>
+                          <td className={tdx}>{caseCodeCouleur}</td>
+                          <td className={tdx}>{caseCouleur}</td>
+                          <td className={tdx}>{caseUnite}</td>
+                        </>
+                      )}
+                      <td className={tdx}>
+                        {erp ? (
+                          uneRangee && l.unite !== 'kg' ? (
+                            /* Facturee hors kg (rare) : le poids, puis la quantite facturee. */
+                            <div className="space-y-1">
+                              {casePoids}
+                              {caseQuantite}
                             </div>
-                            <div className="flex w-24 flex-col gap-0.5">
-                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Remise %</span>
-                              <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={l.remise} disabled={fige} placeholder="0"
-                            aria-label="Remise du fournisseur en pourcentage"
-                            onChange={(e) => majLigne(l.cle, { remise: e.target.value })} />
+                          ) : casePoids
+                        ) : uneRangee ? caseQuantite : <span className="block pt-1.5 text-right text-attenue-texte">—</span>}
+                      </td>
+                      {uneRangee && (
+                        <>
+                          <td className={tdx}>{caseBobines}</td>
+                          <td className={tdx}>{casePalettes}</td>
+                        </>
+                      )}
+                      <td className={tdx}>
+                        <Champ className={cn(chp, 'text-right')} inputMode="decimal" aria-label="Prix unitaire en devise" value={l.prix_unitaire_devise} disabled={fige}
+                          onChange={(e) => majLigne(l.cle, { prix_unitaire_devise: e.target.value })} />
+                      </td>
+                      {uneRangee && <td className={tdx}>{caseRemise}</td>}
+                      <td className={cn(tdx, 'pt-2 text-right font-medium tabular-nums')}>{fmt.nombre(montantLigne(l), 2)}</td>
+                      <td className={cn(tdx, 'pt-1.5 text-[11px] leading-snug tabular-nums')}>
+                        {c.prixBc == null && c.recu == null ? (
+                          <span className="text-attenue-texte">—</span>
+                        ) : (
+                          <>
+                            {c.prixBc != null && (
+                              <div title={`Prix du bon : ${fmt.nombre(c.prixBc, 4)} ${entete.code_devise}/kg`}>
+                                <span className="text-attenue-texte">{uneRangee ? 'BC ' : 'prix / BC '}</span>
+                                {c.ecartPrix == null ? (
+                                  <span className="text-attenue-texte">{fmt.nombre(c.prixBc, 4)}</span>
+                                ) : Math.abs(c.ecartPrix) < 0.005 ? (
+                                  <span className="font-medium text-succes">=</span>
+                                ) : (
+                                  <span className={cn('font-medium', c.ecartPrix > 0 ? 'text-alerte' : 'text-succes')}>
+                                    {c.ecartPrix > 0 ? '+' : ''}{fmt.nombre(c.ecartPrix, 2)} %
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            {c.recu != null && c.ecartKg != null && (
+                              <div title={`Reçu : ${fmt.nombre(c.recu, 2)} kg`}>
+                                <span className="text-attenue-texte">reçu{uneRangee ? ' ' : ` ${fmt.nombre(c.recu, 2)} `}</span>
+                                {Math.abs(c.ecartKg) <= 0.001 ? (
+                                  <span className="font-medium text-succes">=</span>
+                                ) : (
+                                  <span className="font-medium text-alerte">{c.ecartKg > 0 ? '+' : ''}{fmt.nombre(c.ecartKg, 2)}</span>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </td>
+                      <td className={cn(tdx, 'pt-1')}>
+                        <div className="flex justify-end gap-0.5">
+                          {uneRangee ? (
+                            <>
+                              {erp && boutonLien}
+                              {s && coutVisible && (
+                                <Bouton taille="icone-xs" variante="discret" aria-expanded={!!detail}
+                                  aria-label={detail ? 'Replier la répartition des frais' : 'Voir la répartition des frais'}
+                                  title={`Frais ${fmt.nombre(s.frais_alloues_dhs ?? 0, 2)} DH — voir la répartition par frais`}
+                                  onClick={() => setOuverte(ouverte === l.cle ? null : l.cle)}>
+                                  {detail ? <ChevronDown /> : <ChevronRight />}
+                                </Bouton>
+                              )}
+                            </>
+                          ) : (
+                            <Bouton taille="icone-xs" variante="discret" aria-expanded={deplie}
+                              aria-label={deplie ? 'Replier le détail de la ligne' : 'Déplier le détail de la ligne'}
+                              title={deplie ? 'Replier : lot, couleur, colis, remise' : 'Déplier : lot, couleur, colis, remise'}
+                              onClick={() => setDeplies((x) => ({ ...x, [l.cle]: !deplie }))}>
+                              {deplie ? <ChevronUp /> : <ChevronDown />}
+                            </Bouton>
+                          )}
+                          {boutonRetirer}
+                        </div>
+                      </td>
+                    </tr>
+                    {/* SUR UNE RANGEE, l'avis de colisage seul passe dessous, et
+                        seulement quand il y a quelque chose a dire. */}
+                    {uneRangee && colis.niveau !== 'ok' && (
+                      <tr className={cn(!detail && 'border-b border-bordure/60')}>
+                        <td />
+                        <td colSpan={nbColonnes - 1} className={cn(tdx, 'pt-0 pb-1.5')}>
+                          <AvisColisage className="mt-0" kg={l.poids_net_kg} bobines={l.nb_bobines}
+                            palettes={l.nb_palettes} cond={condDe(l.code_reference)} />
+                        </td>
+                      </tr>
+                    )}
+                    {/* LA LIGNE COMPLEMENTAIRE de la ligne de facture, quand la rangee ne suffit pas. */}
+                    {deplie && (
+                      <tr className={cn('align-top', !detail && 'border-b border-bordure/60')}>
+                        <td />
+                        <td colSpan={7} className={cn(td, 'pb-2')}>
+                          <div className="flex flex-wrap items-start gap-x-2 gap-y-2">
+                            <div className="flex w-28 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">↳ Lot</span>
+                              {caseLot}
                             </div>
                             <div className="flex w-20 flex-col gap-0.5">
-                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">% dossier</span>
-                              <span className="pt-1 tabular-nums text-attenue-texte">{s?.pct_dossier == null ? '—' : `${fmt.nombre(s.pct_dossier, 2)} %`}</span>
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Code coul.</span>
+                              {caseCodeCouleur}
                             </div>
-                            {coutVisible && (
+                            <div className="flex w-24 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Couleur</span>
+                              {caseCouleur}
+                            </div>
+                            <div className="flex w-20 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Unité</span>
+                              {caseUnite}
+                            </div>
+                            <div className="flex w-16 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Qté</span>
+                              {erp && l.unite === 'kg' ? (
+                                <span className="block pt-1 text-right tabular-nums text-attenue-texte">= poids</span>
+                              ) : caseQuantite}
+                            </div>
+                            <div className="flex w-16 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Bobines</span>
+                              {caseBobines}
+                            </div>
                             <div className="flex w-28 flex-col gap-0.5">
-                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Frais DH</span>
-                              {s ? (
-                              <button type="button" className="inline-flex items-center gap-0.5 font-medium text-primaire hover:underline"
-                                onClick={() => setOuverte(ouverte === l.cle ? null : l.cle)} title="Voir la répartition par frais">
-                                {fmt.nombre(s.frais_alloues_dhs ?? 0, 2)}
-                                {detail ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-                              </button>
-                            ) : '—'}
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Palettes</span>
+                              <div className="flex items-center gap-1">
+                                {casePalettes}
+                                {boutonLien}
+                              </div>
                             </div>
+                            <div className="flex w-16 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Remise %</span>
+                              {caseRemise}
+                            </div>
+                            {/* Ce que le serveur a calcule : une ligne pas encore enregistree n'en a pas. */}
+                            {s && !coutVisible && (
+                              <div className="flex w-20 flex-col gap-0.5">
+                                <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">% dossier</span>
+                                <span className="pt-1 tabular-nums text-attenue-texte">{s.pct_dossier == null ? '—' : `${fmt.nombre(s.pct_dossier, 2)} %`}</span>
+                              </div>
                             )}
-                            {coutVisible && (
-                            <div className="flex w-28 flex-col gap-0.5">
-                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Revient /u</span>
-                              <span className="pt-1 tabular-nums">{s?.cout_revient_unitaire_dhs == null ? '—' : (
-                              <>
-                                {fmt.nombre(s.cout_revient_unitaire_dhs, 4)}
-                                <span className="text-[10.5px] text-attenue-texte"> /{s.type_ligne === 'HORS_ERP' ? 'pce' : UNITE[s.unite]}</span>
-                              </>
-                            )}</span>
-                            </div>
+                            {s && coutVisible && (
+                              <div className="flex w-36 flex-col gap-0.5">
+                                <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Frais DH (% dossier)</span>
+                                <button type="button" className="inline-flex items-center gap-0.5 pt-1 font-medium tabular-nums text-primaire hover:underline"
+                                  onClick={() => setOuverte(ouverte === l.cle ? null : l.cle)} title="Voir la répartition par frais">
+                                  {fmt.nombre(s.frais_alloues_dhs ?? 0, 2)}
+                                  <span className="font-normal text-attenue-texte">{s.pct_dossier == null ? '' : ` (${fmt.nombre(s.pct_dossier, 2)} %)`}</span>
+                                  {detail ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+                                </button>
+                              </div>
+                            )}
+                            {s && coutVisible && (
+                              <div className="flex w-24 flex-col gap-0.5">
+                                <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Revient /u</span>
+                                <span className="pt-1 tabular-nums">{s.cout_revient_unitaire_dhs == null ? '—' : (
+                                  <>
+                                    {fmt.nombre(s.cout_revient_unitaire_dhs, 4)}
+                                    <span className="text-[10.5px] text-attenue-texte"> /{s.type_ligne === 'HORS_ERP' ? 'pce' : UNITE[s.unite]}</span>
+                                  </>
+                                )}</span>
+                              </div>
                             )}
                           </div>
+                          <AvisColisage className="max-w-[36rem]" kg={l.poids_net_kg} bobines={l.nb_bobines}
+                            palettes={l.nb_palettes} cond={condDe(l.code_reference)} />
                         </td>
-                        <td />
                       </tr>
-                      {/* LA REPARTITION DE LA LIGNE : la part de chaque frais. */}
-                      {detail && (
-                        <tr className="border-b border-bordure/60 bg-attenue/25">
-                          <td />
-                          <td colSpan={4 + (ecrire ? 1 : 0)} className="px-2 py-2">
-                            <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px]">
-                              <span className="text-attenue-texte">
-                                Valeur d'achat <strong className="text-texte tabular-nums">{fmt.nombre(s!.valeur_achat_dhs, 2)} DH</strong>
-                              </span>
-                              {fraisInclus.map((f) => {
-                                const p = partDe(s!.id_ligne, f.id_ligne_frais)
-                                return (
-                                  <span key={f.id_ligne_frais} className="text-attenue-texte">
-                                    {f.frais_libelle}{' '}
-                                    <strong className="text-texte tabular-nums">{p ? fmt.nombre(p.montant_alloue_dhs ?? 0, 2) : '—'}</strong>
-                                    {p && <span className="tabular-nums"> ({fmt.nombre(p.pourcentage, 2)} %)</span>}
-                                  </span>
-                                )
-                              })}
-                              <span className="text-attenue-texte">
-                                Coût de revient <strong className="text-texte tabular-nums">{fmt.nombre(s!.cout_revient_dhs ?? 0, 2)} DH</strong>
-                              </span>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  )
-                })}
-              </tbody>
-            </table>
+                    )}
+                    {/* LA REPARTITION DE LA LIGNE : la part de chaque frais. */}
+                    {detail && (
+                      <tr className="border-b border-bordure/60 bg-attenue/25">
+                        <td />
+                        <td colSpan={nbColonnes - 1} className="px-2 py-2">
+                          <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px]">
+                            <span className="text-attenue-texte">
+                              Valeur d'achat <strong className="text-texte tabular-nums">{fmt.nombre(s!.valeur_achat_dhs, 2)} DH</strong>
+                            </span>
+                            <span className="text-attenue-texte">
+                              Frais <strong className="text-texte tabular-nums">{fmt.nombre(s!.frais_alloues_dhs ?? 0, 2)} DH</strong>
+                              {s!.pct_dossier != null && <span className="tabular-nums"> ({fmt.nombre(s!.pct_dossier, 2)} % du dossier)</span>}
+                            </span>
+                            {fraisInclus.map((f) => {
+                              const p = partDe(s!.id_ligne, f.id_ligne_frais)
+                              return (
+                                <span key={f.id_ligne_frais} className="text-attenue-texte">
+                                  {f.frais_libelle}{' '}
+                                  <strong className="text-texte tabular-nums">{p ? fmt.nombre(p.montant_alloue_dhs ?? 0, 2) : '—'}</strong>
+                                  {p && <span className="tabular-nums"> ({fmt.nombre(p.pourcentage, 2)} %)</span>}
+                                </span>
+                              )
+                            })}
+                            <span className="text-attenue-texte">
+                              Coût de revient <strong className="text-texte tabular-nums">{fmt.nombre(s!.cout_revient_dhs ?? 0, 2)} DH</strong>
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
+            </tbody>
+          </table>
           </div>
           {lignes.some((l) => l.recue) && (
             <p className="border-t border-bordure px-3 py-2 text-[11.5px] text-attenue-texte">
               <Lock className="mr-1 inline size-3" />
-              Les lignes déjà reçues sont entrées en stock à leur prix : leur référence, leur quantité et leur prix ne se modifient plus.
+              Les lignes déjà reçues sont entrées en stock à leur prix : elles ne se modifient plus. Une correction passe par le solde
+              de la ligne, les frais du dossier, ou la contre-passation de la réception avant la DUM.
             </p>
           )}
         </CarteCorps>
@@ -845,12 +1204,19 @@ export function FactureImport() {
               </>
             )}
             <Total libelle={`Montant net (${entete.code_devise})`} valeur={fmt.nombre(totalDevise, 2)}
-              controle={entete.montant_devise ? `imprimé ${fmt.nombre(nombre(entete.montant_devise), 2)}` : undefined} alerte={ecartMontant} />
-            <Total libelle="Valeur (DH)" valeur={fmt.nombre(taux > 0 ? totalDevise * taux : 0, 2)} controle={`au taux ${fmt.nombre(taux, 4)}`} />
-            <Total libelle="Poids net (kg)" valeur={fmt.nombre(totalPoids, 2)} />
+              controle={ecartImprime == null ? undefined : ecartMontant
+                ? `imprimé ${fmt.nombre(nombre(entete.montant_devise), 2)} · écart ${ecartImprime > 0 ? '+' : ''}${fmt.nombre(ecartImprime, 2)}`
+                : `= imprimé ${fmt.nombre(nombre(entete.montant_devise), 2)}`}
+              alerte={ecartMontant} ok={ecartImprime != null && !ecartMontant} />
+            <Total libelle="Valeur (DH)" valeur={fmt.nombre(taux > 0 ? totalDevise * taux : 0, 2)}
+              controle={`au taux ${fmt.nombre(taux, 4)}${reference ? ` · réf. ${fmt.nombre(reference, 4)}` : ''}`}
+              alerte={tauxDirham || tauxEloigne} />
+            <Total libelle="Poids net (kg)" valeur={fmt.nombre(totalPoids, 2)}
+              controle={totalRecu > 0 ? `reçu ${fmt.nombre(totalRecu, 2)}${Math.abs(totalPoids - totalRecu) > 0.001 ? ` · écart ${totalPoids - totalRecu > 0 ? '+' : ''}${fmt.nombre(totalPoids - totalRecu, 2)}` : ''}` : undefined}
+              alerte={totalRecu > 0 && Math.abs(totalPoids - totalRecu) > 0.001} ok={totalRecu > 0 && Math.abs(totalPoids - totalRecu) <= 0.001} />
             <Total libelle="Palettes / bobines" valeur={`${fmt.entier(totalPalettes)} / ${fmt.entier(totalBobines)}`}
-              controle={entete.nb_palettes || entete.nb_bobines ? `imprimé ${entete.nb_palettes || '—'} / ${entete.nb_bobines || '—'}` : undefined}
-              alerte={(entete.nb_palettes !== '' && nombre(entete.nb_palettes) !== totalPalettes) || (entete.nb_bobines !== '' && nombre(entete.nb_bobines) !== totalBobines)} />
+              controle={entete.nb_palettes || entete.nb_bobines ? `${ecartColis ? '' : '= '}imprimé ${entete.nb_palettes || '—'} / ${entete.nb_bobines || '—'}` : undefined}
+              alerte={ecartColis} ok={!!(entete.nb_palettes || entete.nb_bobines) && !ecartColis} />
             {coutVisible && !nouvelle && (
               <>
                 <Total libelle="Frais alloués (DH)" valeur={fmt.nombre(totalFrais, 2)}
@@ -872,33 +1238,69 @@ export function FactureImport() {
         </CarteCorps>
       </Carte>
 
-      <div className="flex flex-wrap justify-between gap-2">
-        {ecrire && !nouvelle && !lignesServeur.some((l) => l.quantite_recue_kg > 0) ? (
-          <Bouton variante="contour" className="text-danger"
-            onClick={() =>
-              confirmation.demander({
-                titre: `Supprimer la facture ${facture!.numero_facture} ?`,
-                destructif: true,
-                libelleConfirmer: 'Supprimer',
-                description: 'Ses lignes sont supprimées et les frais du dossier répartis à nouveau.',
-                action: () => supprimer.mutate(),
-              })
-            }>
-            <Trash2 />
-            Supprimer la facture
-          </Bouton>
-        ) : <span />}
-        <div className="flex gap-2">
-          <Bouton variante="contour" onClick={() => ouvrir(`/import/${idDossier}?onglet=factures`)}>Retour aux factures</Bouton>
-          {ecrire && (
-            <Bouton disabled={!modifie || !enteteComplet || incompletes.length > 0} chargement={enregistrer.isPending}
+      {/* UNE SEULE ACTION PRINCIPALE, COLLANTE (regle d'ecran du 10/10) :
+          Enregistrer reste visible tant que la facture se modifie, grise avec
+          sa raison quand il n'y a rien a ecrire ou qu'il manque quelque chose. */}
+      {ecrire && (
+        <div
+          className={cn(
+            'sticky bottom-0 z-10 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border bg-surface px-3 py-2 shadow-sm',
+            modifie && !raisonBlocage ? 'border-primaire' : 'border-bordure',
+          )}
+        >
+          <span className="min-w-0 text-[13px]">
+            {modifie && !raisonBlocage ? (
+              <>
+                <span className="font-medium">
+                  {nouvelle
+                    ? `nouvelle facture · ${visibles.filter(ligneComplete).length} ligne(s)`
+                    : [
+                        enteteModifie ? 'en-tête modifié' : null,
+                        nbAjoutees ? `${nbAjoutees} ligne(s) ajoutée(s)` : null,
+                        nbCorrigees ? `${nbCorrigees} corrigée(s)` : null,
+                        nbRetirees ? `${nbRetirees} retirée(s)` : null,
+                      ].filter(Boolean).join(' · ')}
+                </span>
+                <span className="text-alerte"> — rien n’est encore enregistré.</span>
+              </>
+            ) : (
+              <span className={modifie ? 'text-alerte' : 'text-attenue-texte'}>{raisonBlocage}</span>
+            )}
+            <span className="ml-2 tabular-nums">
+              <span className="text-attenue-texte">net </span>
+              <span className="font-medium">{fmt.nombre(totalDevise, 2)} {entete.code_devise}</span>
+              {ecartImprime != null && (
+                <span className={ecartMontant ? 'text-alerte' : 'text-succes'}>
+                  {ecartMontant ? ` · écart à l’imprimé ${ecartImprime > 0 ? '+' : ''}${fmt.nombre(ecartImprime, 2)}` : ' · = imprimé'}
+                </span>
+              )}
+            </span>
+          </span>
+          <div className="flex items-center gap-2">
+            {supprimable && (
+              <Bouton variante="discret" className="text-danger hover:bg-danger/10"
+                onClick={() =>
+                  confirmation.demander({
+                    titre: `Supprimer la facture ${facture!.numero_facture} ?`,
+                    destructif: true,
+                    libelleConfirmer: 'Supprimer',
+                    description: 'Ses lignes sont supprimées et les frais du dossier répartis à nouveau.',
+                    action: () => supprimer.mutate(),
+                  })
+                }>
+                <Trash2 />
+                Supprimer la facture
+              </Bouton>
+            )}
+            <Bouton disabled={!!raisonBlocage} title={raisonBlocage ?? undefined} chargement={enregistrer.isPending}
               onClick={() => enregistrer.mutate()}>
               <Save />
               Enregistrer la facture
             </Bouton>
-          )}
+          </div>
         </div>
-      </div>
+      )}
+      {confirmation.element}
     </div>
   )
 }
@@ -908,19 +1310,22 @@ function Total({
   valeur,
   controle,
   alerte,
+  ok,
   fort,
 }: {
   libelle: string
   valeur: React.ReactNode
   controle?: string
   alerte?: boolean
+  /** Le controle concorde : il se lit en vert, pas en gris. */
+  ok?: boolean
   fort?: boolean
 }) {
   return (
     <div>
       <div className="text-[10.5px] uppercase tracking-wider text-attenue-texte">{libelle}</div>
       <div className={cn('tabular-nums', fort ? 'text-[16px] font-semibold' : 'text-[15px] font-medium', alerte && 'text-alerte')}>{valeur}</div>
-      {controle && <div className={cn('text-[11px] tabular-nums', alerte ? 'text-alerte' : 'text-attenue-texte')}>{controle}</div>}
+      {controle && <div className={cn('text-[11px] tabular-nums', alerte ? 'text-alerte' : ok ? 'text-succes' : 'text-attenue-texte')}>{controle}</div>}
     </div>
   )
 }

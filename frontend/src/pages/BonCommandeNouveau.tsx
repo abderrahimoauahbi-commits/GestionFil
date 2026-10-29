@@ -65,6 +65,7 @@ import {
   depuisReference,
   estEbauche,
   estPrete,
+  fusionnerParReference,
   kgDe,
   ligneVide,
   totalDe,
@@ -72,6 +73,8 @@ import {
 } from '../composants/GrilleLignes'
 import { TotauxCommande } from '../composants/TotauxCommande'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
+import { ChoixRecherche, useLigneChoix } from '../composants/ChoixRecherche'
+import { nouvelIdentifiant } from '../lib/identifiant'
 
 const MODULE = 'BONS_COMMANDE'
 
@@ -93,8 +96,8 @@ interface RefCommandable extends Record<string, unknown> {
   classe_abc: string | null
   moq_kg: number | null
   multiple_achat_kg: number | null
-  stock_projete_kg: number | null
-  stock_min_kg: number | null
+  /** L'état au moteur de couverture (27/10/2026) : 1re rupture, jours couverts, état. */
+  premiere_rupture: string | null
   besoin_12m_kg: number | null
   deja_commande_kg: number | null
   jours_couverture: number | null
@@ -163,11 +166,10 @@ export function BonCommandeNouveau() {
     enabled: !!refDemandee,
   })
 
-  const qFrs = useQuery({
-    queryKey: ['fournisseurs-actifs'],
-    queryFn: ({ signal }) => api.get<Fournisseur[]>('/api/fournisseurs?actif=1&limite=500', { signal }),
-  })
-  const fournisseur = qFrs.data?.find((f) => f.code_fournisseur === entete.code_fournisseur)
+  // LE FOURNISSEUR CHOISI, relu par sa cle (24/10/2026) : la liste entiere des
+  // fournisseurs n'est plus chargee — on la cherche en tapant.
+  const qFrs = useLigneChoix('fournisseur', entete.code_fournisseur)
+  const fournisseur = (qFrs.data ?? undefined) as Fournisseur | undefined
   const devise = entete.code_devise || fournisseur?.code_devise || 'MAD'
   const qDevises = useQuery({ queryKey: ['devises'], queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }) })
 
@@ -253,9 +255,11 @@ export function BonCommandeNouveau() {
    * lettre deviendrait un enregistrement.
    */
   const corrigerReference = useMutation({
-    mutationFn: ({ code, champ, valeur }: { code: string; champ: string; valeur: string }) =>
-      api.patch(`/api/catalogue/${encodeURIComponent(code)}`, { [champ]: valeur }),
-    onSuccess: () => {
+    mutationFn: ({ code, champ, valeur, version }: { code: string; champ: string; valeur: string; version?: number | null }) =>
+      api.patch<{ version: number }>(`/api/catalogue/${encodeURIComponent(code)}`, { [champ]: valeur, version }),
+    onSuccess: (r, v) => {
+      // La fiche a change de version : la correction suivante presentera la nouvelle.
+      setLignes((ls) => ls.map((l) => (l.code_reference === v.code ? { ...l, version_reference: r.version } : l)))
       toast.success('Fiche de la référence corrigée')
       void qc.invalidateQueries({ queryKey: ['refs-plan'] })
     },
@@ -282,15 +286,24 @@ export function BonCommandeNouveau() {
     ebauches.length === 0 &&
     sansFacteur.length === 0
 
+  // L'identifiant du document, tire a l'ouverture : un second envoi du meme
+  // formulaire rend le meme document (audit P3, 19/10/2026).
+  const [idDocument] = useState(nouvelIdentifiant)
   const creer = useMutation({
     mutationFn: () =>
       api.post<{ id_bc: string; numero_bc: string; lignes: number }>('/api/bons-commande', {
+        id_document: idDocument,
         ...entete,
-        lignes: pretes.map(corpsLigne),
+        // UNE LIGNE PAR REFERENCE (21/10/2026) : la reference saisie deux fois
+        // part en une ligne, quantites additionnees (le serveur fait de meme).
+        lignes: fusionnerParReference(pretes).lignes.map(corpsLigne),
       }),
     onSuccess: (r) => {
+      const fusions = fusionnerParReference(pretes).fusions
       toast.success(`${r.numero_bc} cree`, {
-        description: `${r.lignes} ligne(s) · brouillon, rien n'est encore engage.`,
+        description:
+          `${r.lignes} ligne(s) · brouillon, rien n'est encore engage.` +
+          (fusions.length ? ` Une ligne par référence : ${fusions.join(' ; ')}.` : ''),
       })
       void qc.invalidateQueries({ queryKey: ['bons-commande'] })
       void qc.invalidateQueries({ queryKey: ['plan-achat-propositions'] })
@@ -342,26 +355,21 @@ export function BonCommandeNouveau() {
                   propositions du plan en dépendent tous.
                 </Aide>
               </Etiq>
-              <Selecteur
+              <ChoixRecherche
+                type="fournisseur"
                 id="frs"
-                value={entete.code_fournisseur}
-                onChange={(e) => {
-                  const code = e.target.value
+                ariaLabel="Fournisseur"
+                valeur={entete.code_fournisseur}
+                onChange={(code, ligne) => {
+                  if (code === entete.code_fournisseur) return
                   setEntete({
                     ...entete,
                     code_fournisseur: code,
-                    code_devise: qFrs.data?.find((f) => f.code_fournisseur === code)?.code_devise ?? '',
+                    code_devise: String(ligne?.code_devise ?? ''),
                   })
                   setLignes([])
                 }}
-              >
-                <option value="">Choisir…</option>
-                {qFrs.data?.map((f) => (
-                  <option key={f.code_fournisseur} value={f.code_fournisseur}>
-                    {f.nom}
-                  </option>
-                ))}
-              </Selecteur>
+              />
             </div>
             <div>
               <Etiq htmlFor="datebc" obligatoire>
@@ -452,12 +460,13 @@ export function BonCommandeNouveau() {
                 setMode={setMode}
                 proposees={proposees}
                 chercherCatalogue={chercherCatalogue}
-                surCorrection={(code, champ, valeur) =>
-                  corrigerReference.mutate({ code, champ, valeur })
+                surCorrection={(code, champ, valeur, version) =>
+                  corrigerReference.mutate({ code, champ, valeur, version })
                 }
                 valeurOrigine={(code, champ) => (parPlan.get(code)?.[champ] as string) ?? ''}
                 surCreerReference={setACreer}
                 avecRemise
+                fusionParReference
               />
               {/* LES MEMES TOTAUX QU'EN MODIFICATION : brut, remise, net HT. Pas
                   d'equivalent en dirhams ici — le taux n'est engage qu'a la

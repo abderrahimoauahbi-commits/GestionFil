@@ -93,6 +93,12 @@ SELECT q.code_qualite,
 -- multi-source : on la commande sans inquietude. Une autre peut etre calme et
 -- mono-source : elle ne presse pas, mais elle merite qu'on qualifie une seconde
 -- source avant qu'elle presse. Melanger les deux fait rater la seconde.
+--
+-- 27/10/2026 : une seule source de verite, le moteur de couverture (migration
+-- 2026-10-27e). La vue lit v_stock_reference (lecture neutre) au lieu de
+-- v_stock_projete : le statut, les jours de couverture et l'action recommandee
+-- qui en decoulait sont retires. L'urgence est celle du moteur, cote serveur ;
+-- la vue garde le risque de source et le palier de montant.
 DROP VIEW IF EXISTS v_risque_sourcing CASCADE;
 CREATE VIEW v_risque_sourcing AS
 WITH alternatives AS (
@@ -101,7 +107,7 @@ WITH alternatives AS (
       FROM reference_groupe_equiv a
       JOIN reference_groupe_equiv b ON b.code_groupe_equiv = a.code_groupe_equiv
                                    AND b.actif = 1
-      JOIN v_stock_projete sp ON sp.code_reference = b.code_reference
+      JOIN v_stock_reference sp ON sp.code_reference = b.code_reference
      WHERE a.actif = 1
      GROUP BY a.code_reference
 )
@@ -110,11 +116,10 @@ SELECT sp.code_reference,
        sp.fournisseur_nom,
        r.classe_abc,
        r.classe_xyz,
-       sp.statut,
-       ROUND(sp.jours_couverture, 1)                              AS jours_couverture,
        sp.delai_livraison_jours,
-       ROUND(COALESCE(sp.conso_mensuelle_kg, 0) * 12
-             * COALESCE(sp.cmup_mad, 0), 2)                       AS budget_annuel_mad,
+       -- Budget et palier au REEL des 12 mois pleins (27/10/2026), meme assiette
+       -- que l'ABC : un poids constate.
+       ROUND(sp.valeur_reel_12m_mad, 2)                           AS budget_annuel_mad,
        COALESCE(a.nb_sources, 1)                                  AS nb_sources,
        CASE
            WHEN COALESCE(a.nb_sources, 1) <= 1 THEN 'MONO_SOURCE'
@@ -122,31 +127,18 @@ SELECT sp.code_reference,
        END                                                        AS risque_source,
        -- Le palier de montant, lu des parametres et non ecrit en dur.
        CASE
-           WHEN COALESCE(sp.conso_mensuelle_kg, 0) * 12 * COALESCE(sp.cmup_mad, 0)
+           WHEN sp.valeur_reel_12m_mad
                 >= (SELECT CAST(valeur_courante AS numeric) FROM parametre
                      WHERE code_parametre = 'P_SeuilTier1') THEN 'TIER_1'
-           WHEN COALESCE(sp.conso_mensuelle_kg, 0) * 12 * COALESCE(sp.cmup_mad, 0)
+           WHEN sp.valeur_reel_12m_mad
                 >= (SELECT CAST(valeur_courante AS numeric) FROM parametre
                      WHERE code_parametre = 'P_SeuilTier2') THEN 'TIER_2'
-           WHEN COALESCE(sp.conso_mensuelle_kg, 0) * 12 * COALESCE(sp.cmup_mad, 0)
+           WHEN sp.valeur_reel_12m_mad
                 >= (SELECT CAST(valeur_courante AS numeric) FROM parametre
                      WHERE code_parametre = 'P_SeuilTier3') THEN 'TIER_3'
            ELSE 'TIER_4'
-       END                                                        AS tier,
-       -- L'action recommandee combine les trois : ce qui presse, ce qui pese,
-       -- ce qui est fragile.
-       CASE
-           WHEN sp.statut IN ('RUPTURE', 'CRITIQUE') AND COALESCE(a.nb_sources, 1) <= 1
-                THEN 'Commander et qualifier une seconde source'
-           WHEN sp.statut IN ('RUPTURE', 'CRITIQUE')
-                THEN 'Commander cette semaine'
-           WHEN COALESCE(a.nb_sources, 1) <= 1 AND r.classe_abc = 'A'
-                THEN 'Qualifier une seconde source sous 30 jours'
-           WHEN sp.statut = 'ATTENTION'
-                THEN 'Surveiller, commander au prochain point'
-           ELSE 'Aucune action'
-       END                                                        AS action_recommandee
-  FROM v_stock_projete sp
+       END                                                        AS tier
+  FROM v_stock_reference sp
   JOIN reference r ON r.code_reference = sp.code_reference
   LEFT JOIN alternatives a ON a.code_reference = sp.code_reference
  WHERE r.actif = 1;

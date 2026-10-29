@@ -1,18 +1,30 @@
 /**
- * Stock projete = stock disponible + en-cours fournisseur − besoins sur 12 mois.
+ * LE STOCK PROJETÉ — TROIS ONGLETS SUR LE MÊME MOTEUR (décisions du 27/10/2026).
  *
- * Le filtrage passe par un RAIL LATERAL plutot que par des onglets en haut : il
- * porte le NOMBRE de references derriere chaque statut. « Rupture » seul invite
- * a cliquer pour savoir ; « Rupture 12 » a deja repondu.
+ *   * STOCK PROJETÉ : toutes les matières suivies, une ligne par référence, en
+ *     21 colonnes (moteur v2, décision du 27/10/2026) — stock disponible, sur
+ *     machines, restant constaté, arrivages, stock projeté, besoin jusqu'à
+ *     réception, couverture actuelle, cible, écart, à commander, montant, avant
+ *     le, état ; sur la ligne ↳ désignation, fournisseur, ABC / XYZ, 1re rupture,
+ *     délai, réception proposée, palettes. Le clic sur la ligne ouvre la fenêtre
+ *     du détail ENRICHIE (tuiles, approvisionnement, calcul, classement, où se
+ *     trouve la matière, onglets).
+ *   * SIMULATION : « et si ? » sur une référence, recalculé par le même moteur ;
+ *     rien n'est jamais enregistré.
+ *   * SURVEILLANCE : le tableau « À commander », déplacé du plan d'achat
+ *     (27/10/2026), sans bouton « Commander » pour l'instant ; le clic ouvre la
+ *     fenêtre de détail du plan d'achat (non enrichie).
  *
- * Les compteurs se calculent sur le jeu complet, une seule fois, et ne bougent
- * pas quand on filtre : un compteur qui suivrait le filtre afficherait toujours
- * le total de ce qu'on regarde deja, et ne dirait plus rien.
+ * Chaque chiffre vient de `routes/couverture.rs` (une seule source de vérité) :
+ * aucune formule de besoin n'est refaite ici. Le filtrage du premier onglet passe
+ * par le RAIL : il porte le NOMBRE de références derrière chaque état.
  */
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle,
+  CalendarClock,
   CheckCircle2,
   ClipboardList,
   FileText,
@@ -21,284 +33,178 @@ import {
   PackageX,
   Shuffle,
   ShoppingCart,
-  TrendingDown,
+  Siren,
+  FlaskConical,
+  Target,
+  Warehouse,
 } from 'lucide-react'
 import { api } from '../api/client'
 import { cn } from '../lib/utils'
 import { EnTetePage } from '../components/Layout'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
-import {
-  PanneauFiltres,
-  useFiltres,
-  type ChampFiltre,
-} from '../composants/PanneauFiltres'
-import { TableDroits, type Colonne } from '../components/TableDroits'
-import { Etiquette, fmt } from '../components/ui'
+import { PanneauFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
+import { DataTable, type ColonneDT as Colonne } from '../composants/DataTable'
+import { fmt } from '../lib/utils'
 import {
   MenuContextuelElement,
   MenuContextuelSeparateur,
   MenuContextuelTitre,
 } from '../composants/ui/surcouches'
 import { useOuvrirVue } from '../lib/navigation'
+import { Alerte } from '../composants/ui/base'
+import { Onglet, OngletContenu, Onglets, OngletsListe } from '../composants/ui/surcouches'
+import { libelleStatut } from '../lib/statuts'
+import { useDroits } from '../auth/AuthContext'
+import { ListeCouverture } from '../composants/couverture/ListeCouverture'
+import { ModaleReference } from '../composants/couverture/ModaleCouverture'
+import { SimulationCouverture } from '../composants/couverture/Simulation'
+import { dateListe, type SignalCouverture } from '../composants/couverture/types'
+import { StatutBadge } from '../composants/StatutBadge'
 
 const MODULE = 'STOCK'
 
+/** Une ligne : celle de l'onglet « À commander », avec ce que le stock dit en plus. */
 interface LigneProjete {
   code_reference: string
-  designation: string
+  designation: string | null
   fournisseur_nom: string | null
-  stock_mrp_kg: number
-  encours_kg: number
-  /** Le fil sur les metiers : sorti du magasin, pas encore consomme (06/10/2026). */
-  kg_sur_machine?: number
-  /** Ce que le calcul compte du fil sur machine (constat recent, lot non bloque, reglage). */
-  stock_machine_kg?: number
-  besoin_12m_kg: number
-  stock_projete_kg: number
-  jours_couverture: number | null
-  /** Bornes de l'echelle logique, servies par la vue : la jauge s'y gradue. */
-  seuil_critique_jours: number | null
-  seuil_alerte_jours: number | null
-  conso_mensuelle_kg: number | null
-  classe_xyz: string | null
-  delai_livraison_jours: number | null
-  unite_catalogue: string | null
-  cmup_mad: number | null
-  valeur_totale_mad: number | null
-  date_derniere_sortie: string | null
-  source_conso: string | null
-  statut: string
   classe_abc: string | null
-  /** Les deux couches, separement : c'est ce qui explique le statut final. */
-  statut_physique: string | null
-  statut_logique: string | null
+  classe_xyz: string | null
+  unite_catalogue: string | null
+  /** L'état au moteur v2 : RUPTURE_INEVITABLE | SOUS_SECURITE | SOUS_CIBLE | COUVERT (§ 15.4). */
+  statut: string
+  /** Les signaux, à part de l'état (§ 15.4) : lus dans la fenêtre de détail seulement. */
+  signaux?: SignalCouverture[]
+  /** La raison de l'état, en une phrase chiffrée (infobulle de l'état). */
+  raison_etat?: string | null
+  /** La réception proposée D (1re proposition), « en retard » quand la cible l'est. */
+  date_disponibilite?: string | null
+  reception_en_retard?: boolean | null
+  /** Le plan daté de [aujourd'hui, D[ ; null sans réception proposée. */
+  besoin_jusqu_reception_kg?: number | null
+  /** La quantité à commander en palettes, quand le conditionnement est connu. */
+  palettes_equivalentes?: number | null
+  /** L'horizon du plan en jours (« > N j » sans rupture). */
+  horizon_j?: number | null
+  source_delai?: string | null
+  /** C, la couverture cible (jours), sa source, et l'écart couverture − C. */
+  couverture_cible_j?: number | null
+  source_cible?: string | null
+  ecart_cible_j?: number | null
+  /** Jours couverts depuis aujourd'hui jusqu'à la veille de la 1re rupture ; null : tout l'horizon. */
+  jours_couverture: number | null
+  disponible_kg: number
+  magasin_kg: number
+  machine_kg: number
+  kg_sur_machine: number | null
+  plan_horizon_kg: number
+  couvert_jusqu_au: string | null
+  couvert_tout_horizon: boolean
+  premiere_rupture: string | null
+  premier_passage_securite: string | null
+  plan_non_couvert_kg: number
+  arrivages_comptes_kg: number
+  prochain_arrivage_date: string | null
+  prochain_arrivage_kg: number | null
+  qte_a_commander_kg: number | null
+  date_limite_commande: string | null
+  a_commander_aujourdhui: boolean
+  delai_j: number
+  defaut_donnees: string | null
+  quarantaine_kg: number
+  bloque_kg: number
+  restes_kg: number
+  en_retard_kg: number
+  sans_date_kg: number
   stock_physique_net_kg: number | null
-  stock_quarantaine_kg: number | null
-  stock_min_kg: number | null
-  stock_max_kg: number | null
-  sur_stock: number | null
-  encours_retarde_kg: number | null
-  nb_lignes_retardees: number | null
-  retard_max_jours: number | null
-  ecart_majeur: number | null
-  besoins_calcules_le: string | null
+  /** Le plan ramené à un mois de 30 jours, tel que le moteur le consomme. */
+  plan_mois_kg: number | null
+  cmup_mad: number | null
+  // ---- Les colonnes du stock projeté (27/10/2026), tirées du moteur ----
+  magasin_hors_restes_kg: number
+  machine_hors_restes_kg: number
+  restant_kg: number
+  stock_total_projete_kg: number
+  besoin_jusqu_livraison_kg: number
+  securite_aujourdhui_kg: number
+  /** Le prix du plan d'achat et le montant de la 1re proposition : masqués selon les droits. */
+  prix_estime_mad?: number | null
+  source_prix?: string
+  montant_estime_mad?: number | null
   [k: string]: unknown
 }
 
-/**
- * Pourquoi cette ligne est-elle dans cet etat ?
- *
- * Le statut seul ne dit rien de sa cause : « critique » peut venir du magasin
- * vide aujourd'hui, d'une couverture trop courte demain, ou d'un camion qu'on
- * n'attend plus. Sans la cause, l'operateur doit reconstituer le calcul de
- * tete — et il finit par ne plus lire l'alerte.
- */
-function motifAlerte(l: LigneProjete): string | null {
-  if (l.statut === 'OK') return null
-  if (l.statut === 'RUPTURE') {
-    return (l.stock_physique_net_kg ?? 0) <= 0
-      ? 'magasin vide'
-      : 'les besoins de l horizon depassent le stock et les commandes'
-  }
-  if (l.statut_physique === 'CRITIQUE') {
-    return `magasin sous son minimum (${fmt.nombre(l.stock_physique_net_kg ?? 0, 0)} pour ${fmt.nombre(l.stock_min_kg ?? 0, 0)} kg)`
-  }
-  if ((l.nb_lignes_retardees ?? 0) > 0) {
-    return `${fmt.nombre(l.encours_retarde_kg ?? 0, 0)} kg ecartes : commande en retard de ${l.retard_max_jours} j`
-  }
-  if (l.jours_couverture != null) {
-    return `${fmt.nombre(l.jours_couverture, 0)} jours de couverture`
-  }
-  return null
-}
+const kg = (v: number | null | undefined, d = 0) => fmt.nombre(v ?? 0, d)
 
-/**
- * La couverture, en chiffre et en jauge.
- *
- * TROIS CHOIX QUI SE TIENNENT.
- *
- * La COULEUR vient du statut calcule, jamais d'un seuil ecrit ici. Peindre en
- * rouge tout ce qui passe sous soixante jours contredirait le modele a double
- * declencheur : une reference a 55 jours mais au-dessus de son minimum magasin
- * n'est pas critique, et la ligne afficherait deux verdicts opposes — la
- * couverture en rouge, la colonne Statut en vert, a deux cases d'ecart.
- *
- * La GRADUATION vient de la base, pas du code. Le plein de la jauge est le
- * seuil d'alerte (P_SeuilAlerte), le repere le seuil critique
- * (P_SeuilCritique) ; tous deux voyagent dans la vue. Ecrits en dur, ils
- * cesseraient de suivre le parametre le jour ou la direction le deplace : le
- * chiffre changerait de statut, la barre non.
- *
- * La LARGEUR est fixe. Une jauge qui s'etirerait avec la colonne ne serait
- * comparable d'une ligne a l'autre que par accident — or c'est le seul usage
- * d'une jauge dans une liste : voir d'un coup laquelle est la plus courte.
- */
-function JaugeCouverture({ ligne: l }: { ligne: LigneProjete }) {
-  if (l.jours_couverture == null) return <span className="text-attenue-texte">—</span>
-
-  const plein = l.seuil_alerte_jours ?? 0
-  const critique = l.seuil_critique_jours ?? 0
-  const grave = l.statut === 'RUPTURE' || l.statut === 'CRITIQUE'
-  const alerte = l.statut === 'ATTENTION'
-
-  // Une couverture negative existe : la projection retranche les besoins de
-  // l'horizon et peut passer sous zero. La jauge se vide, elle ne s'inverse pas.
-  const part = plein > 0 ? Math.min(Math.max(l.jours_couverture / plein, 0), 1) : 0
-
-  return (
-    <span
-      className="relative inline-flex h-[18px] w-[86px] items-center justify-end overflow-hidden rounded-[3px] bg-attenue/40 px-1.5"
-      title={
-        plein > 0
-          ? `${fmt.nombre(l.jours_couverture, 0)} jours — critique en dessous de ${critique}, confortable a partir de ${plein}`
-          : `${fmt.nombre(l.jours_couverture, 0)} jours`
-      }
-    >
-      <span
-        aria-hidden
-        className={cn(
-          'absolute inset-y-0 left-0 transition-[width] duration-150 ease-out',
-          grave ? 'bg-danger/25' : alerte ? 'bg-alerte/30' : 'bg-succes/25',
-        )}
-        style={{ width: `${part * 100}%` }}
-      />
-      {/* Repere du seuil critique : sans lui la jauge dit « peu », avec lui elle
-          dit « peu, et de quel cote de la limite ». */}
-      {plein > 0 && critique > 0 && critique < plein && (
-        <span
-          aria-hidden
-          className="absolute inset-y-0 w-px bg-texte/25"
-          style={{ left: `${(critique / plein) * 100}%` }}
-        />
-      )}
-      <span
-        className={cn(
-          'relative tabular-nums',
-          grave ? 'font-medium text-danger' : alerte ? 'text-alerte' : 'text-texte',
-        )}
-      >
-        {fmt.nombre(l.jours_couverture, 0)} j
-      </span>
-    </span>
-  )
-}
-
-const TON: Record<string, 'rouge' | 'ambre' | 'vert' | 'neutre'> = {
-  RUPTURE: 'rouge',
-  CRITIQUE: 'rouge',
-  ATTENTION: 'ambre',
-  OK: 'vert',
-}
-
-/** Chaque statut, ce qu'il veut dire, et la couleur de son compteur. */
-const STATUTS = [
+/** Les états du moteur v2 (§ 15.4), ce qu'ils veulent dire, et la couleur de leur compteur. */
+const ETATS = [
   {
-    cle: 'RUPTURE',
-    libelle: 'Rupture',
-    resume: 'Projeté a zéro ou négatif',
+    cle: 'RUPTURE_INEVITABLE',
+    resume: 'La 1re rupture tombe avant aujourd’hui + délai',
     Icone: PackageX,
     ton: 'danger' as const,
   },
   {
-    cle: 'CRITIQUE',
-    libelle: 'Critique',
-    resume: 'Sous le stock minimum, ou moins de 60 j',
-    Icone: TrendingDown,
-    ton: 'danger' as const,
-  },
-
-  {
-    cle: 'ATTENTION',
-    libelle: 'Attention',
-    resume: 'Moins de 90 jours de couverture',
+    cle: 'SOUS_SECURITE',
+    resume: 'Un creux sous le seuil de sécurité dans le délai',
     Icone: AlertTriangle,
     ton: 'alerte' as const,
   },
   {
-    cle: 'OK',
-    libelle: 'Situation normale',
-    resume: 'Couverture suffisante',
+    cle: 'SOUS_CIBLE',
+    resume: 'La couverture actuelle est sous la couverture cible',
+    Icone: Target,
+    ton: 'info' as const,
+  },
+  {
+    cle: 'COUVERT',
+    resume: 'La couverture atteint la cible',
     Icone: CheckCircle2,
     ton: 'succes' as const,
   },
 ]
 
-/** Ce sur quoi une question peut porter, avec le type qui decide des operateurs. */
 /**
- * Filtres du stock projete.
- *
- * Uniquement des axes que l'on choisit, jamais de comparateur a saisir : sur
- * cet ecran, les questions reelles sont « quelles references en tension »,
- * « chez quel fournisseur », « quelle classe » — pas « couverture < 42 ».
+ * Filtres : des axes que l'on choisit, jamais un comparateur à saisir.
  */
 const CHAMPS_FILTRABLES: ChampFiltre<LigneProjete>[] = [
-  { cle: 'statut', libelle: 'Statut', type: 'liste', valeur: (l) => l.statut },
-  { cle: 'fournisseur', libelle: 'Fournisseur', type: 'liste', valeur: (l) => l.fournisseur_nom },
+  { cle: 'statut', libelle: 'État', type: 'liste', valeur: (l) => libelleStatut('statut_stock', l.statut) },
+  { cle: 'fournisseur', libelle: 'Fournisseur', type: 'liste', recherche: true, valeur: (l) => l.fournisseur_nom },
   { cle: 'classe', libelle: 'Classe ABC', type: 'liste', valeur: (l) => l.classe_abc },
   { cle: 'reference', libelle: 'Référence', type: 'texte', valeur: (l) => l.code_reference },
 ]
 
 /**
- * Le menu au clic droit sur une ligne de stock.
- *
- * IL NE CREE AUCUN CHEMIN. Chacune de ces quatre destinations reste atteignable
- * par la navigation ordinaire ; le menu ne fait que les atteindre AVEC la
- * reference deja portee. C'est la difference entre « ouvrir l'ecran des
- * mouvements » et « voir l'historique de PES-20/2 » : le second evite a
- * l'operateur de retaper un code qu'il a sous les yeux, et donc de le retaper
- * faux. Un menu contextuel ne s'ouvre ni au clavier ni au doigt : y loger une
- * action unique la rendrait inaccessible a une partie des postes.
- *
- * Les liens portent `?reference=`, et les trois ecrans vises le lisent. Un
- * parametre qu'une page ignorerait serait pire que pas de lien du tout :
- * l'entree promettrait un filtre et livrerait une liste entiere.
+ * Le menu au clic droit : il n'ouvre aucun chemin nouveau, il porte la référence
+ * vers des écrans existants (commande, fiche, mouvements, équivalents, inventaire).
  */
-function ActionsLigne({
-  ligne: l,
-  ouvrir,
-}: {
-  ligne: LigneProjete
-  ouvrir: (chemin: string) => void
-}) {
+function ActionsLigne({ ligne: l, ouvrir }: { ligne: LigneProjete; ouvrir: (chemin: string) => void }) {
   const ref = encodeURIComponent(l.code_reference)
-  const tendu = l.statut === 'RUPTURE' || l.statut === 'CRITIQUE'
-
+  const tendu = l.statut !== 'COUVERT'
   return (
     <>
       <MenuContextuelTitre>{l.code_reference}</MenuContextuelTitre>
       <MenuContextuelSeparateur />
-
-      {/* Commander en tete quand la ligne est en tension : c'est l'action que
-          l'acheteur cherche, et la remonter evite de la lire dans une liste. */}
       {tendu && (
         <MenuContextuelElement onSelect={() => ouvrir(`/bons-commande/nouveau?reference=${ref}`)}>
-          <ShoppingCart /> Commander cette reference
+          <ShoppingCart /> Commander cette référence
         </MenuContextuelElement>
       )}
-
       <MenuContextuelElement onSelect={() => ouvrir(`/catalogue?reference=${ref}`)}>
         <FileText /> Ouvrir la fiche
       </MenuContextuelElement>
-
       <MenuContextuelElement onSelect={() => ouvrir(`/mouvements?reference=${ref}`)}>
-        <History /> Voir l historique des mouvements
+        <History /> Voir l’historique des mouvements
       </MenuContextuelElement>
-
       <MenuContextuelElement onSelect={() => ouvrir(`/equivalences?reference=${ref}`)}>
-        <Shuffle /> Chercher un equivalent
+        <Shuffle /> Chercher un équivalent
       </MenuContextuelElement>
-
       {!tendu && (
         <MenuContextuelElement onSelect={() => ouvrir(`/bons-commande/nouveau?reference=${ref}`)}>
-          <ShoppingCart /> Commander cette reference
+          <ShoppingCart /> Commander cette référence
         </MenuContextuelElement>
       )}
-
       <MenuContextuelSeparateur />
-
-      {/* L'inventaire ne porte pas la reference : il se lance par magasin, et
-          l'ecran demande lequel. Promettre un inventaire cible ici serait
-          promettre ce que le module ne fait pas. */}
       <MenuContextuelElement onSelect={() => ouvrir('/inventaires')}>
         <ClipboardList /> Lancer un inventaire
       </MenuContextuelElement>
@@ -306,14 +212,94 @@ function ActionsLigne({
   )
 }
 
+const ONGLETS = ['projete', 'simulation', 'surveillance'] as const
+type OngletStock = (typeof ONGLETS)[number]
+
 export function Stock() {
+  const [params, setParams] = useSearchParams()
+  const ongletLu = params.get('onglet')
+  const onglet: OngletStock = (ONGLETS as readonly string[]).includes(ongletLu ?? '') ? (ongletLu as OngletStock) : 'projete'
+  // La référence de la simulation, gardée d'un onglet à l'autre (jamais enregistrée).
+  const [simulee, setSimulee] = useState<string | null>(params.get('reference'))
+  // Le moteur (détail, simulation, surveillance) se lit sous le droit du plan d'achat.
+  const lirePlan = useDroits('PLAN_ACHAT').peutLire
+
+  const choisirOnglet = (o: string) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p)
+        if (o === 'projete') n.delete('onglet')
+        else n.set('onglet', o)
+        return n
+      },
+      { replace: true },
+    )
+  const simuler = (reference: string) => {
+    setSimulee(reference)
+    choisirOnglet('simulation')
+  }
+
+  return (
+    <div>
+      <EnTetePage
+        titre="Stock projeté"
+        sous_titre="Le moteur de couverture : ce qui est compté aujourd’hui, ce qui arrive à sa date, jusqu’où le plan est couvert, et ce qu’il faut commander"
+      />
+      <Onglets value={onglet} onValueChange={choisirOnglet}>
+        <OngletsListe className="mb-3 h-auto max-w-full flex-wrap gap-y-0">
+          <Onglet value="projete">
+            <Warehouse className="size-3.5" />
+            Stock projeté
+          </Onglet>
+          <Onglet value="simulation" disabled={!lirePlan}>
+            <FlaskConical className="size-3.5" />
+            Simulation
+          </Onglet>
+          <Onglet value="surveillance" disabled={!lirePlan}>
+            <Siren className="size-3.5" />
+            Surveillance
+          </Onglet>
+        </OngletsListe>
+        <OngletContenu value="projete">
+          <StockProjete lirePlan={lirePlan} surSimuler={lirePlan ? simuler : undefined} />
+        </OngletContenu>
+        <OngletContenu value="simulation">
+          {lirePlan ? (
+            <SimulationCouverture reference={simulee} surReference={setSimulee} />
+          ) : (
+            <PasDeDroitPlan />
+          )}
+        </OngletContenu>
+        <OngletContenu value="surveillance">
+          {lirePlan ? <ListeCouverture surSimuler={simuler} exportable="stock-surveillance" /> : <PasDeDroitPlan />}
+        </OngletContenu>
+      </Onglets>
+    </div>
+  )
+}
+
+function PasDeDroitPlan() {
+  return (
+    <Alerte ton="info">
+      Le détail du moteur de couverture, la simulation et la surveillance se lisent avec le droit de lecture du plan
+      d’achat, que votre rôle n’a pas.
+    </Alerte>
+  )
+}
+
+/** Des kilos dans une cellule : « — » pour zéro. */
+const kgCellule = (v: number | null | undefined) =>
+  typeof v === 'number' && Math.abs(v) > 0.05 ? kg(v) : <span className="text-attenue-texte">—</span>
+
+/** L'ONGLET « STOCK PROJETÉ » : toutes les matières suivies, une ligne chacune. */
+function StockProjete({ lirePlan, surSimuler }: { lirePlan: boolean; surSimuler?: (reference: string) => void }) {
   const ouvrir = useOuvrirVue()
   const [filtre, setFiltre] = useState('')
   const [recherche, setRecherche] = useState('')
   const filtres = useFiltres(CHAMPS_FILTRABLES)
+  // La référence dont la grande fenêtre est ouverte.
+  const [ouverte, setOuverte] = useState<LigneProjete | null>(null)
 
-  // Un seul appel, sans filtre serveur : le jeu tient largement en memoire, et
-  // le garder entier permet de compter chaque statut sans quatre requetes.
   const q = useQuery({
     queryKey: ['stock-projete'],
     queryFn: ({ signal }) => api.get<LigneProjete[]>('/api/stock/projete?limite=2000', { signal }),
@@ -323,9 +309,10 @@ export function Stock() {
 
   const comptes = useMemo(() => {
     const m: Record<string, number> = {}
-    for (const l of toutes) m[l.statut] = (m[l.statut] ?? 0) + 1
-    for (const c of toutes) {
-      if (c.classe_abc) m[`ABC:${c.classe_abc}`] = (m[`ABC:${c.classe_abc}`] ?? 0) + 1
+    for (const l of toutes) {
+      m[l.statut] = (m[l.statut] ?? 0) + 1
+      if (l.a_commander_aujourdhui) m.AUJOURDHUI = (m.AUJOURDHUI ?? 0) + 1
+      if (l.classe_abc) m[`ABC:${l.classe_abc}`] = (m[`ABC:${l.classe_abc}`] ?? 0) + 1
     }
     return m
   }, [toutes])
@@ -337,9 +324,10 @@ export function Stock() {
 
   const lignes = useMemo(() => {
     const f = recherche.trim().toLowerCase()
-    const base = toutes
+    return toutes
       .filter((l) => {
         if (!filtre) return true
+        if (filtre === 'AUJOURDHUI') return l.a_commander_aujourdhui
         if (filtre.startsWith('ABC:')) return l.classe_abc === filtre.slice(4)
         return l.statut === filtre
       })
@@ -350,307 +338,297 @@ export function Stock() {
           (l.designation ?? '').toLowerCase().includes(f) ||
           (l.fournisseur_nom ?? '').toLowerCase().includes(f),
       )
-    return base.filter(filtres.retenir)
+      .filter(filtres.retenir)
   }, [toutes, filtre, recherche, filtres])
 
   const groupes: GroupeRail[] = [
     {
       entrees: [
-        {
-          cle: '',
-          libelle: 'Toutes les références',
-          resume: 'Sans filtre',
-          Icone: Layers,
-          compte: toutes.length,
-        },
+        { cle: '', libelle: 'Toutes les références', resume: 'Suivies par le moteur', Icone: Layers, compte: toutes.length },
       ],
     },
     {
-      titre: 'Par statut',
-      entrees: STATUTS.map((s) => ({
-        cle: s.cle,
-        libelle: s.libelle,
-        resume:
-          s.cle === 'CRITIQUE' && toutes[0]?.seuil_critique_jours != null
-            ? `Sous le stock minimum, ou moins de ${toutes[0].seuil_critique_jours} j`
-            : s.cle === 'ATTENTION' && toutes[0]?.seuil_alerte_jours != null
-              ? `Moins de ${toutes[0].seuil_alerte_jours} jours de couverture`
-              : s.resume,
-        Icone: s.Icone,
-        compte: comptes[s.cle] ?? 0,
-        ton: s.ton,
-      })),
+      titre: 'Par état (moteur de couverture)',
+      entrees: [
+        ...ETATS.map((s) => ({
+          cle: s.cle,
+          libelle: libelleStatut('statut_stock', s.cle),
+          resume: s.resume,
+          Icone: s.Icone,
+          compte: comptes[s.cle] ?? 0,
+          ton: s.ton,
+        })),
+        {
+          cle: 'AUJOURDHUI',
+          libelle: 'À commander aujourd’hui',
+          resume: 'Date limite de commande atteinte ou dépassée',
+          Icone: CalendarClock,
+          compte: comptes.AUJOURDHUI ?? 0,
+          ton: 'danger' as const,
+        },
+      ],
     },
   ]
-
   if (classes.length > 0) {
     groupes.push({
       titre: 'Par classe ABC',
       entrees: classes.map((c) => ({
         cle: `ABC:${c}`,
         libelle: `Classe ${c}`,
-        resume:
-          c === 'A'
-            ? 'Le gros du capital immobilise'
-            : c === 'B'
-              ? 'Poids intermediaire'
-              : 'Nombreuses, faible valeur',
+        resume: c === 'A' ? 'Le gros du capital immobilisé' : c === 'B' ? 'Poids intermédiaire' : 'Nombreuses, faible valeur',
         compte: comptes[`ABC:${c}`] ?? 0,
         ton: c === 'A' ? ('danger' as const) : ('neutre' as const),
       })),
     })
   }
 
+  /* LES 21 COLONNES DU STOCK PROJETÉ (décision du 27/10/2026, soir), dans
+     l'ordre validé. Ligne principale : 1, 5 à 13, 17, 19, 20, 21 ; ligne ↳
+     (`complement`) : 2, 3, 4, 14, 15, 16, 18. Les signaux ne sont QUE dans la
+     fenêtre de détail. Tout vient du moteur de couverture. */
   const colonnes: Colonne<LigneProjete>[] = [
     {
       champ: 'code_reference',
       entete: 'Référence',
-      rendu: (l) => <span className="whitespace-nowrap font-medium text-texte">{l.code_reference}</span>,
-    },
-    {
-      champ: 'statut',
-      entete: 'Statut',
-      // Le statut, sa CAUSE, et le sur-stock qui est un axe distinct. Les trois
-      // tiennent dans la meme cellule parce qu'ils se lisent ensemble : « rouge »
-      // sans « pourquoi » oblige a rouvrir le calcul de tete.
-      rendu: (l) => {
-        const motif = motifAlerte(l)
-        return (
-          <div className="flex items-center gap-1.5 whitespace-nowrap" title={motif ?? undefined}>
-            <Etiquette ton={TON[l.statut] ?? 'neutre'}>{l.statut}</Etiquette>
-            {l.sur_stock === 1 && <Etiquette ton="neutre">sur-stock</Etiquette>}
-            {l.ecart_majeur === 1 && <Etiquette ton="ambre">ecart a vérifier</Etiquette>}
-            {motif && <span className="max-w-[11rem] truncate text-[11px] text-attenue-texte">{motif}</span>}
-          </div>
-        )
-      },
-    },
-    {
-      champ: 'quantite_kg',
-      entete: 'Stock (kg)',
-      numerique: true,
-      rendu: (l) => fmt.nombre(l.stock_mrp_kg, 1),
-    },
-    {
-      champ: 'stock_projete_kg',
-      entete: 'Projeté (kg)',
-      numerique: true,
       rendu: (l) => (
-        <span className={l.stock_projete_kg < 0 ? 'font-medium text-danger' : ''}>
-          {fmt.nombre(l.stock_projete_kg, 1)}
+        <span className="block max-w-[6.5rem] truncate font-medium text-texte" title={l.code_reference}>
+          {l.code_reference}
         </span>
       ),
     },
     {
-      champ: 'jours_couverture',
-      entete: 'Couverture',
-      numerique: true,
-      /* La couverture se colore selon le STATUT calcule, jamais selon un seuil
-         ecrit ici. Peindre en rouge tout ce qui passe sous soixante jours
-         contredirait le modele a double declencheur : une reference a 55 jours
-         mais au-dessus de son minimum magasin n'est pas critique, et l'ecran
-         afficherait alors deux verdicts opposes sur la meme ligne. */
-      rendu: (l) => <JaugeCouverture ligne={l} />,
-    },
-    {
-      champ: 'date_derniere_entree',
-      entete: 'En-cours (kg)',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => fmt.nombre(l.encours_kg, 1),
-    },
-    {
-      /* LE FIL SUR MACHINE (regle 9, 08/10/2026) : hors du magasin — le
-         « Physique » ne le contient pas. La colonne montre ce que le calcul des
-         besoins COMPTE (P_MrpInclureStockMachine, etage constate depuis moins de
-         P_JoursInventMachine jours, lot non bloque) ; le reste, s'il y en a, est
-         signale a cote (audit v5, F16). */
-      // Le champ declare dans la grille (kg_sur_machine) porte la colonne ; la
-      // valeur affichee est celle que le calcul compte.
-      champ: 'kg_sur_machine',
-      entete: 'Sur machine compté (kg)',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => {
-        const compte = l.stock_machine_kg ?? 0
-        const total = l.kg_sur_machine ?? 0
-        if (!total) return '—'
-        return (
-          <span title={total - compte > 0.05 ? `${fmt.nombre(total, 1)} kg sur machine, dont ${fmt.nombre(total - compte, 1)} non comptés (constat ancien ou lot bloqué)` : undefined}>
-            {fmt.nombre(compte, 1)}
-            {total - compte > 0.05 && <span className="text-attenue-texte"> / {fmt.nombre(total, 1)}</span>}
-          </span>
-        )
-      },
-    },
-    {
       champ: 'designation',
-      entete: 'Fournisseur',
-      rendu: (l) => <span className="whitespace-nowrap">{fmt.texte(l.fournisseur_nom)}</span>,
-      secondaire: true,
+      entete: 'Désignation',
+      complement: true,
+      rendu: (l) => (l.designation && l.designation !== l.code_reference ? l.designation : '—'),
     },
-
-    /* --- Les colonnes du classeur qui manquaient ------------------------
-       La vue en expose trente-six, l'ecran n'en montrait sept. Celles-ci
-       sont marquees `secondaire` : elles apparaissent au-dela de 1280 px et
-       restent accessibles par le menu de colonnes. Une tablette de magasin
-       garde ses sept colonnes lisibles ; un poste de bureau voit tout. */
+    {
+      champ: 'fournisseur_nom',
+      entete: 'Fournisseur',
+      complement: true,
+      rendu: (l) => fmt.texte(l.fournisseur_nom),
+    },
     {
       champ: 'classe_abc',
       entete: 'ABC / XYZ',
-      largeur: '78px',
-      secondaire: true,
-      // Les deux classements ensemble : la valeur ET la regularite. Une
-      // reference AX se pilote au fil de l'eau, une AZ demande un stock de
-      // securite — c'est le croisement qui dit la politique, pas chaque
-      // lettre prise seule.
+      complement: true,
+      rendu: (l) => (l.classe_abc ? `${l.classe_abc}${l.classe_xyz ?? ''}` : '—'),
+    },
+    {
+      champ: 'magasin_hors_restes_kg',
+      entete: 'Stock disponible',
+      numerique: true,
+      largeur: '66px',
+      rendu: (l) => kgCellule(l.magasin_hors_restes_kg),
+    },
+    {
+      champ: 'machine_hors_restes_kg',
+      entete: 'Sur machines',
+      numerique: true,
+      largeur: '60px',
+      rendu: (l) => kgCellule(l.machine_hors_restes_kg),
+    },
+    {
+      champ: 'restant_kg',
+      entete: 'Restant constaté',
+      numerique: true,
+      largeur: '62px',
+      rendu: (l) => kgCellule(l.restant_kg),
+    },
+    {
+      champ: 'arrivages_comptes_kg',
+      entete: 'Arrivages',
+      numerique: true,
+      largeur: '64px',
+      rendu: (l) => kgCellule(l.arrivages_comptes_kg),
+    },
+    {
+      champ: 'stock_total_projete_kg',
+      entete: 'Stock projeté',
+      numerique: true,
+      largeur: '66px',
+      rendu: (l) => <span className="font-medium">{kg(l.stock_total_projete_kg)}</span>,
+    },
+    {
+      champ: 'besoin_jusqu_reception_kg',
+      entete: 'Besoin jusqu’à réception',
+      numerique: true,
+      largeur: '70px',
+      rendu: (l) => (l.besoin_jusqu_reception_kg == null ? <span className="text-attenue-texte">—</span> : kg(l.besoin_jusqu_reception_kg)),
+    },
+    {
+      champ: 'jours_couverture',
+      entete: 'Couverture actuelle',
+      numerique: true,
+      largeur: '68px',
+      valeurTri: (l) => (l.jours_couverture == null ? 1e9 : l.jours_couverture),
       rendu: (l) =>
-        !l.classe_abc ? (
+        l.jours_couverture == null ? (
+          <span className="text-succes">{`> ${l.horizon_j ?? '?'} j`}</span>
+        ) : (
+          <span className="tabular-nums">{l.jours_couverture} j</span>
+        ),
+    },
+    {
+      champ: 'couverture_cible_j',
+      entete: 'Cible',
+      numerique: true,
+      largeur: '54px',
+      rendu: (l) =>
+        l.couverture_cible_j == null ? (
+          <span className="text-alerte">non définie</span>
+        ) : (
+          <span className="tabular-nums">{l.couverture_cible_j} j</span>
+        ),
+    },
+    {
+      champ: 'ecart_cible_j',
+      entete: 'Écart cible',
+      numerique: true,
+      largeur: '56px',
+      valeurTri: (l) => (l.ecart_cible_j == null ? 1e9 : l.ecart_cible_j),
+      rendu: (l) =>
+        l.ecart_cible_j == null ? (
           <span className="text-attenue-texte">—</span>
         ) : (
-          <span
-            className={cn(
-              'inline-block rounded-[3px] px-1.5 py-px font-medium',
-              l.classe_abc === 'A' ? 'bg-primaire/15 text-primaire' : 'text-attenue-texte',
-            )}
-          >
-            {l.classe_abc}
-            {l.classe_xyz ?? ''}
+          <span className={cn('tabular-nums', l.ecart_cible_j < 0 && 'font-medium text-danger')}>
+            {l.ecart_cible_j > 0 ? '+' : l.ecart_cible_j < 0 ? '−' : ''}
+            {Math.abs(l.ecart_cible_j)} j
           </span>
         ),
     },
     {
-      champ: 'stock_physique_net_kg',
-      entete: 'Physique (kg)',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => fmt.nombre(l.stock_physique_net_kg ?? 0, 1),
+      champ: 'premiere_rupture',
+      entete: '1re rupture projetée',
+      complement: true,
+      rendu: (l) => (l.premiere_rupture ? <span className="tabular-nums">{dateListe(l.premiere_rupture)}</span> : 'aucune sur l’horizon'),
     },
     {
-      champ: 'stock_min_kg',
-      entete: 'Minimum (kg)',
+      champ: 'delai_j',
+      entete: 'Délai',
       numerique: true,
-      secondaire: true,
-      rendu: (l) => (l.stock_min_kg == null ? '—' : fmt.nombre(l.stock_min_kg, 1)),
+      complement: true,
+      rendu: (l) => <span title={l.source_delai ? `source : ${l.source_delai}` : undefined}>{l.delai_j ?? '—'} j</span>,
     },
     {
-      champ: 'conso_mensuelle_kg',
-      entete: 'Conso / mois',
-      numerique: true,
-      secondaire: true,
+      champ: 'date_disponibilite',
+      entete: 'Date réception proposée',
+      complement: true,
       rendu: (l) =>
-        l.conso_mensuelle_kg == null ? '—' : fmt.nombre(l.conso_mensuelle_kg, 1),
+        l.date_disponibilite ? (
+          <span className="tabular-nums">
+            {dateListe(l.date_disponibilite)}
+            {l.reception_en_retard && <span className="ml-1 font-medium text-danger">en retard</span>}
+          </span>
+        ) : (
+          '—'
+        ),
     },
     {
-      champ: 'besoin_12m_kg',
-      entete: 'Besoin horizon',
+      champ: 'qte_a_commander_kg',
+      entete: 'À commander',
       numerique: true,
-      secondaire: true,
-      rendu: (l) => (l.besoin_12m_kg == null ? '—' : fmt.nombre(l.besoin_12m_kg, 1)),
-    },
-    {
-      champ: 'delai_livraison_jours',
-      entete: 'Délai (j)',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => l.delai_livraison_jours ?? '—',
-    },
-    {
-      champ: 'unite_catalogue',
-      entete: 'Unité',
-      secondaire: true,
-      rendu: (l) => fmt.texte(l.unite_catalogue),
-    },
-    {
-      champ: 'cmup_mad',
-      entete: 'CMUP',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => (l.cmup_mad == null ? '—' : fmt.nombre(l.cmup_mad, 2)),
-    },
-    {
-      champ: 'valeur_totale_mad',
-      entete: 'Valeur (MAD)',
-      numerique: true,
-      secondaire: true,
-      rendu: (l) => (l.valeur_totale_mad == null ? '—' : fmt.nombre(l.valeur_totale_mad, 2)),
-    },
-    {
-      champ: 'sur_stock',
-      entete: 'Sur-stock',
-      largeur: '80px',
-      secondaire: true,
-      // Le sur-stock est un drapeau SEPARE du statut, pas une valeur de
-      // l'echelle : une reference peut etre en sur-stock ET en alerte, si le
-      // stock dort dans le mauvais magasin.
+      largeur: '68px',
       rendu: (l) =>
-        l.sur_stock ? (
-          <span className="rounded-[3px] bg-alerte/12 px-1.5 py-px text-[11px] text-alerte">
-            oui
+        l.qte_a_commander_kg ? (
+          <span className="font-medium tabular-nums">{kg(l.qte_a_commander_kg)}</span>
+        ) : (
+          <span className="text-attenue-texte">—</span>
+        ),
+    },
+    {
+      champ: 'palettes_equivalentes',
+      entete: 'Unité / palette',
+      complement: true,
+      rendu: (l) => (typeof l.palettes_equivalentes === 'number' ? `${fmt.nombre(l.palettes_equivalentes, 2)} pal.` : '—'),
+    },
+    {
+      champ: 'montant_estime_mad',
+      entete: 'Montant commande',
+      numerique: true,
+      largeur: '72px',
+      rendu: (l) =>
+        typeof l.montant_estime_mad === 'number' ? (
+          <span className="tabular-nums" title={l.source_prix ? `Prix : ${l.source_prix}` : undefined}>
+            {fmt.nombre(l.montant_estime_mad, 0)}
           </span>
         ) : (
           <span className="text-attenue-texte">—</span>
         ),
     },
     {
-      champ: 'date_derniere_sortie',
-      entete: 'Dernière sortie',
-      secondaire: true,
-      rendu: (l) => fmt.date(l.date_derniere_sortie),
+      champ: 'date_limite_commande',
+      entete: 'Avant le',
+      largeur: '64px',
+      rendu: (l) =>
+        l.date_limite_commande ? (
+          <span className={cn('tabular-nums', l.a_commander_aujourdhui && 'font-medium text-danger')}>
+            {dateListe(l.date_limite_commande)}
+          </span>
+        ) : (
+          <span className="text-attenue-texte">—</span>
+        ),
+    },
+    {
+      champ: 'statut',
+      entete: 'État',
+      largeur: '136px',
+      valeurTri: (l) => `${{ RUPTURE_INEVITABLE: 0, SOUS_SECURITE: 1, SOUS_CIBLE: 2 }[l.statut] ?? 3}`,
+      rendu: (l) => <StatutBadge entite="statut_stock" code={l.statut} title={l.raison_etat ?? undefined} />,
     },
   ]
 
   return (
-    <div>
-      <EnTetePage
-        titre="Stock projeté"
-        sous_titre="Stock disponible + en-cours fournisseur − besoins sur 12 mois"
+    <PageAvecRail
+      large
+      rail={
+        <div className="space-y-3">
+          <RailLateral
+            groupes={groupes}
+            actif={filtre}
+            surChoix={setFiltre}
+            recherche={{ valeur: recherche, surChangement: setRecherche, placeholder: 'Référence, fournisseur…' }}
+          />
+          <PanneauFiltres
+            champs={CHAMPS_FILTRABLES}
+            lignes={toutes}
+            valeurs={filtres.valeurs}
+            definir={filtres.definir}
+            reinitialiser={filtres.reinitialiser}
+            actifs={filtres.actifs}
+          />
+        </div>
+      }
+    >
+      {filtres.actifs > 0 && (
+        <div className="mb-2 text-[12px] text-attenue-texte">
+          {lignes.length} référence(s) sur {toutes.length} après filtrage.
+        </div>
+      )}
+      <DataTable<LigneProjete>
+        exportable="stock-projete"
+        imprimable="Stock projeté"
+        module={MODULE}
+        recherche={false}
+        entetesRepliables
+        serre
+        menuContextuel={(l) => <ActionsLigne ligne={l} ouvrir={ouvrir} />}
+        surClic={lirePlan ? (l) => setOuverte(l) : undefined}
+        colonnes={colonnes}
+        lignes={lignes}
+        chargement={q.isLoading}
+        erreur={q.error}
+        cle={(l) => l.code_reference}
+        titreCarte={(l) => [l.code_reference, l.designation && l.designation !== l.code_reference ? l.designation : null].filter(Boolean).join(' — ')}
+        videTitre="Aucune référence pour ce filtre."
       />
-
-      <PageAvecRail
-        large
-        rail={
-          <div className="space-y-3">
-            <RailLateral
-              groupes={groupes}
-              actif={filtre}
-              surChoix={setFiltre}
-              recherche={{
-                valeur: recherche,
-                surChangement: setRecherche,
-                placeholder: 'Référence, fournisseur…',
-              }}
-            />
-            <PanneauFiltres
-              champs={CHAMPS_FILTRABLES}
-              lignes={toutes}
-              valeurs={filtres.valeurs}
-              definir={filtres.definir}
-              reinitialiser={filtres.reinitialiser}
-              actifs={filtres.actifs}
-            />
-          </div>
-        }
-      >
-        {filtres.actifs > 0 && (
-          <div className="mb-2 text-[12px] text-attenue-texte">
-            {lignes.length} reference(s) sur {toutes.length} apres filtrage.
-          </div>
-        )}
-        <TableDroits
-          exportable="etat-des-stocks"
-          imprimable="État des stocks"
-          module={MODULE}
-          menuContextuel={(l) => <ActionsLigne ligne={l} ouvrir={ouvrir} />}
-          colonnes={colonnes}
-          lignes={lignes}
-          chargement={q.isLoading}
-          erreur={q.error}
-          cle={(l) => l.code_reference}
-          titreCarte={(l) => l.code_reference}
-          texteVide="Aucune référence pour ce filtre."
-        />
-      </PageAvecRail>
-    </div>
+      <ModaleReference
+        reference={ouverte?.code_reference ?? null}
+        designation={ouverte?.designation}
+        surFermer={() => setOuverte(null)}
+        enrichi
+        surSimuler={surSimuler}
+      />
+    </PageAvecRail>
   )
 }

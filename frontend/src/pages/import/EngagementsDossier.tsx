@@ -17,9 +17,9 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
-import { Badge, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Selecteur } from '../../composants/ui/base'
+import { Badge, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Etiq, Selecteur } from '../../composants/ui/base'
 import { cn, fmt } from '../../lib/utils'
-import { echec, nombre, useRafraichir, type Signaler } from './dialogues'
+import { nombre, useRafraichir, useVersionDossier, type Signaler } from './dialogues'
 import type { DossierComplet, Engagement, Facture } from './types'
 
 const VIDE = { code_fournisseur: '', code_devise: '', numero_ei: '', banque: '', date_ei: '', quantite_kg: '', montant_devise: '', notes: '' }
@@ -72,9 +72,12 @@ export function EngagementsDossier({ d, ecrire, signaler }: { d: DossierComplet;
     d.factures.find((f) => f.code_fournisseur === code)?.code_devise ??
     ''
 
+  // Verrou optimiste : l'engagement passe par la version du dossier, l'imputation
+  // par celle de la facture.
+  const version = useVersionDossier()
   const ajouter = useMutation({
-    mutationFn: () =>
-      api.post(`/api/import/dossiers/${d.dossier.id_dossier}/engagements`, {
+    mutationFn: async () =>
+      version.suivre(await api.post(`/api/import/dossiers/${d.dossier.id_dossier}/engagements`, {
         code_fournisseur: n.code_fournisseur || null,
         code_devise: n.code_devise || null,
         numero_ei: n.numero_ei,
@@ -83,32 +86,37 @@ export function EngagementsDossier({ d, ecrire, signaler }: { d: DossierComplet;
         quantite_kg: n.quantite_kg ? nombre(n.quantite_kg) : null,
         montant_devise: n.montant_devise ? nombre(n.montant_devise) : null,
         notes: n.notes || null,
-      }),
+        version: version.lire(),
+      })),
     onSuccess: () => {
       toast.success(`Engagement ${n.numero_ei.replace(/\s/g, '')} rattaché au dossier`)
       setN((x) => ({ ...VIDE, code_fournisseur: x.code_fournisseur, code_devise: x.code_devise }))
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
 
   const retirer = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/import/engagements/${id}`),
+    mutationFn: async (id: string) =>
+      version.suivre(await api.delete(`/api/import/engagements/${id}?version=${version.lire() ?? ''}`)),
     onSuccess: () => {
       toast.success('Engagement retiré — ses factures n’ont plus d’engagement')
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
 
   const imputer = useMutation({
     mutationFn: (v: { facture: string; engagement: string }) =>
-      api.patch(`/api/import/factures/${v.facture}`, { id_engagement: v.engagement }),
+      api.patch(`/api/import/factures/${v.facture}`, {
+        id_engagement: v.engagement,
+        version: d.factures.find((f) => f.id_facture === v.facture)?.version,
+      }),
     onSuccess: () => {
       toast.success('Imputation de la facture enregistrée')
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
 
   const maj = (k: keyof typeof VIDE) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -154,25 +162,24 @@ export function EngagementsDossier({ d, ecrire, signaler }: { d: DossierComplet;
                 </span>
               </header>
 
+              {/* SANS LARGEUR MINIMALE (24/10/2026) : banque, date et remarque
+                  passent sous le numero (↳) ; les chiffres gardent leur colonne. */}
               <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
-                <table className="w-full min-w-[52rem] text-[12.5px]">
+                <table className="w-full text-[12.5px]">
                   <thead>
                     <tr className="border-b border-bordure">
                       <th className={cn(th, 'text-left')}>N° d’engagement</th>
-                      <th className={cn(th, 'w-28 text-left')}>Banque</th>
-                      <th className={cn(th, 'w-28 text-left')}>Date</th>
-                      <th className={cn(th, 'w-24 text-right')}>Qté (kg)</th>
-                      <th className={cn(th, 'w-32 text-right')}>Montant</th>
+                      <th className={cn(th, 'w-28 text-right')}>Qté (kg)</th>
+                      <th className={cn(th, 'w-36 text-right')}>Montant</th>
                       <th className={cn(th, 'w-32 text-right')}>Imputé</th>
                       <th className={cn(th, 'w-32 text-right')}>Reste</th>
-                      <th className={cn(th, 'w-44 text-left')}>Remarque</th>
                       {ecrire && <th className={cn(th, 'w-10')} />}
                     </tr>
                   </thead>
                   <tbody>
                     {b.engagements.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="px-2 py-2 text-[12px] text-alerte">
+                        <td colSpan={6} className="px-2 py-2 text-[12px] text-alerte">
                           Aucun engagement pour ce fournisseur.
                         </td>
                       </tr>
@@ -182,9 +189,13 @@ export function EngagementsDossier({ d, ecrire, signaler }: { d: DossierComplet;
                       const reste = e.montant_devise != null ? e.montant_devise - imp : null
                       return (
                         <tr key={e.id_engagement} className="border-b border-bordure/60">
-                          <td className={cn(td, 'font-medium tabular-nums')}>{e.numero_ei}</td>
-                          <td className={td}>{e.banque ?? '—'}</td>
-                          <td className={td}>{e.date_ei ? fmt.date(e.date_ei) : '—'}</td>
+                          <td className={cn(td, 'min-w-0')}>
+                            <div className="font-medium tabular-nums">{e.numero_ei}</div>
+                            <div className="truncate text-[11px] text-attenue-texte" title={e.notes ?? undefined}>
+                              ↳ {e.banque ?? 'banque —'} · {e.date_ei ? fmt.date(e.date_ei) : 'date —'}
+                              {e.notes ? ` · ${e.notes}` : ''}
+                            </div>
+                          </td>
                           <td className={cn(td, 'text-right tabular-nums')}>{e.quantite_kg != null ? fmt.nombre(e.quantite_kg, 2) : '—'}</td>
                           <td className={cn(td, 'text-right tabular-nums')}>
                             {e.montant_devise != null ? `${fmt.nombre(e.montant_devise, 2)} ${e.code_devise ?? ''}` : '—'}
@@ -193,7 +204,6 @@ export function EngagementsDossier({ d, ecrire, signaler }: { d: DossierComplet;
                           <td className={cn(td, 'text-right font-medium tabular-nums', reste != null && reste < -0.005 && 'text-danger')}>
                             {reste == null ? '—' : fmt.nombre(reste, 2)}
                           </td>
-                          <td className={cn(td, 'max-w-44 truncate text-attenue-texte')} title={e.notes ?? undefined}>{e.notes ?? '—'}</td>
                           {ecrire && (
                             <td className={td}>
                               <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10"
@@ -250,33 +260,62 @@ export function EngagementsDossier({ d, ecrire, signaler }: { d: DossierComplet;
         {ecrire && (
           <div className="rounded-[var(--radius)] border border-dashed border-bordure bg-attenue/20 p-2">
             <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte">Nouvel engagement</div>
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
-              <Selecteur className={cn(champ, 'xl:col-span-2')} value={n.code_fournisseur} aria-label="Fournisseur de l’engagement"
-                onChange={(e) => {
-                  const code = e.target.value
-                  setN((x) => ({ ...x, code_fournisseur: code, code_devise: deviseFrs(code) || x.code_devise }))
-                }}>
-                <option value="">Fournisseur…</option>
-                {choixFrs.map((f) => (
-                  <option key={f.code_fournisseur} value={f.code_fournisseur}>{f.nom}</option>
-                ))}
-              </Selecteur>
-              <Champ className={champ} value={n.numero_ei} onChange={maj('numero_ei')} placeholder="N° 20261000000000905984"
-                aria-label="Numéro de l’engagement d’importation" />
-              <Selecteur className={champ} value={n.code_devise} onChange={maj('code_devise')} aria-label="Devise de l’engagement">
-                <option value="">Devise…</option>
-                {(qDevises.data ?? []).map((x) => (
-                  <option key={x.code_devise}>{x.code_devise}</option>
-                ))}
-              </Selecteur>
-              <Champ className={champ} value={n.banque} onChange={maj('banque')} placeholder="Banque" aria-label="Banque" />
-              <Champ className={champ} type="date" value={n.date_ei} onChange={maj('date_ei')} aria-label="Date de l’engagement" />
-              <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={n.quantite_kg} onChange={maj('quantite_kg')} placeholder="Qté kg"
-                aria-label="Quantité couverte, en kilos" />
-              <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={n.montant_devise} onChange={maj('montant_devise')}
-                placeholder={`Montant ${n.code_devise}`.trim()} aria-label="Montant couvert, dans la devise de l’engagement" />
-              <Champ className={cn(champ, 'md:col-span-3 xl:col-span-7')} value={n.notes} onChange={maj('notes')} placeholder="Remarque"
-                aria-label="Remarque sur l’engagement" />
+            {/* DES ETIQUETTES VISIBLES (24/10/2026) : un champ rempli perdait
+                son invite, et l'on ne savait plus ce qu'on avait tape ou. */}
+            {/* LE N° D'ENGAGEMENT (20 chiffres) a sa piste au large, prise sur la
+                devise (trois lettres) : en huit colonnes egales, il n'avait que
+                107 px pour 124 a 1366 px. Toujours huit pistes, aucun defilement. */}
+            <div className="grid grid-cols-2 items-end gap-2 md:grid-cols-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(8.5rem,1.3fr)_minmax(0,0.8fr)_repeat(4,minmax(0,1fr))]">
+              <div className="xl:col-span-2">
+                <Etiq obligatoire htmlFor="eng-fournisseur">Fournisseur</Etiq>
+                <Selecteur id="eng-fournisseur" className={cn(champ, 'w-full')} value={n.code_fournisseur} aria-label="Fournisseur de l’engagement"
+                  onChange={(e) => {
+                    const code = e.target.value
+                    setN((x) => ({ ...x, code_fournisseur: code, code_devise: deviseFrs(code) || x.code_devise }))
+                  }}>
+                  <option value="">Fournisseur…</option>
+                  {choixFrs.map((f) => (
+                    <option key={f.code_fournisseur} value={f.code_fournisseur}>{f.nom}</option>
+                  ))}
+                </Selecteur>
+              </div>
+              <div>
+                <Etiq obligatoire htmlFor="eng-numero">N° d’engagement</Etiq>
+                <Champ id="eng-numero" className={champ} value={n.numero_ei} onChange={maj('numero_ei')} placeholder="20261000000000905984"
+                  aria-label="Numéro de l’engagement d’importation" />
+              </div>
+              <div>
+                <Etiq htmlFor="eng-devise">Devise</Etiq>
+                <Selecteur id="eng-devise" className={cn(champ, 'w-full')} value={n.code_devise} onChange={maj('code_devise')} aria-label="Devise de l’engagement">
+                  <option value="">Devise…</option>
+                  {(qDevises.data ?? []).map((x) => (
+                    <option key={x.code_devise}>{x.code_devise}</option>
+                  ))}
+                </Selecteur>
+              </div>
+              <div>
+                <Etiq htmlFor="eng-banque">Banque</Etiq>
+                <Champ id="eng-banque" className={champ} value={n.banque} onChange={maj('banque')} placeholder="BMCE" aria-label="Banque" />
+              </div>
+              <div>
+                <Etiq htmlFor="eng-date">Date</Etiq>
+                <Champ id="eng-date" className={champ} type="date" value={n.date_ei} onChange={maj('date_ei')} aria-label="Date de l’engagement" />
+              </div>
+              <div>
+                <Etiq htmlFor="eng-qte">Qté couverte (kg)</Etiq>
+                <Champ id="eng-qte" className={cn(champ, 'text-right')} inputMode="decimal" value={n.quantite_kg} onChange={maj('quantite_kg')}
+                  aria-label="Quantité couverte, en kilos" />
+              </div>
+              <div>
+                <Etiq htmlFor="eng-montant">Montant{n.code_devise ? ` (${n.code_devise})` : ''}</Etiq>
+                <Champ id="eng-montant" className={cn(champ, 'text-right')} inputMode="decimal" value={n.montant_devise} onChange={maj('montant_devise')}
+                  aria-label="Montant couvert, dans la devise de l’engagement" />
+              </div>
+              <div className="col-span-2 md:col-span-3 xl:col-span-7">
+                <Etiq htmlFor="eng-remarque">Remarque</Etiq>
+                <Champ id="eng-remarque" className={champ} value={n.notes} onChange={maj('notes')} placeholder="Proforma, conditions…"
+                  aria-label="Remarque sur l’engagement" />
+              </div>
               <Bouton taille="sm" className="h-8" disabled={!n.numero_ei.trim() || !n.code_fournisseur} chargement={ajouter.isPending}
                 title={!n.code_fournisseur ? 'Choisissez le fournisseur couvert' : 'Ajouter l’engagement au dossier'}
                 onClick={() => ajouter.mutate()}>

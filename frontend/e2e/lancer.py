@@ -58,6 +58,9 @@ EXEMPLES = {
     "bons-commande/:id/etat": "SELECT id_bc FROM bon_commande ORDER BY date_creation DESC LIMIT 1",
     "receptions/:id": "SELECT id_reception FROM reception ORDER BY date_creation DESC LIMIT 1",
     "etats/receptions/:id": "SELECT id_reception FROM reception ORDER BY date_creation DESC LIMIT 1",
+    # Une reception qui a ses etiquettes (scenario etiquettes du banc, 19/10/2026).
+    "etats/receptions/:id/etiquettes": "SELECT l.id_reception FROM etiquette_lot e "
+                                       "JOIN ligne_reception l USING (id_ligne_reception) LIMIT 1",
     "import/:id": "SELECT id_dossier FROM import_dossiers ORDER BY date_creation DESC LIMIT 1",
     "receptions-import/:idReception": "SELECT id_reception FROM import_receptions ORDER BY date_creation DESC LIMIT 1",
     "factures-fournisseur/:id": "SELECT id_facture FROM facture_fournisseur ORDER BY date_creation DESC LIMIT 1",

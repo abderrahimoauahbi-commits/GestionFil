@@ -33,7 +33,6 @@ import {
 } from '../composants/SelecteurPeriode'
 import {
   Alerte,
-  Badge,
   Bouton,
   Carte,
   CarteCorps,
@@ -46,6 +45,9 @@ import {
 import { Aide, Onglet, OngletContenu, Onglets, OngletsListe } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { exporterCsv } from '../lib/export'
+import { ChoixRecherche } from '../composants/ChoixRecherche'
+import { StatutBadge } from '../composants/StatutBadge'
+import { libelleStatut } from '../lib/statuts'
 
 /* DECLAREE AVANT SES USAGES. `const` n’est pas remonte comme une fonction :
    plus bas, elle ne tenait que parce que ses lecteurs sont des composants,
@@ -65,19 +67,6 @@ const MODULE = 'MRP'
  * lisant la colonne, pas en composant une condition sur un nom de mois.
  */
 type Statut = 'BROUILLON' | 'SIMULATION' | 'EN_COURS' | 'CLOTURE'
-
-const LIBELLE_STATUT: Record<string, string> = {
-  BROUILLON: 'Brouillon',
-  SIMULATION: 'Simulation',
-  EN_COURS: 'En cours',
-  CLOTURE: 'Cloture',
-}
-const TON_STATUT: Record<string, 'neutre' | 'info' | 'succes' | 'contour'> = {
-  BROUILLON: 'neutre',
-  SIMULATION: 'info',
-  EN_COURS: 'succes',
-  CLOTURE: 'contour',
-}
 
 const MOIS_COURT = [
   'Jan', 'Fev', 'Mar', 'Avr', 'Mai', 'Jui',
@@ -361,7 +350,7 @@ export function Besoins() {
             >
               {qPlans.data.map((p) => (
                 <option key={p.id_plan} value={p.id_plan}>
-                  {p.libelle} (v{p.numero_version}) — {LIBELLE_STATUT[p.statut] ?? p.statut}
+                  {p.libelle} (v{p.numero_version}) — {libelleStatut('plan_production', p.statut)}
                 </option>
               ))}
             </select>
@@ -406,9 +395,7 @@ export function Besoins() {
           <Carte repliable="besoins.1">
             <CarteCorps className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px]">
               <span className="flex items-center gap-1.5">
-                <Badge ton={TON_STATUT[plan.statut] ?? 'neutre'}>
-                  {LIBELLE_STATUT[plan.statut] ?? plan.statut}
-                </Badge>
+                <StatutBadge entite="plan_production" code={plan.statut} />
                 {plan.scenario_nom && (
                   <span className="text-attenue-texte">· {plan.scenario_nom}</span>
                 )}
@@ -597,19 +584,17 @@ export function Besoins() {
                     </option>
                   ))}
                 </select>
-                <select
-                  value={fournisseur}
-                  onChange={(e) => setFournisseur(e.target.value)}
-                  className={CLASSE_FILTRE + ' min-w-[10rem]'}
-                  aria-label="Fournisseur"
-                >
-                  <option value="">Tous fournisseurs</option>
-                  {axes.fournisseurs.map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
-                  ))}
-                </select>
+                {/* AVEC RECHERCHE (24/10/2026) : les fournisseurs du dossier, filtres en
+                    tapant ; seuls ceux qui y figurent sont proposes. */}
+                <ChoixRecherche
+                  options={axes.fournisseurs.map((f) => ({ valeur: f, libelle: f }))}
+                  valeur={fournisseur}
+                  onChange={(v) => setFournisseur(v)}
+                  vide="Tous fournisseurs"
+                  ariaLabel="Fournisseur"
+                  className="w-56 max-w-full"
+                  classeChamp="h-7 text-[12px]"
+                />
                 <SelecteurPeriode
                   mois={axes.mois}
                   valeur={periode}

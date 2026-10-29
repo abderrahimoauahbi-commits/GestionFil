@@ -18,29 +18,70 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
+use super::entites::VersionLue;
 use super::json::lignes_en_json;
+use crate::domain::concurrence::exigee;
 
 const IMPORT: &str = "IMPORT";
 
-/// Le dossier d'une facture, pour recalculer apres une modification.
-async fn dossier_de_facture(tx: &mut sqlx::PgConnection, id_facture: &str) -> AppResult<String> {
-    sqlx::query_scalar("SELECT id_dossier FROM import_factures WHERE id_facture = $1")
-        .bind(id_facture)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| AppError::Introuvable(format!("facture {id_facture}")))
+// LE VERROU OPTIMISTE (groupe 3, 20/10/2026) : voir domain/importation.rs,
+// section 0. Une facture et ses lignes prennent la version de la FACTURE ; tout
+// le reste, celle du DOSSIER. Chaque reponse rend la version a jour, que l'ecran
+// presente a l'enregistrement suivant.
+
+/// La version d'une suppression, passee dans l'adresse (`?version=`).
+fn version_requise(q: VersionLue) -> AppResult<i64> {
+    super::entites::version_exigee(q.version.map(Value::String).as_ref())
 }
 
-async fn dossier_de_ligne(tx: &mut sqlx::PgConnection, id_ligne: &str) -> AppResult<String> {
+/// La version passee dans un corps facultatif (`{"version": 3}`) : la cloture
+/// et la validation n'ont pas d'autre saisie.
+fn version_du_corps(corps: &axum::body::Bytes) -> Option<i64> {
+    serde_json::from_slice::<Value>(corps)
+        .ok()
+        .and_then(|v| v.get("version").and_then(Value::as_i64))
+}
+
+/// Le dossier d'une facture, pour recalculer apres une modification.
+///
+/// Le dossier est tenu (`FOR UPDATE`) AVANT la facture : le recalcul de la
+/// repartition le prend ensuite, et un paiement le prend avant la facture. Le
+/// meme ordre partout, sans quoi deux enregistrements croises s'interbloquent.
+async fn dossier_de_facture(tx: &mut sqlx::PgConnection, id_facture: &str) -> AppResult<String> {
     sqlx::query_scalar(
-        "SELECT f.id_dossier FROM import_facture_lignes l
+        "SELECT d.id_dossier FROM import_factures f
+           JOIN import_dossiers d ON d.id_dossier = f.id_dossier
+          WHERE f.id_facture = $1
+            FOR UPDATE OF d",
+    )
+    .bind(id_facture)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("facture {id_facture}")))
+}
+
+/// La facture et le dossier d'une ligne — le dossier tenu, comme ci-dessus.
+async fn facture_de_ligne(tx: &mut sqlx::PgConnection, id_ligne: &str) -> AppResult<(String, String)> {
+    sqlx::query_as(
+        "SELECT f.id_facture, d.id_dossier FROM import_facture_lignes l
            JOIN import_factures f ON f.id_facture = l.id_facture
-          WHERE l.id_ligne = $1",
+           JOIN import_dossiers d ON d.id_dossier = f.id_dossier
+          WHERE l.id_ligne = $1
+            FOR UPDATE OF d",
     )
     .bind(id_ligne)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("ligne {id_ligne}")))
+}
+
+/// Le dossier d'un frais.
+async fn dossier_de_frais(tx: &mut sqlx::PgConnection, id_ligne_frais: &str) -> AppResult<String> {
+    sqlx::query_scalar("SELECT id_dossier FROM dossier_lignes_frais WHERE id_ligne_frais = $1")
+        .bind(id_ligne_frais)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::Introuvable(format!("frais {id_ligne_frais}")))
 }
 
 // ============================================================================
@@ -76,7 +117,7 @@ pub async fn lister_dossiers(
     user.exiger(&state.db, IMPORT, Action::Lire).await?;
     let lignes = sqlx::query(
         "SELECT d.id_dossier, d.numero, d.numero_bl, d.conteneurs, d.code_devise, d.taux_change,
-                d.date_arrivee, d.statut, d.date_creation, d.date_cloture,
+                d.date_arrivee::text AS date_arrivee, d.statut, d.date_creation, d.date_cloture,
                 -- Par quel circuit il recoit sa marchandise (ADR-003 phase A) :
                 -- FACTURE pour les dossiers d'avant la bascule, BON depuis.
                 d.circuit_reception,
@@ -132,6 +173,9 @@ pub struct DossierSaisie {
     /// Pourquoi une DUM deja saisie change (regle 5) : obligatoire alors.
     #[serde(default)]
     motif_dum: Option<String>,
+    /// La version lue avec le dossier (verrou optimiste) — en modification.
+    #[serde(default)]
+    version: Option<i64>,
 }
 
 /// Le refus commun : un dossier clos est fige (regle 5, 09/10/2026).
@@ -140,7 +184,7 @@ const DOSSIER_CLOS: &str = "Le dossier est cloture : il est fige. Une facture ta
 
 /// Le numero suivant, au format du classeur : « 06/26 ».
 async fn prochain_numero(tx: &mut sqlx::PgConnection) -> AppResult<String> {
-    let annee = chrono::Utc::now().format("%y").to_string();
+    let annee = crate::db::jour_casablanca().format("%y").to_string();
     let rang: i64 = sqlx::query_scalar(
         "SELECT COALESCE(max(split_part(numero, '/', 1)::bigint), 0) + 1
            FROM import_dossiers WHERE numero ~ ('^[0-9]+/' || $1 || '$')",
@@ -151,6 +195,54 @@ async fn prochain_numero(tx: &mut sqlx::PgConnection) -> AppResult<String> {
     Ok(format!("{rang:02}/{annee}"))
 }
 
+// =============================================================================
+// LE TAUX DU DOSSIER EST FACULTATIF (arbitrage du 27/10/2026)
+// =============================================================================
+//
+// Le dossier ne convertit rien : chaque facture porte sa devise et son taux,
+// controle a sa saisie (`controler_taux`). Un dossier en devise sans taux est
+// donc admissible, et son taux reste VIDE — jamais 1 invente : c'est ce repli
+// qui avait fait entrer des factures a 1 DH l'euro (05/10/2026). Le taux ne
+// devient obligatoire que la ou une conversion a lieu : sur la facture.
+
+/// Le taux a enregistrer sur un dossier, ou le refus a afficher.
+///
+/// - MAD : toujours 1 (le taux trivial) ; un autre taux est refuse, comme sur
+///   la facture.
+/// - Autre devise : le taux saisi, ou rien (NULL) s'il manque ; le taux 1 est
+///   refuse — c'est celui du dirham.
+pub(crate) fn taux_du_dossier(devise: &str, saisi: Option<f64>) -> Result<Option<f64>, String> {
+    let saisi = saisi.filter(|t| *t > 0.0);
+    if devise == "MAD" {
+        if saisi.is_some_and(|t| (t - 1.0).abs() > 1e-9) {
+            return Err("Dossier en MAD : il se passe au taux 1.".into());
+        }
+        return Ok(Some(1.0));
+    }
+    if saisi.is_some_and(|t| (t - 1.0).abs() < 1e-9) {
+        return Err(format!(
+            "Dossier en {devise} au taux 1 : c'est le taux du dirham, pas celui du {devise}. \
+             Laissez le taux vide : chaque facture porte le sien."
+        ));
+    }
+    Ok(saisi)
+}
+
+/// Le taux qu'une facture SANS taux propre reprend du dossier : seulement si le
+/// dossier en porte un, dans la meme devise. Pour le dirham, rien a reprendre
+/// (`controler_taux` pose 1). Le taux repris passe ensuite par `controler_taux`
+/// comme un taux saisi : ecart au cours BAM, taux 1 refuse.
+pub(crate) fn taux_herite_du_dossier(
+    devise_facture: &str,
+    devise_dossier: &str,
+    taux_dossier: Option<f64>,
+) -> Option<f64> {
+    if devise_facture == "MAD" || devise_facture != devise_dossier {
+        return None;
+    }
+    taux_dossier.filter(|t| *t > 0.0 && (t - 1.0).abs() > 1e-9)
+}
+
 /// `POST /api/import/dossiers`
 pub async fn creer_dossier(
     State(state): State<AppState>,
@@ -159,9 +251,10 @@ pub async fn creer_dossier(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
     // LA DEVISE EST CELLE DE CHAQUE FACTURE (groupage, 01/10/2026). Le dossier
-    // ne garde devise et taux que comme repli : MAD au taux 1 s'ils manquent.
+    // ne garde devise et taux que comme proposition : MAD par defaut, et un
+    // taux VIDE pour une devise qui n'en dit pas (voir `taux_du_dossier`).
     let code_devise = d.code_devise.unwrap_or_else(|| "MAD".into());
-    let taux = d.taux_change.filter(|t| *t > 0.0).unwrap_or(1.0);
+    let taux = taux_du_dossier(&code_devise, d.taux_change).map_err(AppError::RegleMetier)?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -173,7 +266,7 @@ pub async fn creer_dossier(
         "INSERT INTO import_dossiers (numero, numero_bl, conteneurs, code_devise, taux_change,
                                       date_arrivee, notes, id_utilisateur_creation,
                                       numero_dum, regime_douanier, date_dum)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, '010'), $11)
+         VALUES ($1, $2, $3, $4, $5, fn_jour_casablanca($6), $7, $8, $9, COALESCE($10, '010'), fn_jour_casablanca($11))
          RETURNING id_dossier",
     )
     .bind(&numero)
@@ -189,8 +282,9 @@ pub async fn creer_dossier(
     .bind(&d.date_dum)
     .fetch_one(&mut *tx)
     .await?;
+    let version = metier::version_dossier(&mut tx, &id).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_dossier": id, "numero": numero })))
+    Ok(Json(json!({ "id_dossier": id, "numero": numero, "version": version })))
 }
 
 /// `GET /api/import/dossiers/{id}` — tout le dossier : en-tete, factures,
@@ -232,9 +326,17 @@ pub async fn lire_dossier(
     .fetch_all(db)
     .await?;
 
+    // LE PRIX DU BON SUR CHAQUE LIGNE (24/10/2026) : celui de la ligne de bon
+    // liee, meme soldee — l'ecran ne connaissait que les lignes encore
+    // ouvertes, et l'ecart au bon disparaissait des que le bon etait servi.
+    // Lu tel quel, rien n'est recalcule. Meme nom que dans `lignes_bc_ouvertes`
+    // (`prix_kg_devise`) : le champ declare du module, masque selon les droits.
     let lignes = sqlx::query(
-        "SELECT * FROM v_import_cout_revient WHERE id_dossier = $1
-          ORDER BY numero_facture, ligne_numero",
+        "SELECT v.*, lb.prix_kg_devise::float8 AS prix_kg_devise, lb.code_devise AS devise_bc
+           FROM v_import_cout_revient v
+           LEFT JOIN ligne_bc lb ON lb.id_ligne_bc = v.id_ligne_bc
+          WHERE v.id_dossier = $1
+          ORDER BY v.numero_facture, v.ligne_numero",
     )
     .bind(&id)
     .fetch_all(db)
@@ -303,6 +405,31 @@ pub async fn lire_dossier(
     .fetch_all(db)
     .await?;
 
+    // LES DROITS ATTENDUS (19/10/2026) : par ligne, valeur en douane x taux de
+    // la position tarifaire de sa reference ; par dossier, face aux droits
+    // payes. L'ecart se lit ; il ne bloque rien.
+    let droits_lignes = sqlx::query(
+        "SELECT id_ligne, code_reference, code_sh, libelle_position,
+                taux_droit_pct::float8 AS taux_droit_pct,
+                valeur_dhs::float8 AS valeur_dhs,
+                frais_valeur_douane_dhs::float8 AS frais_valeur_douane_dhs,
+                valeur_douane_dhs::float8 AS valeur_douane_dhs,
+                droits_attendus_dhs::float8 AS droits_attendus_dhs
+           FROM v_import_droits WHERE id_dossier = $1",
+    )
+    .bind(&id)
+    .fetch_all(db)
+    .await?;
+    let droits_dossier = sqlx::query(
+        "SELECT nb_lignes, nb_lignes_sans_position,
+                droits_attendus_dhs::float8 AS droits_attendus_dhs,
+                droits_payes_dhs::float8 AS droits_payes_dhs
+           FROM v_import_droits_dossier WHERE id_dossier = $1",
+    )
+    .bind(&id)
+    .fetch_all(db)
+    .await?;
+
     let pieces = super::pieces::lister_du_dossier(db, &id).await?;
     let attendues = super::pieces::attendues(db, &id).await?;
 
@@ -317,6 +444,8 @@ pub async fn lire_dossier(
         "ajustements": lignes_en_json(&ajustements),
         "retours": lignes_en_json(&retours),
         "engagements": lignes_en_json(&engagements),
+        "droits": lignes_en_json(&droits_lignes),
+        "droits_dossier": lignes_en_json(&droits_dossier).get(0).cloned().unwrap_or(Value::Null),
     });
     user.masquer(db, IMPORT, &mut v).await?;
     Ok(Json(v))
@@ -331,18 +460,23 @@ pub async fn modifier_dossier(
     Json(d): Json<DossierSaisie>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let version = exigee(d.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    metier::prendre_dossier(&mut tx, &id, Some(version)).await?;
     // LA VIE DU DOSSIER (regle 5, 09/10/2026). Clos, il est fige (seules les
     // notes s'ecrivent). Une DUM saisie ne s'efface pas et ne se corrige qu'au
     // droit de valider, avec un motif : l'effacer rouvrait la contre-passation
     // apres dedouanement.
-    let (statut, dum_actuelle): (String, Option<String>) =
-        sqlx::query_as("SELECT statut, numero_dum FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE")
-            .bind(&id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| AppError::Introuvable(format!("dossier {id}")))?;
+    let (statut, dum_actuelle, devise_av, taux_av): (String, Option<String>, String, Option<f64>) =
+        sqlx::query_as(
+            "SELECT statut, numero_dum, code_devise, taux_change::float8
+               FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE",
+        )
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::Introuvable(format!("dossier {id}")))?;
     // Clos : seules les notes s'ecrivent ; une DUM changee est refusee, le reste
     // de l'en-tete garde sa valeur (le formulaire renvoie tout).
     let clos = statut == "CLOTURE";
@@ -373,13 +507,26 @@ pub async fn modifier_dossier(
             }
         }
     }
+    // LE TAUX SUIT LA DEVISE (27/10/2026) : il ne se recalcule que si la devise
+    // ou le taux sont envoyes. Une devise qui change sans taux le laisse vide
+    // (MAD : 1) ; l'ancien taux, d'une autre devise, ne la suit pas.
+    let (taux_touche, taux) = match garde(&d.code_devise).filter(|s| !s.trim().is_empty()) {
+        _ if clos => (false, None),
+        None if d.taux_change.is_none() => (false, None),
+        devise => {
+            let devise = devise.unwrap_or_else(|| devise_av.clone());
+            let saisi = d.taux_change.or(if devise == devise_av { taux_av } else { None });
+            (true, taux_du_dossier(&devise, saisi).map_err(AppError::RegleMetier)?)
+        }
+    };
     let n = sqlx::query(
         "UPDATE import_dossiers
             SET numero = COALESCE($2, numero), numero_bl = COALESCE($3, numero_bl),
                 conteneurs = COALESCE($4, conteneurs), code_devise = COALESCE($5, code_devise),
-                taux_change = COALESCE($6, taux_change), date_arrivee = COALESCE($7, date_arrivee),
+                taux_change = CASE WHEN $12::bool THEN $6::numeric ELSE taux_change END,
+                date_arrivee = COALESCE(fn_jour_casablanca($7), date_arrivee),
                 notes = COALESCE($8, notes), numero_dum = COALESCE($9, numero_dum),
-                regime_douanier = COALESCE($10, regime_douanier), date_dum = COALESCE($11, date_dum)
+                regime_douanier = COALESCE($10, regime_douanier), date_dum = COALESCE(fn_jour_casablanca($11), date_dum)
           WHERE id_dossier = $1",
     )
     .bind(&id)
@@ -387,31 +534,36 @@ pub async fn modifier_dossier(
     .bind(garde(&d.numero_bl))
     .bind(garde(&d.conteneurs))
     .bind(garde(&d.code_devise))
-    .bind(if clos { None } else { d.taux_change })
+    .bind(taux)
     .bind(garde(&d.date_arrivee))
     .bind(&d.notes)
     .bind(garde(&d.numero_dum))
     .bind(garde(&d.regime_douanier))
     .bind(garde(&d.date_dum))
+    .bind(taux_touche)
     .execute(&mut *tx)
     .await?
     .rows_affected();
     if n == 0 {
         return Err(AppError::Introuvable(format!("dossier {id}")));
     }
+    let version = metier::version_dossier(&mut tx, &id).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_dossier": id })))
+    Ok(Json(json!({ "id_dossier": id, "version": version })))
 }
 
-/// `DELETE /api/import/dossiers/{id}` — un brouillon seulement (declencheur).
+/// `DELETE /api/import/dossiers/{id}?version=` — un brouillon seulement (declencheur).
 pub async fn supprimer_dossier(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    Query(q): Query<VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let version = version_requise(q)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    metier::prendre_dossier(&mut tx, &id, Some(version)).await?;
     // Un dossier en brouillon n'a rien fait entrer en stock : ses lignes ne
     // peuvent etre que dans des receptions en brouillon. Elles en sortent, et
     // une reception qui n'avait qu'elles disparait avec.
@@ -465,6 +617,10 @@ pub struct FactureSaisie {
     /// de sa banque, par exemple.
     #[serde(default)]
     taux_confirme: Option<bool>,
+    /// Verrou optimiste : a la CREATION, la version du DOSSIER ; en
+    /// modification, celle de la FACTURE.
+    #[serde(default)]
+    version: Option<i64>,
 }
 
 // =============================================================================
@@ -496,8 +652,8 @@ pub(crate) async fn taux_reference(
     date: &str,
 ) -> AppResult<Option<TauxReference>> {
     let bam: Option<(f64, String)> = sqlx::query_as(
-        "SELECT cours_mad::float8, date_cours FROM cours_bam
-          WHERE code_devise = $1 AND date_cours <= substr($2, 1, 10)
+        "SELECT cours_mad::float8, date_cours::text FROM cours_bam
+          WHERE code_devise = $1 AND date_cours <= fn_jour_casablanca($2)
           ORDER BY date_cours DESC LIMIT 1",
     )
     .bind(devise)
@@ -615,13 +771,17 @@ pub async fn creer_facture(
     let numero = f.numero_facture.filter(|s| !s.trim().is_empty())
         .ok_or_else(|| AppError::Invalide("Numéro de facture obligatoire.".into()))?;
     let date = f.date_facture.ok_or_else(|| AppError::Invalide("Date de facture obligatoire.".into()))?;
+    let version = exigee(f.version)?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    metier::prendre_dossier(&mut tx, &id_dossier, Some(version)).await?;
 
     // La devise de la fiche fournisseur par defaut, celle du dossier en repli.
-    // Le TAUX, lui, ne se replie plus sur celui du dossier : 1 par defaut, il
-    // faisait entrer une facture en devise au cours du dirham.
+    // Le TAUX ne se replie sur celui du dossier que si le dossier en porte un,
+    // dans la meme devise (`taux_herite_du_dossier`) : le dossier n'a plus de
+    // taux 1 invente (27/10/2026). Sans l'un ni l'autre, une facture en devise
+    // est refusee par `controler_taux` : c'est ici que le taux devient exige.
     let devise = match f.code_devise.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
         Some(d) => d.to_uppercase(),
         None => sqlx::query_scalar::<_, Option<String>>(
@@ -634,14 +794,27 @@ pub async fn creer_facture(
         .await?
         .unwrap_or_else(|| "MAD".into()),
     };
-    let taux = controler_taux(&mut tx, "facture", &devise, f.taux_change, &date,
+    let taux_saisi = match f.taux_change.filter(|t| *t > 0.0) {
+        Some(t) => Some(t),
+        None => {
+            let (devise_dossier, taux_dossier): (String, Option<f64>) = sqlx::query_as(
+                "SELECT code_devise, taux_change::float8 FROM import_dossiers WHERE id_dossier = $1",
+            )
+            .bind(&id_dossier)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| AppError::Introuvable(format!("dossier {id_dossier}")))?;
+            taux_herite_du_dossier(&devise, &devise_dossier, taux_dossier)
+        }
+    };
+    let taux = controler_taux(&mut tx, "facture", &devise, taux_saisi, &date,
                               f.taux_confirme.unwrap_or(false)).await?;
 
     let id: String = sqlx::query_scalar(
         "INSERT INTO import_factures (id_dossier, code_fournisseur, numero_facture, date_facture,
                                       code_devise, taux_change, montant_devise, nb_palettes,
                                       nb_bobines, id_utilisateur_creation, id_engagement)
-         SELECT d.id_dossier, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, '')
+         SELECT d.id_dossier, $2, $3, fn_jour_casablanca($4), $5, $6, $7, $8, $9, $10, NULLIF($11, '')
            FROM import_dossiers d WHERE d.id_dossier = $1
          RETURNING id_facture",
     )
@@ -659,8 +832,11 @@ pub async fn creer_facture(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("dossier {id_dossier}")))?;
+    let version_dossier = metier::version_dossier(&mut tx, &id_dossier).await?;
+    let version = metier::version_facture(&mut tx, &id).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_facture": id })))
+    // `version` : celle de la facture nee, que ses lignes presenteront.
+    Ok(Json(json!({ "id_facture": id, "version": version, "version_dossier": version_dossier })))
 }
 
 /// `PATCH /api/import/factures/{id}` — le taux change la base : on recalcule.
@@ -671,15 +847,17 @@ pub async fn modifier_facture(
     Json(f): Json<FactureSaisie>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let version = exigee(f.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
     let id_dossier = dossier_de_facture(&mut tx, &id).await?;
+    metier::prendre_facture(&mut tx, &id, Some(version)).await?;
 
     // LE TAUX N'EST CONTROLE QUE S'IL BOUGE : devise, taux ou date. Sans cela, un
     // taux confirme une fois serait redemande a chaque enregistrement de la
     // facture, pour un nombre de palettes corrige.
     let (devise_av, taux_av, date_av): (String, f64, String) = sqlx::query_as(
-        "SELECT code_devise, taux_change::float8, date_facture FROM import_factures
+        "SELECT code_devise, taux_change::float8, date_facture::text FROM import_factures
           WHERE id_facture = $1 FOR UPDATE",
     )
     .bind(&id)
@@ -702,7 +880,7 @@ pub async fn modifier_facture(
     sqlx::query(
         "UPDATE import_factures
             SET code_fournisseur = COALESCE($2, code_fournisseur),
-                numero_facture = COALESCE($3, numero_facture), date_facture = COALESCE($4, date_facture),
+                numero_facture = COALESCE($3, numero_facture), date_facture = COALESCE(fn_jour_casablanca($4), date_facture),
                 code_devise = COALESCE($5, code_devise), taux_change = COALESCE($6, taux_change),
                 montant_devise = COALESCE($7, montant_devise), nb_palettes = COALESCE($8, nb_palettes),
                 nb_bobines = COALESCE($9, nb_bobines),
@@ -722,21 +900,25 @@ pub async fn modifier_facture(
     .execute(&mut *tx)
     .await?;
     metier::recalculer_repartition(&mut tx, &id_dossier).await?;
+    let version = metier::version_facture(&mut tx, &id).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_facture": id })))
+    Ok(Json(json!({ "id_facture": id, "version": version })))
 }
 
-/// `DELETE /api/import/factures/{id}` — tant qu'aucune de ses lignes n'est
-/// entree en stock.
+/// `DELETE /api/import/factures/{id}?version=` — tant qu'aucune de ses lignes
+/// n'est entree en stock. La version est celle de la facture.
 pub async fn supprimer_facture(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    Query(q): Query<VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let version = version_requise(q)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
     let id_dossier = dossier_de_facture(&mut tx, &id).await?;
+    metier::prendre_facture(&mut tx, &id, Some(version)).await?;
     let recues: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM import_reception_lignes rl
            JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
@@ -782,6 +964,9 @@ pub struct LigneSaisie {
     /// La remise du fournisseur, en % du prix brut. Absente : 0 a la
     /// creation, inchangee a la correction.
     remise_pct: Option<f64>,
+    /// La version de la FACTURE (verrou optimiste) : la ligne passe par son en-tete.
+    #[serde(default)]
+    version: Option<i64>,
 }
 
 /// `POST /api/import/factures/{id}/lignes`
@@ -804,10 +989,12 @@ pub async fn ajouter_ligne(
     };
     let prix = l.prix_unitaire_devise
         .ok_or_else(|| AppError::Invalide("Prix unitaire obligatoire.".into()))?;
+    let version = exigee(l.version)?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
     let id_dossier = dossier_de_facture(&mut tx, &id_facture).await?;
+    metier::prendre_facture(&mut tx, &id_facture, Some(version)).await?;
     let id: String = sqlx::query_scalar(
         "INSERT INTO import_facture_lignes
                 (id_facture, ligne_numero, type_ligne, code_reference, libelle, id_ligne_bc,
@@ -838,12 +1025,13 @@ pub async fn ajouter_ligne(
     .bind(l.nb_palettes)
     .bind(prix)
     .bind(&l.libelle_couleur)
-    .bind(super::stock::remise_valide(l.remise_pct)?)
+    .bind(super::bons_commande::remise_valide(l.remise_pct)?)
     .fetch_one(&mut *tx)
     .await?;
     metier::recalculer_repartition(&mut tx, &id_dossier).await?;
+    let version = metier::version_facture(&mut tx, &id_facture).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_ligne": id })))
+    Ok(Json(json!({ "id_ligne": id, "version": version })))
 }
 
 /// `PATCH /api/import/lignes/{id}`
@@ -854,9 +1042,11 @@ pub async fn modifier_ligne(
     Json(l): Json<LigneSaisie>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let version = exigee(l.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    let id_dossier = dossier_de_ligne(&mut tx, &id).await?;
+    let (id_facture, id_dossier) = facture_de_ligne(&mut tx, &id).await?;
+    metier::prendre_facture(&mut tx, &id_facture, Some(version)).await?;
     sqlx::query(
         "UPDATE import_facture_lignes
             SET code_reference = COALESCE($2, code_reference), libelle = COALESCE($3, libelle),
@@ -887,24 +1077,29 @@ pub async fn modifier_ligne(
     .bind(l.nb_palettes)
     .bind(l.prix_unitaire_devise)
     .bind(&l.libelle_couleur)
-    .bind(match l.remise_pct { Some(r) => Some(super::stock::remise_valide(Some(r))?), None => None })
+    .bind(match l.remise_pct { Some(r) => Some(super::bons_commande::remise_valide(Some(r))?), None => None })
     .execute(&mut *tx)
     .await?;
     metier::recalculer_repartition(&mut tx, &id_dossier).await?;
+    let version = metier::version_facture(&mut tx, &id_facture).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_ligne": id })))
+    Ok(Json(json!({ "id_ligne": id, "version": version })))
 }
 
-/// `DELETE /api/import/lignes/{id}` — tant qu'elle n'est pas en reception.
+/// `DELETE /api/import/lignes/{id}?version=` — tant qu'elle n'est pas en
+/// reception. La version est celle de sa facture.
 pub async fn supprimer_ligne(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    Query(q): Query<VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let version = version_requise(q)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    let id_dossier = dossier_de_ligne(&mut tx, &id).await?;
+    let (id_facture, id_dossier) = facture_de_ligne(&mut tx, &id).await?;
+    metier::prendre_facture(&mut tx, &id_facture, Some(version)).await?;
     let recue: i64 = sqlx::query_scalar("SELECT count(*) FROM import_reception_lignes WHERE id_ligne = $1")
         .bind(&id)
         .fetch_one(&mut *tx)
@@ -919,13 +1114,17 @@ pub async fn supprimer_ligne(
         .execute(&mut *tx)
         .await?;
     metier::recalculer_repartition(&mut tx, &id_dossier).await?;
+    let version = metier::version_facture(&mut tx, &id_facture).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "supprime": id })))
+    Ok(Json(json!({ "supprime": id, "version": version })))
 }
 
 #[derive(Deserialize)]
 pub struct Solde {
     motif: Option<String>,
+    /// La version de la facture de la ligne (verrou optimiste).
+    #[serde(default)]
+    version: Option<i64>,
 }
 
 /// `POST /api/import/lignes/{id}/solder` — le reliquat ne viendra pas.
@@ -938,17 +1137,20 @@ pub async fn solder_ligne(
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
     let motif = s.motif.filter(|m| !m.trim().is_empty())
         .ok_or_else(|| AppError::Invalide("Le motif du solde est obligatoire.".into()))?;
+    let version = exigee(s.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    let id_dossier = dossier_de_ligne(&mut tx, &id).await?;
+    let (id_facture, id_dossier) = facture_de_ligne(&mut tx, &id).await?;
+    metier::prendre_facture(&mut tx, &id_facture, Some(version)).await?;
     sqlx::query("UPDATE import_facture_lignes SET soldee = 1, motif_solde = $2 WHERE id_ligne = $1")
         .bind(&id)
         .bind(motif.trim())
         .execute(&mut *tx)
         .await?;
     metier::statuer_factures(&mut tx, &id_dossier).await?;
+    let version = metier::version_facture(&mut tx, &id_facture).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_ligne": id, "soldee": 1 })))
+    Ok(Json(json!({ "id_ligne": id, "soldee": 1, "version": version })))
 }
 
 /// `GET /api/import/lignes-bc?fournisseur=X` — les lignes de commande encore
@@ -963,7 +1165,7 @@ pub async fn lignes_bc_ouvertes(
     let fournisseur = q.get("fournisseur")
         .ok_or_else(|| AppError::Invalide("Paramètre fournisseur obligatoire.".into()))?;
     let lignes = sqlx::query(
-        "SELECT lb.id_ligne_bc, b.numero_bc, b.date_bc, b.statut AS statut_bc, lb.ligne_numero,
+        "SELECT lb.id_ligne_bc, b.numero_bc, b.date_bc::text AS date_bc, b.statut AS statut_bc, lb.ligne_numero,
                 lb.code_reference, r.designation, r.code_couleur, lb.quantite_commandee_kg,
                 lb.quantite_restante_kg, lb.prix_kg_devise, lb.code_devise
            FROM ligne_bc lb
@@ -1012,9 +1214,12 @@ pub struct FraisSaisie {
     /// La repartition de ce frais : vide = celle de son type ; MANUEL = les
     /// montants se saisissent ligne par ligne (onglet Liquidation).
     methode_repartition: Option<String>,
+    /// La version du DOSSIER (verrou optimiste) : le frais passe par son en-tete.
+    #[serde(default)]
+    version: Option<i64>,
 }
 
-const METHODES: &[&str] = &["VALEUR", "POIDS", "QUANTITE", "PARTS_EGALES", "MANUEL"];
+const METHODES: &[&str] = &["VALEUR", "POIDS", "QUANTITE", "PARTS_EGALES", "MANUEL", "DROITS"];
 
 /// La methode saisie : vide = celle du type ; sinon une des methodes connues.
 fn methode_saisie(m: &Option<String>) -> AppResult<Option<String>> {
@@ -1063,9 +1268,11 @@ pub async fn ajouter_frais(
     let montant = f.montant_devise.filter(|m| *m > 0.0)
         .ok_or_else(|| AppError::Invalide("Montant du frais obligatoire.".into()))?;
     let devise = f.code_devise.clone().unwrap_or_else(|| "MAD".into());
+    let version = exigee(f.version)?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    metier::prendre_dossier(&mut tx, &id_dossier, Some(version)).await?;
     // LE MEME CONTROLE QUE LES FACTURES (06/10/2026) : un fret de 4 000 USD au
     // cours 1 entrait au cout de revient pour 4 000 DH au lieu de 39 400.
     let jour = aujourd_hui(&mut tx).await?;
@@ -1092,8 +1299,9 @@ pub async fn ajouter_frais(
     .await?;
     poser_cibles(&mut tx, &id, f.cibles.as_deref().unwrap_or(&[])).await?;
     metier::recalculer_repartition(&mut tx, &id_dossier).await?;
+    let version = metier::version_dossier(&mut tx, &id_dossier).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_ligne_frais": id })))
+    Ok(Json(json!({ "id_ligne_frais": id, "version": version })))
 }
 
 #[derive(Deserialize)]
@@ -1126,9 +1334,12 @@ pub async fn frais_post_cloture(
     let montant = f.montant_devise.filter(|m| *m > 0.0)
         .ok_or_else(|| AppError::Invalide("Montant du frais obligatoire.".into()))?;
     let devise = f.code_devise.clone().unwrap_or_else(|| "MAD".into());
+    // L'apercu n'ecrit rien : il ne demande pas de version.
+    let version = if p.simuler { None } else { Some(exigee(f.version)?) };
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    metier::prendre_dossier(&mut tx, &id_dossier, version).await?;
     let jour = aujourd_hui(&mut tx).await?;
     let cours = controler_taux(&mut tx, "frais", &devise, f.cours_change, &jour,
                                f.taux_confirme.unwrap_or(false)).await?;
@@ -1156,6 +1367,7 @@ pub async fn frais_post_cloture(
     .await?;
     poser_cibles(&mut tx, &id, f.cibles.as_deref().unwrap_or(&[])).await?;
     let mut v = metier::cloturer_dans(&mut tx, &user, &id_dossier, true, p.simuler).await?;
+    v["version"] = json!(metier::version_dossier(&mut tx, &id_dossier).await?);
     if p.simuler {
         tx.rollback().await?;
     } else {
@@ -1222,6 +1434,10 @@ pub struct PaiementSaisie {
     notes: Option<String>,
     #[serde(default)]
     taux_confirme: bool,
+    /// La version du DOSSIER (verrou optimiste) : un paiement ne modifie pas la
+    /// facture, qui est souvent figee (dossier clos) quand il arrive.
+    #[serde(default)]
+    version: Option<i64>,
 }
 
 /// `POST /api/import/factures/{id}/paiements` — un paiement de la facture, au
@@ -1238,8 +1454,11 @@ pub async fn ajouter_paiement(
         return Err(AppError::Invalide("Le montant payé et les dirhams débités doivent être positifs.".into()));
     }
     let date = p.date_paiement.trim().get(..10).unwrap_or("").to_string();
+    let version = exigee(p.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    let id_dossier = dossier_de_facture(&mut tx, &id_facture).await?;
+    metier::prendre_dossier(&mut tx, &id_dossier, Some(version)).await?;
     let futur: bool = sqlx::query_scalar("SELECT $1 > to_char(current_date, 'YYYY-MM-DD')")
         .bind(&date)
         .fetch_one(&mut *tx)
@@ -1267,7 +1486,7 @@ pub async fn ajouter_paiement(
     let id: String = sqlx::query_scalar(
         "INSERT INTO paiement_facture_import (id_facture, date_paiement, montant_devise, montant_mad,
                                               reference_banque, notes, id_utilisateur)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id_paiement",
+         VALUES ($1, fn_jour_casablanca($2), $3, $4, $5, $6, $7) RETURNING id_paiement",
     )
     .bind(&id_facture)
     .bind(&date)
@@ -1295,8 +1514,9 @@ pub async fn ajouter_paiement(
         })
         .into_iter()
         .collect();
+    let version = metier::version_dossier(&mut tx, &id_dossier).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_paiement": id, "avis": avis })))
+    Ok(Json(json!({ "id_paiement": id, "avis": avis, "version": version })))
 }
 
 /// `DELETE /api/import/paiements/{id}` — un paiement saisi par erreur. Il ne
@@ -1305,10 +1525,23 @@ pub async fn supprimer_paiement(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    Query(q): Query<VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Valider).await?;
+    let version = version_requise(q)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // La version est celle du DOSSIER de la facture payee.
+    let id_dossier: String = sqlx::query_scalar(
+        "SELECT f.id_dossier FROM paiement_facture_import p
+           JOIN import_factures f ON f.id_facture = p.id_facture
+          WHERE p.id_paiement = $1",
+    )
+    .bind(&id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("paiement {id}")))?;
+    metier::prendre_dossier(&mut tx, &id_dossier, Some(version)).await?;
     let n = sqlx::query("DELETE FROM paiement_facture_import WHERE id_paiement = $1")
         .bind(&id)
         .execute(&mut *tx)
@@ -1317,8 +1550,9 @@ pub async fn supprimer_paiement(
     if n == 0 {
         return Err(AppError::Introuvable(format!("paiement {id}")));
     }
+    let version = metier::version_dossier(&mut tx, &id_dossier).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "supprime": true })))
+    Ok(Json(json!({ "supprime": true, "version": version })))
 }
 
 /// `PATCH /api/import/frais/{id}`
@@ -1329,8 +1563,11 @@ pub async fn modifier_frais(
     Json(f): Json<FraisSaisie>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let version = exigee(f.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    let id_dossier = dossier_de_frais(&mut tx, &id).await?;
+    metier::prendre_dossier(&mut tx, &id_dossier, Some(version)).await?;
     // Le taux ne se recontrole que si la devise ou le cours changent.
     if f.code_devise.is_some() || f.cours_change.is_some() {
         let actuel: Option<(String, f64)> = sqlx::query_as(
@@ -1346,7 +1583,7 @@ pub async fn modifier_frais(
             controler_taux(&mut tx, "frais", &devise, cours, &jour, f.taux_confirme.unwrap_or(false)).await?;
         }
     }
-    let id_dossier: String = sqlx::query_scalar(
+    let _: String = sqlx::query_scalar(
         "UPDATE dossier_lignes_frais
             SET id_frais = COALESCE($2, id_frais), libelle = COALESCE($3, libelle),
                 numero_piece = COALESCE($4, numero_piece),
@@ -1378,8 +1615,9 @@ pub async fn modifier_frais(
             .await?;
     }
     metier::recalculer_repartition(&mut tx, &id_dossier).await?;
+    let version = metier::version_dossier(&mut tx, &id_dossier).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_ligne_frais": id })))
+    Ok(Json(json!({ "id_ligne_frais": id, "version": version })))
 }
 
 #[derive(Deserialize)]
@@ -1391,6 +1629,9 @@ pub struct MontantLigne {
 #[derive(Deserialize)]
 pub struct RepartitionManuelle {
     montants: Vec<MontantLigne>,
+    /// La version du DOSSIER (verrou optimiste).
+    #[serde(default)]
+    version: Option<i64>,
 }
 
 /// `PUT /api/import/frais/{id}/repartition` — LA REPARTITION SAISIE d'un
@@ -1405,9 +1646,12 @@ pub async fn repartir_frais(
     Json(r): Json<RepartitionManuelle>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let version = exigee(r.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    let (id_dossier, montant): (String, f64) = sqlx::query_as(
+    let id_dossier = dossier_de_frais(&mut tx, &id).await?;
+    metier::prendre_dossier(&mut tx, &id_dossier, Some(version)).await?;
+    let (_, montant): (String, f64) = sqlx::query_as(
         "SELECT id_dossier, montant_dhs::float8 FROM dossier_lignes_frais WHERE id_ligne_frais = $1 FOR UPDATE",
     )
     .bind(&id)
@@ -1460,29 +1704,33 @@ pub async fn repartir_frais(
             "{total:.2} DH répartis : plus que le montant du frais ({montant:.2} DH)."
         )));
     }
+    let version = metier::version_dossier(&mut tx, &id_dossier).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_ligne_frais": id, "reparti_dhs": (total * 100.0).round() / 100.0, "montant_dhs": montant })))
+    Ok(Json(json!({ "id_ligne_frais": id, "reparti_dhs": (total * 100.0).round() / 100.0, "montant_dhs": montant,
+                    "version": version })))
 }
 
-/// `DELETE /api/import/frais/{id}`
+/// `DELETE /api/import/frais/{id}?version=` — la version du dossier.
 pub async fn supprimer_frais(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    Query(q): Query<VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let version = version_requise(q)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    let id_dossier: String = sqlx::query_scalar(
-        "DELETE FROM dossier_lignes_frais WHERE id_ligne_frais = $1 RETURNING id_dossier",
-    )
-    .bind(&id)
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or_else(|| AppError::Introuvable(format!("frais {id}")))?;
+    let id_dossier = dossier_de_frais(&mut tx, &id).await?;
+    metier::prendre_dossier(&mut tx, &id_dossier, Some(version)).await?;
+    sqlx::query("DELETE FROM dossier_lignes_frais WHERE id_ligne_frais = $1")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?;
     metier::recalculer_repartition(&mut tx, &id_dossier).await?;
+    let version = metier::version_dossier(&mut tx, &id_dossier).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "supprime": id })))
+    Ok(Json(json!({ "supprime": id, "version": version })))
 }
 
 // ============================================================================
@@ -1510,7 +1758,13 @@ pub async fn cloturer(
         .and_then(|v| v.get("simuler").and_then(Value::as_bool))
         .unwrap_or(false);
     let simuler = dans_corps || matches!(q.get("simuler").map(String::as_str), Some("1" | "true"));
-    let mut v = metier::cloturer(&state.db, &user, &id, simuler).await?;
+    // La version du dossier, dans le corps ou l'adresse ; l'apercu s'en passe.
+    let version = if simuler {
+        None
+    } else {
+        Some(exigee(version_du_corps(&corps).or_else(|| q.get("version").and_then(|v| v.trim().parse().ok())))?)
+    };
+    let mut v = metier::cloturer(&state.db, &user, &id, simuler, version).await?;
     user.masquer(&state.db, IMPORT, &mut v).await?;
     Ok(Json(v))
 }
@@ -1527,6 +1781,9 @@ pub struct AvoirImport {
     code_reference: Option<String>,
     #[serde(default)]
     simuler: bool,
+    /// La version du DOSSIER (verrou optimiste) ; l'apercu s'en passe.
+    #[serde(default)]
+    version: Option<i64>,
 }
 
 /// `POST /api/import/dossiers/{id}/avoir` — un avoir du fournisseur sur un
@@ -1541,6 +1798,7 @@ pub async fn avoir(
     Json(a): Json<AvoirImport>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Valider).await?;
+    let version = if a.simuler { None } else { Some(exigee(a.version)?) };
     let mut v = metier::avoir(
         &state.db,
         &user,
@@ -1551,6 +1809,7 @@ pub async fn avoir(
         &a.motif,
         a.code_reference.as_deref(),
         a.simuler,
+        version,
     )
     .await?;
     user.masquer(&state.db, IMPORT, &mut v).await?;
@@ -1562,14 +1821,19 @@ pub async fn avoir(
 /// DEMANDE DU 30/09/2026 : on valide le dossier a la main, sans attendre la
 /// premiere reception (qui le fait toujours d'elle-meme). Valide, il ne se
 /// supprime plus — le declencheur ne l'admet qu'en brouillon.
+///
+/// Corps : `{"version": n}`, la version lue avec le dossier.
 pub async fn valider_dossier(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    corps: axum::body::Bytes,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Valider).await?;
+    let version = exigee(version_du_corps(&corps))?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    metier::prendre_dossier(&mut tx, &id, Some(version)).await?;
     let statut: Option<String> =
         sqlx::query_scalar("SELECT statut FROM import_dossiers WHERE id_dossier = $1")
             .bind(&id)
@@ -1599,8 +1863,9 @@ pub async fn valider_dossier(
         .bind(&id)
         .execute(&mut *tx)
         .await?;
+    let version = metier::version_dossier(&mut tx, &id).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_dossier": id, "statut": "EN_COURS" })))
+    Ok(Json(json!({ "id_dossier": id, "statut": "EN_COURS", "version": version })))
 }
 
 
@@ -1625,6 +1890,9 @@ pub struct EngagementSaisi {
     /// Le fournisseur dont la proforma est couverte : sa devise est celle de
     /// l'engagement, sauf saisie contraire.
     code_fournisseur: Option<String>,
+    /// La version du DOSSIER (verrou optimiste).
+    #[serde(default)]
+    version: Option<i64>,
 }
 
 /// `POST /api/import/dossiers/{id}/engagements`
@@ -1643,13 +1911,15 @@ pub async fn ajouter_engagement(
         return Err(AppError::Invalide("Le numero de l'engagement est obligatoire.".into()));
     }
     let vide = |s: &Option<String>| s.as_deref().map(str::trim).filter(|x| !x.is_empty()).map(String::from);
+    let version = exigee(e.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    metier::prendre_dossier(&mut tx, &id_dossier, Some(version)).await?;
     let id: String = sqlx::query_scalar(
         "INSERT INTO import_engagements
                 (id_dossier, numero_ei, banque, date_ei, quantite_kg, montant_devise,
                  code_devise, notes, id_utilisateur_creation, code_fournisseur)
-         VALUES ($1, $2, $3, $4, $5, $6,
+         VALUES ($1, $2, $3, fn_jour_casablanca($4), $5, $6,
                  COALESCE($7, (SELECT code_devise FROM fournisseur WHERE code_fournisseur = $10),
                           (SELECT code_devise FROM import_dossiers WHERE id_dossier = $1)),
                  $8, $9, $10)
@@ -1674,19 +1944,29 @@ pub async fn ajouter_engagement(
         ),
         _ => AppError::from(err),
     })?;
+    let version = metier::version_dossier(&mut tx, &id_dossier).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_engagement": id, "numero_ei": numero })))
+    Ok(Json(json!({ "id_engagement": id, "numero_ei": numero, "version": version })))
 }
 
-/// `DELETE /api/import/engagements/{id}`
+/// `DELETE /api/import/engagements/{id}?version=` — la version du dossier.
 pub async fn supprimer_engagement(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    Query(q): Query<VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let version = version_requise(q)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    let id_dossier: String =
+        sqlx::query_scalar("SELECT id_dossier FROM import_engagements WHERE id_engagement = $1")
+            .bind(&id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| AppError::Introuvable(format!("engagement {id}")))?;
+    metier::prendre_dossier(&mut tx, &id_dossier, Some(version)).await?;
     let n = sqlx::query("DELETE FROM import_engagements WHERE id_engagement = $1")
         .bind(&id)
         .execute(&mut *tx)
@@ -1695,6 +1975,42 @@ pub async fn supprimer_engagement(
     if n == 0 {
         return Err(AppError::Introuvable(format!("engagement {id}")));
     }
+    let version = metier::version_dossier(&mut tx, &id_dossier).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "supprime": id })))
+    Ok(Json(json!({ "supprime": id, "version": version })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{taux_du_dossier, taux_herite_du_dossier};
+
+    #[test]
+    fn dossier_en_devise_sans_taux_reste_vide() {
+        assert_eq!(taux_du_dossier("EUR", None), Ok(None));
+        assert_eq!(taux_du_dossier("EUR", Some(0.0)), Ok(None));
+        assert_eq!(taux_du_dossier("EUR", Some(10.85)), Ok(Some(10.85)));
+    }
+
+    #[test]
+    fn dossier_en_devise_au_taux_1_refuse() {
+        assert!(taux_du_dossier("USD", Some(1.0)).unwrap_err().contains("taux du dirham"));
+    }
+
+    #[test]
+    fn dossier_en_dirham_au_taux_1() {
+        assert_eq!(taux_du_dossier("MAD", None), Ok(Some(1.0)));
+        assert_eq!(taux_du_dossier("MAD", Some(1.0)), Ok(Some(1.0)));
+        assert!(taux_du_dossier("MAD", Some(10.8)).is_err());
+    }
+
+    #[test]
+    fn facture_reprend_le_taux_du_dossier_seulement_s_il_existe() {
+        assert_eq!(taux_herite_du_dossier("EUR", "EUR", Some(10.85)), Some(10.85));
+        assert_eq!(taux_herite_du_dossier("EUR", "EUR", None), None);
+        // Le taux 1 d'avant l'arbitrage n'est jamais repris pour une devise.
+        assert_eq!(taux_herite_du_dossier("EUR", "EUR", Some(1.0)), None);
+        // Un taux d'une autre devise ne convertit pas la facture.
+        assert_eq!(taux_herite_du_dossier("EUR", "USD", Some(9.3)), None);
+        assert_eq!(taux_herite_du_dossier("MAD", "MAD", Some(1.0)), None);
+    }
 }

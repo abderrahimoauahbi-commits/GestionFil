@@ -48,7 +48,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_iac_retour_solde
 -- (RIM-…) qui a recu cette reference pour ce dossier.
 CREATE OR REPLACE VIEW v_retours_import AS
 SELECT d.id_dossier, d.numero AS numero_dossier, r.id_reception, r.numero AS numero_reception,
-       m.id_mouvement, m.numero_mouvement, m.date_mouvement, lm.code_reference,
+       m.id_mouvement, m.numero_mouvement, m.date_mouvement::text AS date_mouvement, lm.code_reference,
        round(sum(lm.quantite_kg), 4) AS kg,
        EXISTS (SELECT 1 FROM import_ajustements_cump a
                 WHERE a.nature = 'RETOUR' AND a.id_mouvement_retour = m.id_mouvement) AS solde

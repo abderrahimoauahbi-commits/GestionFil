@@ -23,16 +23,16 @@ import { EnTetePage } from '../../composants/Coquille'
 import { TableauImprimable } from '../../composants/Etat'
 import { Alerte, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Chargement, EtatVide, Etiq, Selecteur } from '../../composants/ui/base'
 import { useConfirmation } from '../../composants/ui/surcouches'
-import { couleurEcart, libelleLot, useTolerancesLot } from '../../lib/lots'
+import { classeNiveauEcart, couleurEcart, libelleLot, useTolerancesLot } from '../../lib/lots'
 import { cn, fmt } from '../../lib/utils'
 import { ActionsLot, BadgeCategorie, BadgeStatut, LienLot } from './commun'
+import { ConditionnementLot, type MesureConditionnement } from './ConditionnementLot'
 import {
   EVENEMENTS,
   MODULE,
+  MODULE_DECISION,
   ORIGINES,
   TYPES_DEMANDE,
-  classeDerive,
-  classeEcart,
   designationUtile,
   gereAuKilo,
   libelleSeuil,
@@ -81,6 +81,8 @@ interface Vie {
   magasins: LieuMagasin[]
   machines: LieuMachine[]
   evenements: Evenement[]
+  /** Le journal du conditionnement du lot (23/10/2026). */
+  conditionnement?: MesureConditionnement[]
 }
 
 /** Une ligne de `/api/stock/lots` : le stock d'un lot dans un magasin. */
@@ -164,7 +166,7 @@ export function FicheLot() {
   }
 
   const { lot, magasins, machines, evenements } = q.data
-  const peutBasculer = peut(MODULE, 'ECRIRE')
+  const peutBasculer = peut(MODULE_DECISION, 'ECRIRE') // POST /api/lots/basculer : LOTS, ECRIRE
   const auKilo = gereAuKilo(lot)
   const ecartPoids =
     lot.poids_reel_moyen_bobine_kg != null && lot.poids_catalogue_bobine_kg
@@ -306,7 +308,7 @@ export function FicheLot() {
                 <span className="text-attenue-texte">pas encore pesé en bobines</span>
               ) : (
                 <>
-                  <span className={cn('tabular-nums', classeDerive(lot.alerte_derive))}>
+                  <span className={cn('tabular-nums', classeNiveauEcart(lot.alerte_derive, true) ?? 'text-attenue-texte')}>
                     {signe(lot.ecart_cumule_pct, 2, ' %')}
                   </span>
                   <span className="ml-1 text-attenue-texte tabular-nums">({signe(lot.ecart_cumule_kg, 1, ' kg')})</span>
@@ -321,7 +323,7 @@ export function FicheLot() {
               )}
               <span className="text-attenue-texte tabular-nums"> / {nb(lot.poids_catalogue_bobine_kg, 2)} catalogue</span>
               {ecartPoids != null && (
-                <span className={cn('ml-1 tabular-nums', classeEcart(couleurEcart(ecartPoids, tolerances)))}>
+                <span className={cn('ml-1 tabular-nums', classeNiveauEcart(couleurEcart(ecartPoids, tolerances), true) ?? 'text-attenue-texte')}>
                   ({signe(ecartPoids, 1, ' %')})
                 </span>
               )}
@@ -340,6 +342,9 @@ export function FicheLot() {
             {voitValeur && <Info libelle="Valeur">{fmt.mad(lot.valeur_mad)}</Info>}
           </CarteCorps>
         </Carte>
+
+        {/* ---- Son conditionnement (23/10/2026) ------------------------------ */}
+        {!auKilo && <ConditionnementLot lot={lot} historique={q.data.conditionnement ?? []} />}
 
         {/* ---- Ou est le lot ------------------------------------------------- */}
         <div className="grid gap-3 lg:grid-cols-2">
@@ -472,7 +477,7 @@ export function FicheLot() {
                         <td className="px-2 py-1.5 text-right">{e.nb_bobines ?? ''}</td>
                         <td className="px-2 py-1.5 text-right text-attenue-texte">{e.theorique_kg == null ? '' : nb(e.theorique_kg, 1)}</td>
                         <td
-                          className={cn('whitespace-nowrap px-2 py-1.5 text-right', classeEcart(couleurEcart(e.ecart_pct, tolerances)))}
+                          className={cn('whitespace-nowrap px-2 py-1.5 text-right', classeNiveauEcart(couleurEcart(e.ecart_pct, tolerances), true) ?? 'text-attenue-texte')}
                           title={e.ecart_kg != null ? `${signe(e.ecart_kg, 2, ' kg')}` : undefined}
                         >
                           {e.ecart_pct == null ? '' : signe(e.ecart_pct, 2, ' %')}
@@ -583,6 +588,7 @@ function Identifier({ lot }: { lot: Lot }) {
           />
         </div>
         <Bouton
+          variante="contour"
           disabled={!cible || identifier.isPending}
           chargement={identifier.isPending}
           onClick={() =>
@@ -765,6 +771,7 @@ function Fusion({ lot, magasins }: { lot: Lot; magasins: LieuMagasin[] }) {
                 </span>
               )}
               <Bouton
+                variante="contour"
                 disabled={!pret}
                 chargement={fusionner.isPending}
                 onClick={() =>

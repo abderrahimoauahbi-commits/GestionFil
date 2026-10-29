@@ -24,13 +24,14 @@
  * ensemble : un mouvement a moitie enregistre n'aurait aucun sens au grand
  * livre, que R03 rend immuable.
  */
-import { type Dispatch, type SetStateAction, useMemo, useState } from 'react'
+import { type Dispatch, type SetStateAction, useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Save } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { api, ErreurApi } from '../api/client'
 import { ChampLot } from '../composants/ChampLot'
+import { ChampScan, type EtiquetteLue } from '../composants/ChampScan'
 import { EnTetePage } from '../components/Layout'
 import { chercherCatalogue as chercherAuCatalogue } from '../composants/ChampReference'
 import {
@@ -44,10 +45,15 @@ import {
 } from '../composants/GrilleLignes'
 import { Alerte, Bouton, Champ, Selecteur } from '../composants/ui/base'
 import { type Conditionnement, depuisKg, facteurVersKg, pourChamp, saisieExacte } from '../lib/conditionnement'
+import { ChoixOF, ChoixQualite, qualiteDeLOf, useOfOuverts } from '../composants/ChoixOF'
+import { useLotsSurGrille } from '../hooks/useConditionnementLots'
 import { useTolerancesLot } from '../lib/lots'
 import { cn, fmt } from '../lib/utils'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
 import { PanneRequetes } from '../composants/PanneRequetes'
+import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
+import { phraseGel, useGelInventaire } from '../lib/inventairesOuverts'
+import { nouvelIdentifiant } from '../lib/identifiant'
 
 
 /* REGLE 12 : ajustements et dechets. La sortie production n'est plus qu'un
@@ -56,12 +62,17 @@ import { PanneRequetes } from '../composants/PanneRequetes'
    reception (Achats -> Retours fournisseur, 12/10/2026).
    REGLE 1 (09/10/2026) : la sortie hors machine (atelier, echantillon, essai,
    reparation, pret a une autre usine), avec un motif par ligne et un OF libre,
-   et le retour du pret, en nature. */
+   et le retour du pret, en nature.
+   CONSOMMATION DIRECTE (21/10/2026) : la matiere qui ne va pas sur machine
+   (fiche article en mode DIRECTE : jute, latex, SBR, plastique, cuir) sort au
+   CMUP, sans seuil, avec un ordre ou un plan facultatif. */
 const TYPES_SAISIE_LIBRE = [
-  'SORTIE_PROD', 'SORTIE_HORS_MACHINE', 'RETOUR_PRET', 'AJUST_INV_POS', 'AJUST_INV_NEG', 'STOCK_INIT',
+  'SORTIE_PROD', 'CONSO_DIRECTE', 'SORTIE_HORS_MACHINE', 'RETOUR_PRET', 'AJUST_INV_POS', 'AJUST_INV_NEG',
+  'STOCK_INIT',
 ]
 const LIBELLE_SAISIE: Record<string, string> = {
   SORTIE_PROD: 'Déchet (rebut, chute non réutilisable)',
+  CONSO_DIRECTE: 'Consommation directe (jute, latex, SBR, plastique, cuir…)',
   SORTIE_HORS_MACHINE: 'Sortie hors machine (atelier, échantillon, essai, réparation, prêt)',
   RETOUR_PRET: 'Retour d’un prêt (fil rendu par une autre usine)',
 }
@@ -89,6 +100,8 @@ interface StockMagasin {
   bobines_par_palette: number | null
   bobines_par_lot: number | null
   densite_kg_ml: number | null
+  /** MACHINE (sort par les fiches machine) ou DIRECTE (consommation directe). */
+  mode_consommation?: string | null
 }
 
 /**
@@ -221,6 +234,10 @@ export function MouvementNouveau() {
     responsable: '',
     reference_document: '',
     numero_of: '',
+    /** L'OF en lien d'une consommation directe (22/10/2026) ; `numero_of` reste le texte libre d'avant. */
+    id_of: '',
+    /** LA QUALITE SERVIE (23/10/2026) : celle de l'OF quand il y en a un ; sans OF, obligatoire. */
+    code_qualite: '',
     /** L'usine du pret et de son retour. */
     tiers: '',
     observations_globales: '',
@@ -232,8 +249,15 @@ export function MouvementNouveau() {
   /* TOUTE ECRITURE DE LA GRILLE PASSE PAR LA REMISE EN ORDRE : unite permise,
      lot attache a sa reference. La grille ne connait pas ces regles ; elle
      n'a pas a les connaitre. */
-  const majLignes: Dispatch<SetStateAction<LigneSaisie[]>> = (action) =>
-    setLignes((prev) => (typeof action === 'function' ? action(prev) : action).map(normaliser))
+  const majLignes: Dispatch<SetStateAction<LigneSaisie[]>> = useCallback(
+    (action) => setLignes((prev) => (typeof action === 'function' ? action(prev) : action).map(normaliser)),
+    [],
+  )
+  /* CHAQUE LOT A SON CONDITIONNEMENT (23/10/2026) : des que le lot d'une ligne
+     est choisi, ses palettes, bobines et kilos se repondent avec le poids de
+     bobine et les bobines par palette DU LOT ; le serveur convertit de meme. */
+  useLotsSurGrille(lignes, majLignes)
+  const ofsOuverts = useOfOuverts()
 
   const qTypes = useQuery({
     queryKey: ['types-mouvement'],
@@ -287,6 +311,10 @@ export function MouvementNouveau() {
     horsMachine ? estMotifHorsMachine(m.code_motif_ligne) : !estMotifHorsMachine(m.code_motif_ligne),
   )
   const pret = entete.code_type_mvt === 'RETOUR_PRET'
+  /* LA CONSOMMATION DIRECTE ne vaut que pour un article en mode DIRECTE : le fil
+     sort par les fiches machine. Le serveur et la base le refusent ; l'ecran ne
+     propose que les articles DIRECTE et signale une ligne qui ne l'est pas. */
+  const consoDirecte = entete.code_type_mvt === 'CONSO_DIRECTE'
   /* LES PRETS EN COURS : l'usine a qui l'on a prete, ce qu'elle doit rendre. */
   const qPrets = useQuery({
     queryKey: ['prets-en-cours'],
@@ -356,6 +384,7 @@ export function MouvementNouveau() {
     () =>
       [...stockPar.values()]
         .filter((s) => s.quantite_kg > 0.001)
+        .filter((s) => !consoDirecte || s.mode_consommation === 'DIRECTE')
         .map((s) => ({
           code_reference: s.code_reference,
           designation: s.designation,
@@ -368,7 +397,7 @@ export function MouvementNouveau() {
           // ici, c'est le disponible du magasin, et c'est ce qu'il faut lire.
           statut_stock: `${fmt.nombre(s.quantite_kg, 0)} kg en magasin`,
         })),
-    [stockPar],
+    [stockPar, consoDirecte],
   )
 
   /**
@@ -407,6 +436,9 @@ export function MouvementNouveau() {
     (l) => suiviDe(l.code_reference) === 1 && !(l.extra?.lot ?? '').trim(),
   )
   const motifsManquants = exigeMotif ? utiles.filter((l) => !l.extra?.motif_ligne) : []
+  const enModeMachine = consoDirecte
+    ? utiles.filter((l) => l.code_reference && stockPar.get(l.code_reference)?.mode_consommation === 'MACHINE')
+    : []
   const totalKg = utiles.reduce((s, l) => s + (kgDe(l) ?? 0), 0)
 
   /** Ce que les lignes demandent, par reference — la meme peut revenir, un lot par ligne. */
@@ -575,13 +607,54 @@ export function MouvementNouveau() {
     },
   })
 
+  // L'identifiant du document, tire a l'ouverture : un second envoi du meme
+  // formulaire rend le meme document (audit P3, 19/10/2026).
+  const [idDocument] = useState(nouvelIdentifiant)
+  /** Une etiquette scannee : la ligne de sa reference et de son lot, ou une nouvelle. */
+  const surEtiquette = (e: EtiquetteLue): string | void => {
+    if (e.statut_reception === 'ANNULE') return `Étiquette ${e.code} : sa réception est annulée.`
+    const lot = e.lot_fournisseur ?? ''
+    const champ = e.nature === 'BOBINE' ? 'bobines' : 'palettes'
+    const compter = (l: LigneSaisie): LigneSaisie => ({
+      ...l,
+      unite: 'kg',
+      // DETACHEE : le compte vient des etiquettes, pas de la formule.
+      lie: false,
+      qte: pourChamp(Number(l.qte || 0) + (e.poids_kg ?? 0), 4),
+      [champ]: String(Number(l[champ] || 0) + 1),
+    })
+    majLignes((prev) => {
+      const i = prev.findIndex(
+        (l) => !l.valide && l.code_reference === e.code_reference && (l.extra?.lot ?? '') === lot,
+      )
+      if (i >= 0) return prev.map((l, k) => (k === i ? compter(l) : l))
+      const base = depuisReference({
+        code_reference: e.code_reference,
+        designation: e.designation ?? e.code_reference,
+        unite_catalogue: e.unite_catalogue ?? 'kg',
+        poids_bobine_kg: e.poids_bobine_kg,
+        bobines_par_palette: e.bobines_par_palette,
+        bobines_par_lot: e.bobines_par_lot,
+        densite_kg_ml: e.densite_kg_ml,
+      })
+      const neuve = compter({ ...base, qte: '', palettes: '', bobines: '', extra: { ...(base.extra ?? {}), lot } })
+      // La ligne vide qui attend en bas de grille prend la place.
+      const vide = prev.findIndex((l) => !l.code_reference && !l.qte)
+      return vide >= 0 ? prev.map((l, k) => (k === vide ? neuve : l)) : [...prev, neuve]
+    })
+  }
+
   const enregistrer = useMutation({
     mutationFn: () =>
       api.post('/api/mouvements', {
+        id_document: idDocument,
         ...entete,
         responsable: entete.responsable.trim() || null,
         reference_document: entete.reference_document.trim() || null,
         numero_of: entete.numero_of || null,
+        id_of: consoDirecte && entete.id_of ? entete.id_of : null,
+        // Avec un OF, la base pose sa qualite ; sans OF, celle choisie (obligatoire).
+        code_qualite: consoDirecte && !entete.id_of && entete.code_qualite ? entete.code_qualite : null,
         tiers: entete.tiers.trim() || null,
         observations_globales: entete.observations_globales.trim() || null,
         lignes: utiles.map((l) => corpsMouvement(pourEnvoi(l))),
@@ -591,8 +664,19 @@ export function MouvementNouveau() {
       setErreur(e instanceof ErreurApi ? e.message : 'Enregistrement impossible.'),
   })
 
+  /* LE MAGASIN GELE PAR UN INVENTAIRE OUVERT (23/10/2026) : la base refuse,
+     l'ecran le dit avant la saisie. Un global gele tout le magasin ; un
+     tournant ou un cible, ses seules references (2026-10-24a). */
+  const gel = useGelInventaire(
+    [entete.code_magasin],
+    lignes.map((l) => ({ magasin: entete.code_magasin, reference: l.code_reference })),
+  )
   const bloquant =
-    utiles.length === 0
+    gel.length > 0
+      ? phraseGel(gel)
+      : consoDirecte && !entete.id_of && !entete.code_qualite
+      ? 'Sans OF, choisissez la qualité que sert cette consommation directe.'
+      : utiles.length === 0
       ? 'Saisissez au moins une ligne.'
       : horsCatalogue.length > 0
         ? `Un mouvement ne porte que des références du catalogue : retirez la ligne « ${horsCatalogue[0].intitule} ».`
@@ -602,7 +686,9 @@ export function MouvementNouveau() {
             ? `${lotsManquants.length} ligne(s) sans lot : la référence est suivie par lot.`
             : motifsManquants.length > 0
               ? `${motifsManquants.length} ligne(s) sans motif : ce type de mouvement l’exige.`
-              : null
+              : enModeMachine.length > 0
+                ? `${enModeMachine[0].code_reference} est en mode de consommation MACHINE : le fil sort par les fiches machine, pas par une consommation directe.`
+                : null
 
   const champ =
     'w-full rounded-lg border border-champ px-3 py-2 text-sm outline-none focus:border-anneau'
@@ -611,7 +697,7 @@ export function MouvementNouveau() {
     <>
       <EnTetePage
         titre="Saisir un mouvement"
-        sous_titre="La quantité est convertie en kilogrammes avant enregistrement, par les paramètres de la référence."
+        sous_titre="La quantité est convertie en kilogrammes avant enregistrement, par le conditionnement du lot choisi, sinon de la référence."
         actions={
           <Bouton variante="contour" onClick={() => quitter(() => naviguer('/mouvements'))}>
             <ArrowLeft />
@@ -620,6 +706,7 @@ export function MouvementNouveau() {
         }
       />
       <PanneRequetes requetes={[['Les types de mouvement', qTypes], ['Les magasins', qMag], ['Les motifs', qMotifs], ['Le stock du magasin', qStock]]} />
+      <AvisInventaireOuvert inventaires={gel} className="mb-3" />
       {/* LE FORMULAIRE NE PORTE QUE L'EN-TETE. Les boutons de la grille ne
           declarent pas de type : places dans un formulaire, chacun —
           valider une ligne, en ajouter une — l'aurait soumis. Le bouton du bas
@@ -643,7 +730,17 @@ export function MouvementNouveau() {
             <select id="mvt-1"
               required
               value={entete.code_type_mvt}
-              onChange={(e) => setEntete({ ...entete, code_type_mvt: e.target.value })}
+              onChange={(e) => {
+                const code_type_mvt = e.target.value
+                /* Une consommation directe est une consommation de production :
+                   le motif d'en-tete s'en deduit tant qu'on n'en a pas choisi. */
+                const code_motif =
+                  code_type_mvt === 'CONSO_DIRECTE' && !entete.code_motif &&
+                  qMotifs.data?.some((m) => m.code_motif === 'PRODUCTION')
+                    ? 'PRODUCTION'
+                    : entete.code_motif
+                setEntete({ ...entete, code_type_mvt, code_motif })
+              }}
               className={champ}
             >
               <option value="">—</option>
@@ -700,18 +797,48 @@ export function MouvementNouveau() {
             </select>
           </div>
 
-          {(typeActif?.exige_of === 1 || horsMachine) && (
+          {(typeActif?.exige_of === 1 || horsMachine || consoDirecte) && (
             <div>
               <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-4">
-                Numero d ordre de fabrication {typeActif?.exige_of === 1 && <span className="text-danger">*</span>}
+                {consoDirecte ? 'Ordre de fabrication' : 'Numero d ordre de fabrication'}{' '}
+                {typeActif?.exige_of === 1 && <span className="text-danger">*</span>}
               </label>
-              <input id="mvt-4"
-                required={typeActif?.exige_of === 1}
-                value={entete.numero_of}
-                onChange={(e) => setEntete({ ...entete, numero_of: e.target.value })}
-                placeholder={horsMachine ? 'Facultatif, texte libre' : undefined}
-                className={champ}
-              />
+              {/* L'OF EN LIEN (22/10/2026) : la consommation directe se range sous un
+                  OF, donc sous sa qualite. SANS OF, LA QUALITE SE DIT (23/10/2026) :
+                  obligatoire ; le texte libre reste pour l'ancien usage. */}
+              {consoDirecte && (
+                <ChoixOF
+                  valeur={entete.id_of}
+                  onChange={(id, numero) =>
+                    setEntete({ ...entete, id_of: id, numero_of: id ? numero : '', code_qualite: id ? '' : entete.code_qualite })
+                  }
+                  vide="— aucun OF : choisir la qualité —"
+                  className="mb-1 w-full"
+                />
+              )}
+              {consoDirecte && (
+                <div className="mb-1">
+                  <span className="mb-1 block text-[12px] text-attenue-texte">
+                    Qualité {!entete.id_of && <span className="text-danger">*</span>}
+                  </span>
+                  <ChoixQualite
+                    valeur={entete.code_qualite}
+                    onChange={(q) => setEntete({ ...entete, code_qualite: q })}
+                    imposee={entete.id_of ? (qualiteDeLOf(ofsOuverts.data, entete.id_of) ?? '…') : null}
+                    invalide={!entete.id_of && !entete.code_qualite}
+                    className="w-full"
+                  />
+                </div>
+              )}
+              {!(consoDirecte && entete.id_of) && (
+                <input id="mvt-4"
+                  required={typeActif?.exige_of === 1}
+                  value={entete.numero_of}
+                  onChange={(e) => setEntete({ ...entete, numero_of: e.target.value })}
+                  placeholder={consoDirecte ? 'ou ordre / plan en texte libre (ancien)' : horsMachine ? 'Facultatif, texte libre' : undefined}
+                  className={champ}
+                />
+              )}
             </div>
           )}
 
@@ -797,6 +924,12 @@ export function MouvementNouveau() {
                 hors machine cumulés), la sortie demande le droit de valider l’inventaire.
               </p>
             )}
+            {consoDirecte && (
+              <p className="mt-0.5 text-[11px] text-attenue-texte">
+                Sans seuil, au CMUP du magasin : seuls les articles en mode de consommation « Directe » (fiche
+                article) sortent ainsi. Le fil sort par les fiches machine.
+              </p>
+            )}
           </div>
         </div>
 
@@ -823,6 +956,11 @@ export function MouvementNouveau() {
             stock d'un autre magasin — ou celui d'un autre ecran de stock —
             reviendrait dans la liste. Aucune reference proposee ne porte de
             fournisseur, il n'est donc compare a rien d'autre. */}
+        {/* LE SCAN D'UNE ETIQUETTE DE LOT (19/10/2026) : reference et lot lus sur
+            la bobine, plus tapes. Les kilos sont ceux de la pesee de reception
+            (moyenne par bobine ou palette) : la ligne reste a valider, on les
+            corrige si la balance dit autre chose. */}
+        {entete.code_magasin && <ChampScan surLecture={surEtiquette} className="max-w-md" />}
         <GrilleLignes
           codeFournisseur={`MVT:${entete.code_magasin}`}
           devise="MAD"
@@ -951,11 +1089,11 @@ function EquivalentsDispo({
   )
 
   return (
-    <div className="mt-1 rounded-lg border border-danger/40 bg-danger/[0.06] p-2">
-      <div className="text-[12px] font-medium text-danger">
-        Stock insuffisant dans le magasin : il manque {fmt.nombre(manque, 0)} kg.
-      </div>
-
+    <Alerte
+      ton="danger"
+      className="mt-1 px-2 py-2 text-[12px]"
+      titre={`Stock insuffisant dans le magasin : il manque ${fmt.nombre(manque, 0)} kg.`}
+    >
       {utiles.length === 0 ? (
         <div className="mt-1 text-[11px] text-attenue-texte">
           Aucune reference equivalente ne dispose de stock. La sortie sera refusee (R02) :
@@ -985,6 +1123,6 @@ function EquivalentsDispo({
           </div>
         </>
       )}
-    </div>
+    </Alerte>
   )
 }

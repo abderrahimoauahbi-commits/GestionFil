@@ -28,6 +28,7 @@ import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLa
 import type { Colonne } from '../components/TableDroits'
 import {
   Alerte,
+  Badge,
   Bouton,
   Champ,
   Chargement,
@@ -35,7 +36,7 @@ import {
   Selecteur,
 } from '../composants/ui/base'
 import { Dialogue, DialogueContenu, useConfirmation } from '../composants/ui/surcouches'
-import { Etiquette } from '../components/ui'
+import { fmt } from '../lib/utils'
 
 interface Ligne extends Record<string, unknown> {
   actif: number
@@ -59,18 +60,7 @@ interface Ligne extends Record<string, unknown> {
  * On le choisit desormais.
  */
 function EcranCouleurs() {
-  const qFrs = useQuery({
-    queryKey: ['fournisseurs-actifs'],
-    queryFn: () =>
-      api.get<{ code_fournisseur: string; nom: string }[]>(
-        '/api/fournisseurs?actif=1&limite=500',
-      ),
-  })
-  const fournisseurs = (qFrs.data ?? []).map((f) => ({
-    valeur: f.code_fournisseur,
-    libelle: `${f.nom} (${f.code_fournisseur})`,
-  }))
-
+  // Le fournisseur se CHERCHE (24/10/2026) : la liste des fournisseurs grandit.
   return (
     <MaitreDetail
       titre="Couleurs"
@@ -115,7 +105,9 @@ function EcranCouleurs() {
             entete: 'Fournisseur',
             obligatoire: true,
             largeur: 'w-52',
-            options: fournisseurs,
+            choix: 'fournisseur',
+            libelleChoix: (l) =>
+              l.code_fournisseur ? `${String(l.code_fournisseur)} — ${String(l.fournisseur_nom ?? '')}` : undefined,
           },
           {
             champ: 'code_couleur',
@@ -171,7 +163,7 @@ const compte = (champ: string, entete: string): Colonne<Ligne> => ({
   champ,
   entete,
   numerique: true,
-  rendu: (l) => <Etiquette>{String(l[champ] ?? 0)}</Etiquette>,
+  rendu: (l) => <Badge>{String(l[champ] ?? 0)}</Badge>,
 })
 
 /** Un 0/1 de la base, lu comme une reponse : oui, ou rien. */
@@ -179,7 +171,7 @@ const ouiNon = (champ: string, entete: string): Colonne<Ligne> => ({
   champ,
   entete,
   rendu: (l) =>
-    Number(l[champ]) === 1 ? <Etiquette>oui</Etiquette> : <span className="text-attenue-texte">non</span>,
+    Number(l[champ]) === 1 ? <Badge>oui</Badge> : <span className="text-attenue-texte">non</span>,
 })
 
 const METHODES_FRAIS = [
@@ -187,6 +179,7 @@ const METHODES_FRAIS = [
   { valeur: 'POIDS', libelle: 'Au poids' },
   { valeur: 'QUANTITE', libelle: 'À la quantité' },
   { valeur: 'PARTS_EGALES', libelle: 'A parts égales' },
+  { valeur: 'DROITS', libelle: 'Au taux des droits' },
 ]
 
 const colonneCode = (champ: string, entete: string): Colonne<Ligne> => ({
@@ -320,11 +313,11 @@ const ONGLETS: Onglet[] = [
         entete: 'Regime',
         rendu: (l) => (
           <div className="flex gap-1">
-            {l.est_quarantaine === 1 && <Etiquette ton="rouge">quarantaine</Etiquette>}
+            {l.est_quarantaine === 1 && <Badge ton="danger">quarantaine</Badge>}
             {l.inclure_mrp === 1 ? (
-              <Etiquette ton="vert">compte au MRP</Etiquette>
+              <Badge ton="succes">compte au MRP</Badge>
             ) : (
-              <Etiquette ton="gris">hors MRP</Etiquette>
+              <Badge ton="neutre">hors MRP</Badge>
             )}
           </div>
         ),
@@ -397,9 +390,9 @@ const ONGLETS: Onglet[] = [
         champ: 'signe',
         entete: 'Sens',
         rendu: (l) => (
-          <Etiquette ton={Number(l.signe) > 0 ? 'vert' : 'ambre'}>
+          <Badge ton={Number(l.signe) > 0 ? 'succes' : 'alerte'}>
             {Number(l.signe) > 0 ? 'entree' : 'sortie'}
-          </Etiquette>
+          </Badge>
         ),
       },
       { champ: 'exige_prix', entete: 'Prix exige', rendu: (l) => (l.exige_prix ? 'oui' : '—') },
@@ -514,6 +507,7 @@ const ONGLETS: Onglet[] = [
       ouiNon('recuperable', 'Recuperable'),
       ouiNon('inclus_dans_cout', 'Dans le cout'),
       ouiNon('commun', 'Commun'),
+      ouiNon('entre_valeur_douane', 'Valeur en douane'),
       {
         champ: 'methode_repartition',
         entete: 'Repartition',
@@ -580,9 +574,68 @@ const ONGLETS: Onglet[] = [
         options: METHODES_FRAIS,
         defaut: 'VALEUR',
         aide: 'Le classeur répartit tout à la valeur. Le poids sert pour un fret facture au kilo, '
-          + 'les parts egales pour une formalite qui ne depend ni du prix ni du poids.',
+          + 'les parts egales pour une formalite qui ne depend ni du prix ni du poids. '
+          + 'Au taux des droits : chaque ligne porte la douane au prorata de ses droits attendus '
+          + '(valeur en douane × taux de sa position tarifaire).',
         section: 'Coût de revient',
       },
+      {
+        champ: 'entre_valeur_douane',
+        libelle: 'Entre dans la valeur en douane',
+        type: 'booleen',
+        aide: 'La valeur en douane est la valeur CAF : la marchandise, plus le fret et '
+          + 'l’assurance jusqu’à la frontière. Coché, la part de ce frais s’ajoute à la valeur '
+          + 'qui calcule les droits attendus. Incompatible avec une répartition au taux des droits.',
+        section: 'Coût de revient',
+      },
+    ],
+  },
+  {
+    /**
+     * LES POSITIONS TARIFAIRES (19/10/2026) : la nomenclature douaniere et son
+     * droit d'importation. Chaque reference du catalogue designe la sienne ; les
+     * droits attendus d'un dossier d'import en decoulent. Desactivee plutot que
+     * supprimee : un dossier clos l'a citee.
+     */
+    cle: 'positions-tarifaires',
+    libelle: 'Positions tarifaires',
+    module: 'PARAMETRES',
+    chemin: 'positions-tarifaires',
+    identifiant: 'code_sh',
+    unite: 'position',
+    colonnes: [
+      colonneCode('code_sh', 'Code SH'),
+      { champ: 'libelle', entete: 'Libellé' },
+      {
+        champ: 'taux_droit_pct',
+        entete: 'Droit (%)',
+        rendu: (l) => `${fmt.nombre(Number(l.taux_droit_pct), 2)} %`,
+      },
+      compte('nb_references', 'Références'),
+    ],
+    champs: [
+      {
+        champ: 'code_sh',
+        libelle: 'Code SH / NGP',
+        obligatoire: true,
+        cleCreation: true,
+        aide: 'De 6 à 10 chiffres, sans points ni espaces : 5402200000.',
+        section: 'Identification',
+      },
+      { champ: 'libelle', libelle: 'Libellé', obligatoire: true, section: 'Identification' },
+      {
+        champ: 'taux_droit_pct',
+        libelle: 'Droit d’importation (%)',
+        type: 'nombre',
+        min: 0,
+        max: 100,
+        obligatoire: true,
+        aide: 'En pour cent de la valeur en douane. Modifié, il recalcule les droits attendus '
+          + 'des dossiers ouverts ; un dossier clôturé garde ce qu’il a porté au CMUP.',
+        section: 'Identification',
+      },
+      { champ: 'notes', libelle: 'Notes', type: 'zone', section: 'Identification' },
+      { champ: 'actif', libelle: 'Active', type: 'booleen', defaut: true, section: 'Identification' },
     ],
   },
   {

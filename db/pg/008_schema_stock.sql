@@ -252,7 +252,9 @@ CREATE TABLE stock_lot (
     UNIQUE (code_reference, code_magasin, lot_fournisseur)
 );
 
--- Index FEFO : sert fn_suggerer_lots_fefo (vue v_lot_fefo)
+-- Index FEFO : sert la vue v_lot_fefo et la liste des lots d'un magasin, que
+-- l'ecran trie dans le meme ordre (frontend/src/lib/fefo.ts). La fonction
+-- fn_suggerer_lots_fefo que ce commentaire citait n'a jamais existe (audit du 17/10/2026).
 CREATE INDEX ix_stock_lot_fefo ON stock_lot(code_reference, code_magasin, date_peremption)
     WHERE quantite_kg > 0;
 
@@ -262,6 +264,7 @@ CREATE INDEX ix_stock_lot_fefo ON stock_lot(code_reference, code_magasin, date_p
 CREATE TABLE transfert (
     id_transfert        text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
+    version             integer NOT NULL DEFAULT 1,  -- verrou optimiste (2026-10-17d)
     numero_transfert    text    NOT NULL UNIQUE,
     date_transfert      text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     code_magasin_source text    NOT NULL REFERENCES magasin(code_magasin),
@@ -277,6 +280,14 @@ CREATE TABLE transfert (
     --   date_reception_dest quand quelqu'un a constate son arrivee.
     date_sortie         text,
     date_reception_dest text,
+
+    -- Date PREVUE de disponibilite au magasin destinataire (arbitrage du
+    -- 27/10/2026, migration 2026-10-27d) : obligatoire a l'expedition (passage
+    -- en VALIDE), revisable tant que le transfert est en route, figee apres —
+    -- garanti par trg_transfert_date_disponibilite (TRF-DATE, en 010). Le moteur
+    -- de couverture compte le transfert comme un arrivage a cette date ; un
+    -- transfert en route sans date est signale par C66.
+    date_disponibilite_prevue date,
 
     -- Qui repond de la marchandise pendant le trajet : chauffeur, chef de
     -- quai, transporteur. Distinct des comptes applicatifs, qui disent qui a
@@ -346,6 +357,7 @@ CREATE TABLE valorisation_stock (
 CREATE TABLE inventaire (
     id_inventaire       text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
+    version             integer NOT NULL DEFAULT 1,  -- verrou optimiste (2026-10-17d)
     numero_inventaire   text    NOT NULL UNIQUE,
     date_inventaire     text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     type_inventaire     text    NOT NULL CHECK (type_inventaire IN ('GLOBAL','TOURNANT','CIBLE')),
@@ -359,6 +371,9 @@ CREATE TABLE inventaire (
     motif_annulation    text,
     id_utilisateur_annulation text REFERENCES utilisateur(id_utilisateur),
     date_annulation     text,
+    -- La liste d'un tournant ou d'un cible : qui l'a validee, et quand (2026-10-24b).
+    date_selection      timestamptz,
+    id_utilisateur_selection text REFERENCES utilisateur(id_utilisateur),
     CHECK (statut <> 'CLOTURE' OR date_cloture IS NOT NULL)
 );
 
@@ -394,3 +409,22 @@ CREATE TABLE ligne_inventaire (
 );
 
 CREATE INDEX ix_ligne_inv_ref ON ligne_inventaire(code_reference);
+
+-- -----------------------------------------------------------------------------
+-- inventaire_reference — LA LISTE D'UN INVENTAIRE TOURNANT OU CIBLE (decision du
+-- 23/10/2026, migration 2026-10-24b). Choisie (cible) ou proposee selon la classe
+-- ABC puis retouchee (tournant), validee avant la preparation des lignes ; figee
+-- ensuite. Ses lignes n'en sortent pas, son gel la suit (010_declencheurs.sql).
+-- -----------------------------------------------------------------------------
+CREATE TABLE inventaire_reference (
+    id_inventaire     text        NOT NULL REFERENCES inventaire(id_inventaire) ON DELETE CASCADE,
+    code_reference    text        NOT NULL REFERENCES reference(code_reference),
+    origine           text        NOT NULL CHECK (origine IN ('PROPOSITION', 'CHOIX', 'REPRISE')),
+    classe_abc        text        CHECK (classe_abc IS NULL OR classe_abc IN ('A', 'B', 'C')),
+    dernier_comptage  timestamptz,
+    id_utilisateur    text        REFERENCES utilisateur(id_utilisateur),
+    date_ajout        timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (id_inventaire, code_reference)
+);
+CREATE INDEX ix_inventaire_reference_ref ON inventaire_reference(code_reference);
+CREATE INDEX ix_inventaire_reference_utilisateur ON inventaire_reference(id_utilisateur);

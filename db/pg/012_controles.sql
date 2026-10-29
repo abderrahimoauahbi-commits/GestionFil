@@ -57,13 +57,10 @@ SELECT r.code_reference, r.code_fournisseur
 FROM reference r
 WHERE NOT EXISTS (SELECT 1 FROM fournisseur f WHERE f.code_fournisseur = r.code_fournisseur);
 
--- C05 : stock projete negatif sur 12 mois
-DROP VIEW IF EXISTS v_ctl_c05 CASCADE;
-CREATE VIEW v_ctl_c05 AS
-SELECT code_reference, designation, stock_mrp_kg, encours_kg, besoin_12m_kg,
-       stock_projete_kg, jours_couverture, statut
-FROM v_stock_projete
-WHERE stock_projete_kg < 0;
+-- C05 : stock projete negatif. Depuis le 27/10/2026 (une seule source de
+-- verite, le moteur de couverture, migration 2026-10-27e), il n'est plus une vue :
+-- il est calcule par le moteur et servi par le serveur sous le meme code
+-- (couverture::controles_moteur), hors de v_controles.
 
 -- C06 : mouvement date dans le futur
 DROP VIEW IF EXISTS v_ctl_c06 CASCADE;
@@ -311,49 +308,34 @@ WHERE lq.actif = 1
         AND r.actif = 1
         AND r.code_role = lq.code_role);
 
--- C27 : ECART MAJEUR entre la couverture annoncee et le stock reel.
---
--- La couverture en jours est une projection : elle suppose que les besoins du
--- MRP sont a jour, que les commandes arrivent, et que tout le stock est
--- utilisable. Quand elle annonce du confort alors que le magasin est sous son
--- minimum, l'une de ces trois hypotheses est fausse — et le plus souvent c'est
--- une consommation, une casse ou une perte qui n'a pas ete declaree.
---
--- Ce controle ne dit pas « commandez » : il dit « allez verifier ». C'est une
--- alerte de VERITE DES DONNEES, pas une alerte de stock, et elle se traite par
--- un inventaire tournant, pas par un bon de commande.
-DROP VIEW IF EXISTS v_ctl_c27 CASCADE;
-CREATE VIEW v_ctl_c27 AS
-SELECT sp.code_reference, sp.designation,
-       sp.jours_couverture, sp.stock_physique_net_kg,
-       r.stock_min_kg,
-       ROUND(r.stock_min_kg - sp.stock_physique_net_kg, 3) AS manque_kg,
-       sp.stock_quarantaine_kg, sp.encours_retarde_kg, sp.besoins_calcules_le
-FROM v_stock_projete sp
-JOIN reference r ON r.code_reference = sp.code_reference
-WHERE sp.ecart_majeur = 1;
+-- C27 (« ecart majeur : couverture confortable, magasin sous le minimum ») est
+-- RETIRE le 27/10/2026 : une seule source de verite, le moteur de couverture
+-- (migration 2026-10-27e), qui n'a ni seuils de jours ni drapeau d'ecart majeur.
 
--- C28 : commande en retard (comptee ou non dans la couverture selon P_EncoursRetardInclus).
+-- C28 : commande en retard, HORS COUVERTURE tant qu'aucune nouvelle date n'existe.
 --
--- Passe la tolerance, la quantite est retiree du calcul (v_encours_fiable) et la
--- couverture s'effondre. Le controle nomme la cause, sans quoi l'acheteur verrait
--- une alerte apparaitre sans comprendre ce qui a change : rien n'a bouge au
--- magasin, c'est une date qui est passee.
+-- Rebranche le 27/10/2026 sur la regle du moteur de couverture (migration
+-- 2026-10-27e) : une ligne de bon valide dont la date prevue — celle de la
+-- ligne, sinon celle de l'en-tete — est depassee est en retard, et le moteur ne
+-- la compte pas. Plus de tolerance P_RetardBCJours, plus de libelle selon
+-- P_EncoursRetardInclus (le moteur ne compte jamais un bon en retard). Le
+-- controle nomme la cause : rien n'a bouge au magasin, c'est une date qui est
+-- passee.
 DROP VIEW IF EXISTS v_ctl_c28 CASCADE;
 CREATE VIEW v_ctl_c28 AS
 SELECT lb.code_reference, r.designation, bc.numero_bc, bc.code_fournisseur,
-       lb.date_livraison_prevue,
-       CAST((current_date - (lb.date_livraison_prevue)::date) AS bigint) AS retard_jours,
+       COALESCE(lb.date_livraison_prevue, bc.date_livraison_prevue) AS date_livraison_prevue,
+       CAST((current_date - (COALESCE(lb.date_livraison_prevue, bc.date_livraison_prevue))::date)
+            AS bigint)                                              AS retard_jours,
        lb.quantite_restante_kg
 FROM ligne_bc lb
 JOIN bon_commande bc ON bc.id_bc = lb.id_bc
 JOIN reference r     ON r.code_reference = lb.code_reference
-CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_RetardBCJours') p
 WHERE bc.statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')
   AND lb.statut NOT IN ('ANNULE','SOLDE')
   AND lb.type_ligne = 'MARCHANDISE'
   AND lb.quantite_restante_kg > 0
-  AND substr(lb.date_livraison_prevue, 1, 10) < to_char(current_date - (p.v)::integer, 'YYYY-MM-DD');
+  AND (COALESCE(lb.date_livraison_prevue, bc.date_livraison_prevue))::date < current_date;
 
 -- C29 : la projection repose sur des besoins plus anciens que le plan.
 --
@@ -411,24 +393,11 @@ JOIN ligne_bc    lb ON lb.id_ligne_bc  = lr.id_ligne_bc
 WHERE lb.code_reference <> lr.code_reference
   AND lr.substitution_acceptee = 0;
 
--- C25 : reference alternative portant du stock sans aucun besoin planifie.
--- Ce n'est pas une faute, c'est du capital immobilise : la matiere est en
--- magasin, sa jumelle est peut-etre en tension, et le MRP ne les rapproche pas
--- de lui-meme. Le rapprochement est une decision, et elle n'a pas ete prise.
-DROP VIEW IF EXISTS v_ctl_c25 CASCADE;
-CREATE VIEW v_ctl_c25 AS
-SELECT e.code_reference, e.designation, e.stock_kg,
-       e.equivalent_reference, e.equivalent_statut,
-       e.equivalent_besoin_12m_kg, e.equivalent_stock_projete_kg
-FROM v_equivalence e
-WHERE e.stock_kg > 0
-  AND e.besoin_12m_kg = 0
-  AND e.interchangeable = 1
-  -- La jumelle doit etre REELLEMENT en tension. Se contenter d'un besoin non nul
-  -- remontait toute alternative dont la preferentielle est employee — c'est-a
-  -- dire l'etat NORMAL d'un groupe, et non une anomalie.
-  AND e.equivalent_statut IS NOT NULL
-  AND e.equivalent_statut <> 'OK';
+-- C25 : reference alternative portant du stock sans aucun besoin planifie, face
+-- a une jumelle en tension. Depuis le 27/10/2026 (une seule source de verite, le
+-- moteur de couverture, migration 2026-10-27e), la tension se lit au moteur : le
+-- controle n'est plus une vue, il est calcule et servi par le serveur sous le
+-- meme code (couverture::controles_moteur), hors de v_controles.
 
 -- C26 : groupe d'equivalence dont toutes les references viennent du MEME
 -- fournisseur. Le groupe promet une alternative d'approvisionnement qu'il ne
@@ -538,14 +507,36 @@ JOIN machine_emplacement e ON e.code_magasin = sl.code_magasin
 WHERE (sl.quantite_kg > 0 AND sl.nb_bobines = 0)
    OR (sl.quantite_kg = 0 AND sl.nb_bobines > 0);
 
+-- C66 : transfert en route sans date prevue de disponibilite (27/10/2026,
+-- migrations 2026-10-27d et 27e).
+--
+-- Le moteur de couverture compte un transfert en route comme un arrivage a sa
+-- date prevue de disponibilite. Ceux expedies avant que la date ne devienne
+-- obligatoire (TRF-DATE) n'en ont pas : le moteur les liste « sans date » et ne
+-- les compte pas. Le signal dure jusqu'a ce qu'une date soit saisie.
+DROP VIEW IF EXISTS v_ctl_c66 CASCADE;
+CREATE VIEW v_ctl_c66 AS
+SELECT t.id_transfert, t.numero_transfert, t.code_magasin_source, t.code_magasin_dest,
+       COALESCE((t.date_sortie)::date, (t.date_transfert)::date) AS date_expedition,
+       (SELECT ROUND(COALESCE(SUM(l.quantite_kg), 0), 3)
+          FROM ligne_transfert l
+         WHERE l.id_transfert = t.id_transfert)                 AS quantite_kg
+FROM transfert t
+WHERE t.statut = 'VALIDE'
+  AND t.date_disponibilite_prevue IS NULL;
 
+
+-- 27/10/2026 : une seule source de verite, le moteur de couverture (migration
+-- 2026-10-27e). C05 et C25 sont calcules par le moteur et servis par le serveur
+-- sous leurs codes (couverture::controles_moteur) : ils quittent cette vue. C27
+-- est retire (comme C49, qui n'a jamais ete dans ces fichiers). C28 est
+-- rebranche sur la regle du moteur ; C66 nait.
 DROP VIEW IF EXISTS v_controles CASCADE;
 CREATE VIEW v_controles AS
 SELECT 'C01' AS code, 'Somme des % <> 100 par role BOM'                AS controle, 'BLOQUANT'  AS criticite, (SELECT COUNT(*) FROM v_ctl_c01) AS anomalies UNION ALL
 SELECT 'C02', 'BC envoyes non soldes depuis plus de 30j',              'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c02) UNION ALL
 SELECT 'C03', 'Reference de mouvement absente du catalogue',           'BLOQUANT',  (SELECT COUNT(*) FROM v_ctl_c03) UNION ALL
 SELECT 'C04', 'Fournisseur de reference inexistant',                   'BLOQUANT',  (SELECT COUNT(*) FROM v_ctl_c04) UNION ALL
-SELECT 'C05', 'Stock projete negatif sur 12 mois',                     'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c05) UNION ALL
 SELECT 'C06', 'Mouvement date dans le futur',                          'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c06) UNION ALL
 SELECT 'C07', 'Sortie production sans numero d''OF',                   'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c07) UNION ALL
 SELECT 'C08', 'Retour sans motif de ligne',                            'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c08) UNION ALL
@@ -565,12 +556,8 @@ SELECT 'C21', 'Role avec densite mais sans matiere en recette',        'CRITIQUE
 SELECT 'C22', 'Groupe d''equivalence aux references non interchangeables', 'BLOQUANT',  (SELECT COUNT(*) FROM v_ctl_c22) UNION ALL
 SELECT 'C23', 'Groupe d''equivalence sans reference preferentielle',     'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c23) UNION ALL
 SELECT 'C24', 'Reception d''une autre reference sans substitution declaree', 'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c24) UNION ALL
-SELECT 'C25', 'Stock mobilisable face a un equivalent en tension',        'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c25) UNION ALL
 SELECT 'C26', 'Groupe d''equivalence limite a un seul fournisseur',        'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c26) UNION ALL
-SELECT 'C27', 'Ecart majeur : couverture confortable, magasin sous le minimum', 'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c27) UNION ALL
-SELECT 'C28', CASE WHEN COALESCE((SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_EncoursRetardInclus'), '1') = '1'
-                   THEN 'Commande en retard, toujours comptee dans la couverture'
-                   ELSE 'Commande en retard, retiree du calcul de couverture' END, 'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c28) UNION ALL
+SELECT 'C28', 'Commande en retard : hors couverture tant qu aucune nouvelle date n existe (moteur de couverture)', 'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c28) UNION ALL
 SELECT 'C29', 'Besoins plus anciens que le plan : projection perimee',    'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c29) UNION ALL
 -- Les trois derniers viennent de la feuille Tests du classeur (T12, T17, T19).
 -- Leurs vues de detail sont definies dans 016_controles_classeur.sql, charge
@@ -586,4 +573,5 @@ SELECT 'C35', 'Estimation de poids hors tolerance en machine',          'ATTENTI
 SELECT 'C36', 'Emplacement de machine sans inventaire recent',          'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c36) UNION ALL
 SELECT 'C37', 'Bobines sans kilos, ou kilos sans bobines, en machine',  'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c37) UNION ALL
 SELECT 'C43', 'Colisage incoherent sur un document d''achat ouvert',    'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c43) UNION ALL
-SELECT 'C44', 'Plus d''un inventaire en cours sur un magasin',           'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c44);
+SELECT 'C44', 'Plus d''un inventaire en cours sur un magasin',           'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c44) UNION ALL
+SELECT 'C66', 'Transfert en route sans date prevue de disponibilite (hors couverture)', 'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c66);

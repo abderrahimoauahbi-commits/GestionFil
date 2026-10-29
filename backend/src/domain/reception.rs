@@ -95,7 +95,7 @@ pub async fn valider(
 
     // ---- 1. Entete ----------------------------------------------------------
     let entete: EnteteReception = sqlx::query_as(
-        "SELECT numero_reception, date_reception, statut, id_bc,
+        "SELECT numero_reception, date_reception::text AS date_reception, statut, id_bc,
                 code_fournisseur, id_utilisateur_reception, id_dossier_import
            FROM reception WHERE id_reception = $1",
     )
@@ -127,7 +127,7 @@ pub async fn valider(
     // precisement dans le cas ou elle compte le plus.
     let bons: Vec<BonCouvert> = sqlx::query_as(
         "SELECT DISTINCT bc.id_bc, bc.numero_bc, bc.statut,
-                bc.date_livraison_prevue, bc.id_utilisateur_creation
+                bc.date_livraison_prevue::text AS date_livraison_prevue, bc.id_utilisateur_creation
            FROM bon_commande bc
           WHERE bc.id_bc = $2
              OR bc.id_bc IN (SELECT lb.id_bc
@@ -148,7 +148,7 @@ pub async fn valider(
     if let Some(b) = bons.iter().find(|b| {
         matches!(
             b.statut.as_str(),
-            "BROUILLON" | "EN_ATTENTE_VALIDATION" | "VALIDE" | "ANNULE"
+            "BROUILLON" | "EN_CONTROLE" | "DEMANDE_PRIX" | "EN_ATTENTE_VALIDATION" | "VALIDE" | "ANNULE"
         )
     }) {
         return Err(AppError::RegleMetier(format!(
@@ -255,7 +255,7 @@ pub async fn valider(
     // bons du meme fournisseur n'ont pas la meme date, et archiver un retard
     // unique pour toutes les lignes inventerait une avance ici, une faute la.
     let promesses: HashMap<String, Option<String>> = sqlx::query_as::<_, (String, Option<String>)>(
-        "SELECT lb.id_ligne_bc, bc.date_livraison_prevue
+        "SELECT lb.id_ligne_bc, bc.date_livraison_prevue::text
            FROM ligne_reception lr
            JOIN ligne_bc lb     ON lb.id_ligne_bc = lr.id_ligne_bc
            JOIN bon_commande bc ON bc.id_bc = lb.id_bc
@@ -318,7 +318,7 @@ pub async fn valider(
             "INSERT INTO mouvement
                  (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt,
                   code_magasin, code_motif, reference_document, id_utilisateur)
-             VALUES ($1, $2, $3, 'ENTREE_REC', $4, 'RECEPTION', $5, $6)",
+             VALUES ($1, $2, fn_jour_casablanca($3), 'ENTREE_REC', $4, 'RECEPTION', $5, $6)",
         )
         .bind(&id_mouvement)
         .bind(&numero_mouvement)
@@ -337,7 +337,7 @@ pub async fn valider(
                      (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
                       quantite_saisie, unite_saisie, facteur_conversion,
                       lot_fournisseur, date_fabrication, date_peremption, statut_qualite, nb_bobines)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, fn_jour_casablanca($10), fn_jour_casablanca($11), $12, $13)",
             )
             .bind(&id_mouvement)
             .bind((i + 1) as i64)
@@ -407,7 +407,7 @@ pub async fn valider(
                   total_mad, code_magasin_dest, statut_qualite, ecart_pct,
                   conformite_specifications, conformite_quantite, conformite_delai,
                   jours_retard, date_archive, id_utilisateur_archive, version)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
+             VALUES ($1,$2,$3,$4,fn_jour_casablanca($5),$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,fn_instant($22),$23,
                      -- Une revalidation ecrit la version suivante (2026-10-08g).
                      (SELECT COALESCE(max(version), 0) + 1 FROM archive_reception WHERE id_ligne_reception = $1))",
         )
@@ -443,7 +443,7 @@ pub async fn valider(
                  (id_ligne_reception, code_reference, code_fournisseur, date_achat,
                   prix_kg_devise, code_devise, taux_change, prix_kg_mad,
                   quantite_achetee_kg, total_mad, date_enregistrement)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+             VALUES ($1,$2,$3,fn_jour_casablanca($4),$5,$6,$7,$8,$9,$10,fn_instant($11))
              -- Revalidee, la ligne garde son entree d'origine (meme prix de bon).
              ON CONFLICT (id_ligne_reception) DO NOTHING",
         )
@@ -485,6 +485,33 @@ pub async fn valider(
 
         // ---- 6. Soldes du bon de commande, en kg ---------------------------
         if let Some(id_ligne_bc) = &l.id_ligne_bc {
+            // DEUX RECEPTIONS SUR LA MEME LIGNE (19/10/2026) : la ligne est
+            // verrouillee, et une pesee qui depasse ce qui reste — au-dela de la
+            // tolerance, sans derogation — est refusee. Elle etait plafonnee en
+            // silence : le stock entrait deux fois, le bon se disait solde.
+            let (reste, tol, derogation, numero_bc): (f64, f64, i64, String) = sqlx::query_as(
+                "SELECT lb.quantite_restante_kg::float8,
+                        fn_tolerance_pesee($2)::float8,
+                        (SELECT derogation_ecart FROM ligne_reception
+                          WHERE id_ligne_reception = $3)::bigint,
+                        (SELECT numero_bc FROM bon_commande WHERE id_bc = lb.id_bc)
+                   FROM ligne_bc lb
+                  WHERE lb.id_ligne_bc = $1
+                    FOR UPDATE OF lb",
+            )
+            .bind(id_ligne_bc)
+            .bind(id_reception)
+            .bind(&l.id_ligne_reception)
+            .fetch_one(&mut *tx)
+            .await?;
+            if derogation == 0 && l.quantite_stock_kg > reste * (1.0 + tol / 100.0) + 0.0005 {
+                return Err(AppError::RegleMetier(format!(
+                    "R-REC : {} kg pesés sur une ligne du bon {numero_bc} dont il ne reste que {} kg                      à recevoir (tolérance {} %) : une autre réception l'a déjà reçue.                      Une dérogation motivée est requise.",
+                    arrondi_kg(l.quantite_stock_kg),
+                    arrondi_kg(reste),
+                    tol
+                )));
+            }
             sqlx::query(
                 // LA TOLERANCE DE PESEE PASSE (06/10/2026) : 1 015 kg pesés pour
                 // 1 000 commandés, admis a ±2 %, faisaient echouer la validation sur
@@ -573,6 +600,51 @@ pub async fn valider(
         _ => Some(avances.join(" · ")),
     };
 
+    // LE DOSSIER NE SE SAISIT PLUS, IL SE DEDUIT (16/10/2026).
+    //
+    // AVANT LE PASSAGE EN VALIDE, ET C'EST IMPERATIF : le dossier d'une
+    // reception validee ne change plus — les frais d'approche se repartissent
+    // sur ses lignes. Ecrire la deduction apres la validation se faisait
+    // refuser (« son dossier d'import ne change plus »), ce que le banc a
+    // revele en portant `scenario_import_coherence` : les essais de bout en
+    // bout ne le voyaient pas, aucun de leurs bons n'ayant de facture d'import. Le magasinier
+    // choisit les BONS de son camion ; c'est la facture d'import qui relie le
+    // bon au dossier. On le lit donc sur les lignes deja pesees, et on l'ecrit
+    // sur l'arrivage pour que la suite de la chaine — frais d'approche vers le
+    // CUMP (`importation::porter`) et cloture — le trouve comme avant.
+    //
+    // Zero dossier : arrivage local, rien a faire. Plusieurs : on NE DEVINE PAS
+    // (un bon ne mene qu'a un dossier dans les donnees, mais aucune contrainte
+    // ne le garantit) ; la colonne reste vide et le cas se voit aux controles
+    // plutot que de rattacher la marchandise au mauvais dossier.
+    let id_dossier_effectif: Option<String> = match &entete.id_dossier_import {
+        Some(d) => Some(d.clone()),
+        None => {
+            let dossiers: Vec<String> = sqlx::query_scalar(
+                "SELECT DISTINCT fi.id_dossier
+                   FROM ligne_reception lr
+                   JOIN import_facture_lignes ifl ON ifl.id_ligne_bc = lr.id_ligne_bc
+                   JOIN import_factures fi ON fi.id_facture = ifl.id_facture
+                  WHERE lr.id_reception = $1",
+            )
+            .bind(id_reception)
+            .fetch_all(&mut *tx)
+            .await?;
+            match dossiers.as_slice() {
+                [unique] => {
+                    sqlx::query("UPDATE reception SET id_dossier_import = $2 WHERE id_reception = $1")
+                        .bind(id_reception)
+                        .bind(unique)
+                        .execute(&mut *tx)
+                        .await?;
+                    Some(unique.clone())
+                }
+                _ => None,
+            }
+        }
+    };
+
+
     // ---- 8. Cloture de la reception ----------------------------------------
     // Le taux de l'entete est celui de la devise du fournisseur a la date de
     // reception (RG-09) ; chaque ligne porte par ailleurs son propre taux.
@@ -582,7 +654,7 @@ pub async fn valider(
         "UPDATE reception
             SET statut = 'VALIDE',
                 id_utilisateur_controle = $2,
-                date_controle = $3,
+                date_controle = fn_instant($3),
                 taux_change_reception = $4
           WHERE id_reception = $1",
     )
@@ -613,6 +685,17 @@ pub async fn valider(
     // fiche article mise a jour — sauf mesure aberrante, gardee mais ecartee.
     // Apres les mouvements : ils ont deja fige l'ancien poids, contre lequel
     // l'ecart de la livraison se lit.
+    //
+    // CHAQUE LOT A SON CONDITIONNEMENT (23/10/2026) : le lot recu prend le poids
+    // d'une bobine (kilos / bobines comptees) et les bobines par palette
+    // (bobines / palettes entieres) de ses receptions validees ; a defaut, il
+    // garde la fiche article qu'il a prise a sa naissance. AVANT la mise a jour
+    // de la fiche : le garde-fou de 50 % juge contre la fiche d'avant.
+    sqlx::query("SELECT fn_lot_conditionnement_reception($1, $2)")
+        .bind(id_reception)
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("SELECT fn_suivi_conditionnement('RECEPTION', $1, $2)")
         .bind(id_reception)
         .bind(&user.id)
@@ -627,7 +710,7 @@ pub async fn valider(
     // CUMP definitif — lit pourtant `import_facture_lignes.quantite_recue_kg`.
     // On le relit donc depuis les arrivages, et le dossier passe EN_COURS : de
     // la marchandise est entree, il y a desormais un stock a ajuster.
-    if let Some(id_dossier) = &entete.id_dossier_import {
+    if let Some(id_dossier) = &id_dossier_effectif {
         crate::domain::importation::synchroniser_recu_arrivages(&mut tx, id_dossier).await?;
         sqlx::query(
             "UPDATE import_dossiers SET statut = 'EN_COURS'

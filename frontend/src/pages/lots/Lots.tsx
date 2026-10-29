@@ -29,12 +29,13 @@ import { api } from '../../api/client'
 import { useAuth, useDroits } from '../../auth/AuthContext'
 import { EnTetePage } from '../../composants/Coquille'
 import { TableauImprimable } from '../../composants/Etat'
-import { Bouton, Champ, EtatVide, Selecteur, Squelette } from '../../composants/ui/base'
+import { Bouton, Champ, EtatVide, Squelette } from '../../composants/ui/base'
 import { Onglet, Onglets, OngletsListe, useConfirmation } from '../../composants/ui/surcouches'
-import { libelleLot } from '../../lib/lots'
+import { classeNiveauEcart, libelleLot } from '../../lib/lots'
 import { cn } from '../../lib/utils'
+import { ChoixRecherche } from '../../composants/ChoixRecherche'
 import { ActionsLot, BadgeCategorie, BadgeStatut } from './commun'
-import { MODULE, ORIGINES, classeDerive, designationUtile, gereAuKilo, libelleSeuil, lienFiche, messageErreur, nb, signe, useApresDecision, type Compteurs, type Lot } from './modele'
+import { MODULE, MODULE_DECISION, ORIGINES, designationUtile, gereAuKilo, libelleSeuil, lienFiche, messageErreur, nb, signe, useApresDecision, type Compteurs, type Lot } from './modele'
 
 type Vue = 'comptable' | 'projet' | 'restes' | 'a_basculer' | 'dormants' | 'bloques' | 'derive'
 
@@ -203,7 +204,7 @@ export function Lots() {
     </th>
   )
 
-  const peutBasculer = peut(MODULE, 'ECRIRE')
+  const peutBasculer = peut(MODULE_DECISION, 'ECRIRE') // POST /api/lots/basculer : LOTS, ECRIRE
 
   return (
     <div className="flex flex-col gap-3">
@@ -283,19 +284,15 @@ export function Lots() {
               </button>
             )}
           </div>
-          <Selecteur
-            value={fournisseur}
-            onChange={(e) => setFournisseur(e.target.value)}
+          {/* AVEC RECHERCHE (24/10/2026) : seuls les fournisseurs des lignes recues. */}
+          <ChoixRecherche
+            options={fournisseurs.map(([code, nom]) => ({ valeur: code, libelle: nom, info: code }))}
+            valeur={fournisseur}
+            onChange={(v) => setFournisseur(v)}
+            vide="Tous les fournisseurs"
+            ariaLabel="Fournisseur"
             className="w-full sm:w-60"
-            aria-label="Fournisseur"
-          >
-            <option value="">Tous les fournisseurs</option>
-            {fournisseurs.map(([code, nom]) => (
-              <option key={code} value={code}>
-                {nom}
-              </option>
-            ))}
-          </Selecteur>
+          />
           {vue === 'comptable' && (
             <label className="inline-flex items-center gap-1.5 text-[12.5px] text-attenue-texte">
               <input type="checkbox" checked={soldes} onChange={(e) => setSoldes(e.target.checked)} />
@@ -406,7 +403,7 @@ export function Lots() {
                       {l.jours_sans_activite == null ? '—' : `${nb(l.jours_sans_activite)} j`}
                     </td>
                     <td
-                      className={cn('px-2 py-1.5 text-right', classeDerive(l.alerte_derive))}
+                      className={cn('px-2 py-1.5 text-right', classeNiveauEcart(l.alerte_derive, true) ?? 'text-attenue-texte')}
                       title={l.ecart_cumule_kg != null ? `${signe(l.ecart_cumule_kg, 1, ' kg')} sur la vie du lot` : 'Aucune pesée comparable'}
                     >
                       {signe(l.ecart_cumule_pct, 2, ' %')}

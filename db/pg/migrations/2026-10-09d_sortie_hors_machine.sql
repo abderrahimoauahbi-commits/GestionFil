@@ -64,7 +64,7 @@ CREATE OR REPLACE VIEW v_prets_en_cours AS
 WITH flux AS (
     SELECT m.tiers, lm.code_reference,
            CASE WHEN m.code_type_mvt = 'RETOUR_PRET' THEN -lm.quantite_kg ELSE lm.quantite_kg END AS kg,
-           CASE WHEN m.code_type_mvt = 'SORTIE_HORS_MACHINE' THEN m.date_mouvement END AS date_pret,
+           CASE WHEN m.code_type_mvt = 'SORTIE_HORS_MACHINE' THEN m.date_mouvement::text END AS date_pret,
            CASE WHEN m.code_type_mvt = 'SORTIE_HORS_MACHINE'
                 THEN lm.quantite_kg * COALESCE(lm.prix_kg_mad, 0) END AS valeur_pretee_mad
       FROM mouvement m
@@ -110,7 +110,9 @@ DO $$
 DECLARE def text;
 BEGIN
     def := pg_get_viewdef('v_conso_reelle'::regclass);
-    IF position('SORTIE_HORS_MACHINE' IN def) = 0 THEN
+    -- Depuis 2026-10-27g, v_conso_reelle est un agregat du grand livre de la
+    -- consommation (v_consommation_fait), qui compte deja ces sorties : rien a faire.
+    IF position('SORTIE_HORS_MACHINE' IN def) = 0 AND position('v_consommation_fait' IN def) = 0 THEN
         IF position('(m.code_type_mvt = ''SORTIE_PROD''::text)' IN def) = 0 THEN
             RAISE EXCEPTION 'v_conso_reelle : la clause des sorties production est introuvable';
         END IF;

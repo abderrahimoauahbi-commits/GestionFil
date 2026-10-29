@@ -16,7 +16,10 @@ import { EcranReferentiel } from '../components/EcranReferentiel'
 import { useParamVue } from '../lib/navigation'
 import type { ChampDef } from '../components/Formulaire'
 import type { Colonne } from '../components/TableDroits'
-import { Etiquette, Message, fmt } from '../components/ui'
+import { Alerte, Badge } from '../composants/ui/base'
+import { fmt } from '../lib/utils'
+import { tonStatut } from '../lib/statuts'
+import { ChoixRecherche } from '../composants/ChoixRecherche'
 
 /* DECLAREE AVANT SES USAGES. `const` n’est pas remonte comme une fonction :
    plus bas, elle ne tenait que parce que ses lecteurs sont des composants,
@@ -62,10 +65,6 @@ export function Catalogue() {
     queryKey: ['categories', ''],
     queryFn: ({ signal }) => api.get<{ code_categorie: string; libelle: string }[]>('/api/categories?actif=1', { signal }),
   })
-  const qFour = useQuery({
-    queryKey: ['fournisseurs', ''],
-    queryFn: ({ signal }) => api.get<{ code_fournisseur: string; nom: string }[]>('/api/fournisseurs?actif=1', { signal }),
-  })
   const qDev = useQuery({
     queryKey: ['devises'],
     queryFn: ({ signal }) => api.get<{ code_devise: string; libelle: string }[]>('/api/devises', { signal }),
@@ -81,6 +80,14 @@ export function Catalogue() {
     queryFn: () =>
       api.get<{ code_couleur_interne: string; libelle: string }[]>('/api/couleurs?actif=1'),
   })
+  const qPos = useQuery({
+    queryKey: ['positions-tarifaires', ''],
+    queryFn: ({ signal }) =>
+      api.get<{ code_sh: string; libelle: string; taux_droit_pct: number }[]>(
+        '/api/positions-tarifaires?actif=1',
+        { signal },
+      ),
+  })
 
   const colonnes: Colonne<Reference>[] = [
     {
@@ -90,7 +97,7 @@ export function Catalogue() {
       rendu: (r) => (
         <div>
           <div className="font-medium text-texte">{r.code_reference}</div>
-          {r.actif === 0 && <Etiquette ton="rouge">desactivee</Etiquette>}
+          {r.actif === 0 && <Badge ton="danger">desactivee</Badge>}
         </div>
       ),
     },
@@ -179,8 +186,8 @@ export function Catalogue() {
       secondaire: true,
       rendu: (r) =>
         r.stock_min_kg == null ? (
-          <span className="text-attenue-texte" title="Calcule dynamiquement (formule F3)">
-            dynamique
+          <span className="text-attenue-texte" title="Aucun minimum : le minimum calculé (F3) n’existe plus ; le stock minimum n’est qu’une alerte">
+            —
           </span>
         ) : (
           fmt.nombre(r.stock_min_kg, 0)
@@ -192,10 +199,10 @@ export function Catalogue() {
       filtre: 'liste',
       rendu: (r) =>
         r.classe_abc ? (
-          <Etiquette ton={r.classe_abc === 'A' ? 'rouge' : r.classe_abc === 'B' ? 'ambre' : 'gris'}>
+          <Badge ton={tonStatut('classe_abc', r.classe_abc)}>
             {r.classe_abc}
             {r.classe_xyz ?? ''}
-          </Etiquette>
+          </Badge>
         ) : (
           '—'
         ),
@@ -243,9 +250,10 @@ export function Catalogue() {
     {
       champ: 'code_fournisseur',
       libelle: 'Fournisseur',
-      type: 'liste',
+      // CHERCHE, PLUS DEROULE (24/10/2026) : la liste des fournisseurs grandit.
+      type: 'choix',
+      choix: 'fournisseur',
       obligatoire: true,
-      options: qFour.data?.map((f) => ({ valeur: f.code_fournisseur, libelle: f.nom })),
       section: 'Général',
     },
     {
@@ -256,6 +264,18 @@ export function Catalogue() {
       section: 'Général',
     },
     { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true, section: 'Général' },
+    {
+      champ: 'code_sh',
+      libelle: 'Position tarifaire (SH)',
+      type: 'liste',
+      options: qPos.data?.map((p) => ({
+        valeur: p.code_sh,
+        libelle: `${p.code_sh} — ${p.libelle} (${fmt.nombre(Number(p.taux_droit_pct), 2)} %)`,
+      })),
+      aide: 'La nomenclature douanière de cette matière, et donc son droit d’importation. '
+        + 'Sans elle, les droits attendus d’un dossier d’import ne se calculent pas pour ses lignes.',
+      section: 'Achat',
+    },
     /* --- Paramètres techniques --------------------------------------- */
     { champ: 'type_fil', libelle: 'Nature', section: 'Paramètres techniques' },
     { champ: 'titrage', libelle: 'Titrage', section: 'Paramètres techniques' },
@@ -391,20 +411,33 @@ export function Catalogue() {
       section: 'Gestion des lots',
     },
     {
+      champ: 'mode_consommation',
+      libelle: 'Mode de consommation',
+      type: 'liste',
+      defaut: 'MACHINE',
+      options: [
+        { valeur: 'MACHINE', libelle: 'Machine — sort par les fiches machine' },
+        { valeur: 'DIRECTE', libelle: 'Directe — consommée sans machine' },
+      ],
+      aide:
+        'Comment cette matière sort du magasin. Machine : le fil se charge sur les machines et sort par leurs ' +
+        'fiches. Directe : jute, latex, SBR, plastique, simili cuir… se consomment sans machine et sortent par ' +
+        'une « Consommation directe », au CMUP du magasin, sans le seuil des déchets.',
+      section: 'Conditionnement et stockage',
+    },
+    {
       champ: 'stock_min_kg',
       libelle: 'Stock minimum (kg)',
       type: 'nombre',
-      aide: 'Laisser vide pour un minimum calcule dynamiquement (formule F3).',
+      aide: 'Garde-fou : un signal « vérifier le plan », jamais une quantité de commande. Vide : aucun minimum.',
       section: 'Conditionnement et stockage',
     },
-    { champ: 'couverture_min_mois', libelle: 'Couverture minimale (mois)', type: 'nombre', section: 'Conditionnement et stockage' },
     {
-      champ: 'marge_securite_pct',
-      libelle: 'Marge de sécurité (%)',
+      champ: 'couverture_cible_mois',
+      libelle: 'Couverture cible (mois)',
       type: 'nombre',
       aide:
-        'Majore le stock minimum de cette référence. Vide : la valeur générale des paramètres ' +
-        's applique.',
+        'La couverture souhaitée au moment de la réception : le moteur déclenche la commande pour qu’elle arrive C jours avant la rupture. Obligatoire pour un article soumis au MRP ; jamais une quantité.',
       section: 'Conditionnement et stockage',
     },
     /* --- Achat ------------------------------------------------------- */
@@ -462,7 +495,7 @@ export function Catalogue() {
     <>
       {!droits.visible('prix_catalogue') && (
         <div className="mb-4">
-          <Message ton="info">Les informations de prix sont masquees pour votre profil.</Message>
+          <Alerte ton="info">Les informations de prix sont masquees pour votre profil.</Alerte>
         </div>
       )}
 
@@ -476,7 +509,6 @@ export function Catalogue() {
               valeurs={{ categorie, fournisseur, unite, actif }}
               definir={{ categorie: setCategorie, fournisseur: setFournisseur, unite: setUnite, actif: setActif }}
               categories={qCat.data ?? []}
-              fournisseurs={qFour.data ?? []}
             />
           }
           exportable="catalogue-references"
@@ -488,7 +520,7 @@ export function Catalogue() {
           module={MODULE}
           chemin="catalogue"
           serveur
-          actionsExtra={(r) => <SupprimerDefinitivement reference={r.code_reference} />}
+          actionsExtra={(r) => <SupprimerDefinitivement reference={r.code_reference} version={r.version} />}
           cle="code_reference"
           colonnes={colonnes}
           champs={champs}
@@ -522,7 +554,7 @@ interface Usages {
  * une action qui echouera est pire que ne pas la proposer. Le serveur les
  * recompte de son cote — l'ecran informe, il n'autorise pas.
  */
-function SupprimerDefinitivement({ reference }: { reference: string }) {
+function SupprimerDefinitivement({ reference, version }: { reference: string; version: unknown }) {
   const client = useQueryClient()
   const confirmation = useConfirmation()
 
@@ -555,7 +587,9 @@ function SupprimerDefinitivement({ reference }: { reference: string }) {
       libelleConfirmer: 'Supprimer definitivement',
       action: async () => {
         try {
-          await api.delete(`/api/catalogue/${encodeURIComponent(reference)}/definitivement`)
+          await api.delete(
+            `/api/catalogue/${encodeURIComponent(reference)}/definitivement?version=${encodeURIComponent(String(version ?? ''))}`,
+          )
           await client.invalidateQueries()
           toast.success(`${reference} supprimee.`)
         } catch (e) {
@@ -594,7 +628,6 @@ function BarreFiltres({
   valeurs,
   definir,
   categories,
-  fournisseurs,
 }: {
   valeurs: { categorie: string; fournisseur: string; unite: string; actif: string }
   definir: {
@@ -604,7 +637,6 @@ function BarreFiltres({
     actif: (v: string) => void
   }
   categories: { code_categorie: string; libelle: string }[]
-  fournisseurs: { code_fournisseur: string; nom: string }[]
 }) {
   const actifs = Object.entries(valeurs).filter(
     ([c, v]) => v !== '' && !(c === 'actif' && v === '1'),
@@ -651,18 +683,16 @@ function BarreFiltres({
       </Champ>
 
       <Champ libelle="Fournisseur">
-        <select
-          value={valeurs.fournisseur}
-          onChange={(e) => definir.fournisseur(e.target.value)}
-          className={CLASSE_CHAMP}
-        >
-          <option value="">Tous</option>
-          {fournisseurs.map((f) => (
-            <option key={f.code_fournisseur} value={f.code_fournisseur}>
-              {f.nom}
-            </option>
-          ))}
-        </select>
+        {/* Cherche au serveur : la liste des fournisseurs grandit (24/10/2026). */}
+        <ChoixRecherche
+          type="fournisseur"
+          ariaLabel="Fournisseur"
+          valeur={valeurs.fournisseur}
+          onChange={(v) => definir.fournisseur(v)}
+          vide="Tous"
+          className="w-full sm:w-56"
+          classeChamp="h-7 text-[12px]"
+        />
       </Champ>
 
       <Champ libelle="Unité">

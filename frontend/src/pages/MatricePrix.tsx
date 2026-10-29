@@ -22,8 +22,7 @@ import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../components/Layout'
 import { BarreFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
 import { Alerte, Carte, CarteCorps, Chargement, EtatVide, Selecteur } from '../composants/ui/base'
-import { fmt } from '../components/ui'
-import { cn } from '../lib/utils'
+import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'CATALOGUE'
 

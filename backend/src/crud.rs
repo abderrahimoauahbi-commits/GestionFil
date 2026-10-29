@@ -13,6 +13,7 @@
 
 use crate::auth::{rbac::Action, Utilisateur};
 use crate::db::{maintenant, Db};
+use crate::domain::concurrence::refus;
 use crate::error::{AppError, AppResult};
 use crate::routes::json::lignes_en_json;
 use serde_json::{json, Map, Value};
@@ -259,14 +260,31 @@ pub const ENTITES: &[Entite] = &[
         cle_generee: false,
         creation: &[
             "id_frais", "libelle", "categorie", "piece_justificative", "recuperable",
-            "commun", "methode_repartition", "inclus_dans_cout", "ordre", "actif"],
+            "commun", "methode_repartition", "inclus_dans_cout", "entre_valeur_douane", "ordre",
+            "actif"],
         modification: &[
             "libelle", "categorie", "piece_justificative", "recuperable", "commun",
-            "methode_repartition", "inclus_dans_cout", "ordre", "actif"],
+            "methode_repartition", "inclus_dans_cout", "entre_valeur_douane", "ordre", "actif"],
         suppression: Suppression::Logique("actif"),
         selection: "c.*, (SELECT COUNT(*) FROM dossier_lignes_frais d
                            WHERE d.id_frais = c.id_frais) AS nb_utilisations",
         tri: "c.ordre",
+    },
+    // LES POSITIONS TARIFAIRES (19/10/2026) : la nomenclature douaniere et son
+    // droit d'importation, que chaque reference designe. Desactivee plutot que
+    // supprimee : une reference, un dossier clos la citent.
+    Entite {
+        chemin: "positions-tarifaires",
+        table: "position_tarifaire",
+        module: "PARAMETRES",
+        cle: "code_sh",
+        cle_generee: false,
+        creation: &["code_sh", "libelle", "taux_droit_pct", "notes", "actif"],
+        modification: &["libelle", "taux_droit_pct", "notes", "actif"],
+        suppression: Suppression::Logique("actif"),
+        selection: "c.*,
+                    (SELECT COUNT(*) FROM reference r WHERE r.code_sh = c.code_sh) AS nb_references",
+        tri: "c.code_sh",
     },
     Entite {
         chemin: "fournisseurs",
@@ -396,24 +414,26 @@ pub const ENTITES: &[Entite] = &[
             "code_couleur",
             "reference_fournisseur", "supplement_teinture",
             "unite_catalogue", "code_conditionnement", "poids_bobine_kg",
-            "bobines_par_palette", "bobines_par_lot", "seuil_lot_valeur", "type_lot", "fusion_lot", "arrondi_palette",
+            "bobines_par_palette", "bobines_par_lot", "seuil_lot_valeur", "type_lot", "fusion_lot", "arrondi_palette", "mode_consommation",
             "densite_kg_ml", "prix_catalogue",
             "description_commerciale",
             "code_devise_catalogue", "date_prix_catalogue", "stock_min_kg",
-            "couverture_min_mois", "marge_securite_pct", "moq_kg",
-            "multiple_achat_kg", "suivi_lot", "actif"],
+            // La couverture cible du MRP (2026-10-27l) ; la marge de securite
+            // de l'article n'existe plus (celle de la qualite reste).
+            "couverture_cible_mois", "moq_kg",
+            "multiple_achat_kg", "suivi_lot", "code_sh", "actif"],
         modification: &[
             "code_categorie", "code_fournisseur", "designation", "type_fil",
             "couleur", "origine", "titrage", "code_famille", "code_couleur_interne",
             "code_couleur",
             "reference_fournisseur", "supplement_teinture",
             "unite_catalogue", "code_conditionnement", "poids_bobine_kg",
-            "bobines_par_palette", "bobines_par_lot", "seuil_lot_valeur", "type_lot", "fusion_lot", "arrondi_palette",
+            "bobines_par_palette", "bobines_par_lot", "seuil_lot_valeur", "type_lot", "fusion_lot", "arrondi_palette", "mode_consommation",
             "densite_kg_ml", "prix_catalogue",
             "description_commerciale",
             "code_devise_catalogue", "date_prix_catalogue", "stock_min_kg",
-            "couverture_min_mois", "marge_securite_pct", "moq_kg",
-            "multiple_achat_kg", "suivi_lot", "actif",
+            "couverture_cible_mois", "moq_kg",
+            "multiple_achat_kg", "suivi_lot", "code_sh", "actif",
         ],
         suppression: Suppression::Logique("actif"),
         // prix_kg_mad applique la MEME regle que le plan d'achat : le CMUP reel
@@ -599,12 +619,20 @@ pub struct Filtre {
     pub sens: Option<String>,
 }
 
+/// Une liste lue, et la coupe qu'elle a subie.
+pub struct Liste {
+    pub valeur: Value,
+    /// `(total, limite)` quand le tableau nu a ete coupe a la limite ; `None`
+    /// quand il est complet (ou qu'il est pagine : l'enveloppe porte le total).
+    pub coupee: Option<(i64, i64)>,
+}
+
 pub async fn lister(
     db: &Db,
     user: &Utilisateur,
     e: &Entite,
     f: &Filtre,
-) -> AppResult<Value> {
+) -> AppResult<Liste> {
     user.exiger(db, e.module, Action::Lire).await?;
 
     // ON NE TRIE NI NE FILTRE SUR CE QU'ON NE VOIT PAS (audit v4) : trier les
@@ -660,13 +688,21 @@ pub async fn lister(
         // `ILIKE` ET NON `LIKE` : PostgreSQL distingue la casse. En `LIKE`,
         // taper « pes » ne trouvait jamais « PES-3000 Deniers » — le champ de
         // recherche paraissait casse alors qu'il obeissait a la lettre.
+        //
+        // ON NE CHERCHE PAS DANS UN CHAMP MASQUE (24/10/2026) : la reponse dirait
+        // ce que le champ contient. Rien de visible ou chercher : rien ne sort.
         let cibles: Vec<String> = ["libelle", "nom", "designation", "couleur", "type_fil"]
             .iter()
             .filter(|c| e.creation.contains(*c))
+            .copied()
+            .chain(std::iter::once(e.cle))
+            .filter(|c| !masque(c))
             .map(|c| format!("c.{c}"))
-            .chain(std::iter::once(format!("c.{}", e.cle)))
             .collect();
-        for mot in motif.split_whitespace() {
+        if cibles.is_empty() && !motif.trim().is_empty() {
+            conditions.push("FALSE".into());
+        }
+        for mot in motif.split_whitespace().filter(|_| !cibles.is_empty()) {
             valeurs.push(format!("%{mot}%"));
             let i = valeurs.len();
             conditions.push(format!(
@@ -701,6 +737,9 @@ pub async fn lister(
     let limite = f.limite.clamp(1, 5000);
     let offset = f.offset.unwrap_or(0).max(0);
 
+    /* UNE LIGNE DE PLUS que la limite, en tableau nu : c'est elle qui dit si la
+       liste a ete coupee (24/10/2026). Avant, la coupe a 500 etait muette — au
+       501e fournisseur, l'ecran n'en savait rien et la valeur n'existait plus. */
     let sql = format!(
         "SELECT {} FROM {} c {} {} ORDER BY {} LIMIT {} OFFSET {}",
         e.selection,
@@ -708,7 +747,7 @@ pub async fn lister(
         jointures(e.table),
         ou,
         tri,
-        limite,
+        if f.offset.is_none() { limite + 1 } else { limite },
         offset
     );
 
@@ -716,13 +755,17 @@ pub async fn lister(
     for v in &valeurs {
         q = q.bind(v);
     }
-    let rows = q.fetch_all(db).await?;
+    let mut rows = q.fetch_all(db).await?;
+    let coupee = f.offset.is_none() && rows.len() as i64 > limite;
+    if coupee {
+        rows.truncate(limite as usize);
+    }
 
     let mut valeur = lignes_en_json(&rows);
     user.masquer(db, e.module, &mut valeur).await?;
 
-    if f.offset.is_none() {
-        return Ok(valeur);
+    if f.offset.is_none() && !coupee {
+        return Ok(Liste { valeur, coupee: None });
     }
 
     /* Le total porte sur le filtre, pas sur la page : sans lui le client ne
@@ -741,7 +784,20 @@ pub async fn lister(
     }
     let total: i64 = qt.fetch_one(db).await?;
 
-    Ok(json!({ "lignes": valeur, "total": total, "limite": limite, "offset": offset }))
+    if f.offset.is_none() {
+        // Le tableau nu reste un tableau (les ecrans l'attendent) ; la coupe
+        // part en en-tetes, posees par la route.
+        return Ok(Liste { valeur, coupee: Some((total, limite)) });
+    }
+    let rendues = valeur.as_array().map_or(0, |a| a.len()) as i64;
+    Ok(Liste {
+        valeur: json!({
+            "lignes": valeur, "total": total, "limite": limite, "offset": offset,
+            // Il reste des lignes apres cette page : l'ecran le dit.
+            "plus": total > offset + rendues,
+        }),
+        coupee: None,
+    })
 }
 
 pub async fn lire(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> AppResult<Value> {
@@ -842,6 +898,7 @@ pub async fn modifier(
     user: &Utilisateur,
     e: &Entite,
     id: &str,
+    version: i64,
     charge: &Map<String, Value>,
 ) -> AppResult<Value> {
     user.exiger(db, e.module, Action::Ecrire).await?;
@@ -855,7 +912,7 @@ pub async fn modifier(
     let set: Vec<String> = champs.iter().map(|(n, _)| format!("{n} = p.{n}")).collect();
     let sql = format!(
         "UPDATE {} AS c SET {} FROM jsonb_populate_record(NULL::{}, $1::jsonb) AS p
-          WHERE c.{}::text = $2",
+          WHERE c.{}::text = $2 AND c.version = $3 RETURNING c.version::bigint",
         e.table,
         set.join(", "),
         e.table,
@@ -865,18 +922,24 @@ pub async fn modifier(
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let res = sqlx::query(&sql)
+    // LA NOUVELLE VERSION REVIENT A L'ECRAN : celui qui corrige deux fois de
+    // suite la meme fiche (une reference depuis un bon) la presente ensuite.
+    // LE VERROU EST DANS L'ECRITURE (decision du 19/10/2026) : `AND version = $3`.
+    // Aucune ligne touchee : la fiche a change depuis que l'ecran l'a lue.
+    let nouvelle: Option<i64> = sqlx::query_scalar(&sql)
         .bind(charge_jsonb(&champs))
         .bind(id)
-        .execute(&mut *tx)
+        .bind(version)
+        .fetch_optional(&mut *tx)
         .await?;
-    if res.rows_affected() == 0 {
-        return Err(AppError::Introuvable(format!("{} {id}", e.chemin)));
-    }
+    let Some(nouvelle) = nouvelle else {
+        return Err(refus(&mut tx, e.table, e.cle, id, &format!("La fiche {id}")).await);
+    };
     tx.commit().await?;
 
     Ok(json!({
         e.cle: id,
+        "version": nouvelle,
         "champs_modifies": champs.iter().map(|(n, _)| n).collect::<Vec<_>>(),
     }))
 }
@@ -904,7 +967,13 @@ async fn retenue_par(db: &Db, contrainte: Option<&str>) -> Option<String> {
     .flatten()
 }
 
-pub async fn supprimer(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> AppResult<Value> {
+pub async fn supprimer(
+    db: &Db,
+    user: &Utilisateur,
+    e: &Entite,
+    id: &str,
+    version: i64,
+) -> AppResult<Value> {
     user.exiger(db, e.module, Action::Ecrire).await?;
 
     let mut tx = db.begin().await?;
@@ -933,11 +1002,13 @@ pub async fn supprimer(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> App
         // La desactivation reste possible, mais comme un acte a part : on met
         // `actif` a zero. Retirer et desactiver ne sont pas la meme decision.
         Suppression::Logique(_) | Suppression::Physique => {
-            format!("DELETE FROM {} WHERE {} = $1", e.table, e.cle)
+            // On ne supprime pas une fiche qu'un autre vient de modifier sans
+            // l'avoir vue : la version lue est dans la condition.
+            format!("DELETE FROM {} WHERE {}::text = $1 AND version = $2", e.table, e.cle)
         }
     };
 
-    let res = match sqlx::query(&sql).bind(id).execute(&mut *tx).await {
+    let res = match sqlx::query(&sql).bind(id).bind(version).execute(&mut *tx).await {
         Ok(r) => r,
         // 23503 : violation de cle etrangere. Quelque chose s'appuie sur cette
         // ligne. Le message brut de PostgreSQL ne veut rien dire pour qui
@@ -975,7 +1046,7 @@ pub async fn supprimer(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> App
         Err(autre) => return Err(autre.into()),
     };
     if res.rows_affected() == 0 {
-        return Err(AppError::Introuvable(format!("{} {id}", e.chemin)));
+        return Err(refus(&mut tx, e.table, e.cle, id, &format!("La fiche {id}")).await);
     }
     tx.commit().await?;
 

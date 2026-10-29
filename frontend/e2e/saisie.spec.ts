@@ -3,11 +3,13 @@
  * les vrais roles, puis relus au serveur. Le nombre tape « 1 234,5 » doit etre
  * enregistre 1234,5 — ni 12345, ni 1,2345, ni vide.
  *
- * Les parcours s'enchainent comme au bureau : l'assistante cree le bon, la
- * direction le valide et l'envoie, le magasin le receptionne.
+ * Les parcours s'enchainent comme au bureau : l'assistante cree le bon et
+ * l'envoie au controle, la direction le controle, saisit la reponse du
+ * fournisseur a la demande de prix, le valide et l'envoie, le magasin le
+ * receptionne.
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { attendu, consigner, lireApi, mesurer, saisir, session, type Constat } from './outils'
+import { attendu, choisirRecherche, consigner, echapper, lireApi, mesurer, saisir, session, type Constat } from './outils'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -26,7 +28,7 @@ function champNombre(page: Page, options: { name: string | RegExp; exact?: boole
   return page.getByRole('textbox', options).or(page.getByRole('spinbutton', options))
 }
 
-/** Le statut d'une reception, lu au serveur (l'ecran affiche le code brut). */
+/** Le statut d'une reception, lu au serveur (l'ecran affiche son libelle). */
 async function statutReception(page: Page, id: string) {
   const liste = await lireApi<Record<string, unknown>[]>(page, '/api/receptions')
   return liste.find((r) => r.id_reception === id)?.statut
@@ -34,10 +36,28 @@ async function statutReception(page: Page, id: string) {
 
 /** Choisir l'option d'une liste par une partie de son libelle, comme on la lit. */
 async function choisirOption(liste: Locator, motif: RegExp) {
+  // LA LISTE PEUT ARRIVER APRES LE CHAMP (20/10/2026) : les types de frais se
+  // chargent a part ; lue trop tot, elle ne portait que « Nouveau frais… ».
+  await expect
+    .poll(async () => (await liste.locator('option').allTextContents()).some((l) => motif.test(l)), { timeout: 10_000 })
+    .toBe(true)
+    .catch(() => undefined)
   const libelles = await liste.locator('option').allTextContents()
   const libelle = libelles.find((l) => motif.test(l))
   expect(libelle, `aucune option ${motif} dans ${JSON.stringify(libelles)}`).toBeTruthy()
   await liste.selectOption({ label: libelle! })
+}
+
+/** Ajoute une reference a la liste d'un inventaire tournant ou cible, par recherche (2026-10-24b). */
+async function ajouterALaListe(page: Page, ref: string) {
+  if (await page.getByRole('button', { name: `Retirer ${ref}`, exact: true }).count()) return
+  const champ = page.getByRole('combobox', { name: 'Ajouter une référence à compter' })
+  await champ.click()
+  await champ.pressSequentially(ref, { delay: 20 })
+  const option = page.getByRole('listbox').getByRole('option').filter({ hasText: ref }).first()
+  await expect(option).toBeVisible({ timeout: 15_000 })
+  await option.click()
+  await expect(page.getByRole('button', { name: `Retirer ${ref}`, exact: true })).toBeVisible()
 }
 
 /** La premiere proposition de la liste deroulante « Référence de la ligne ». */
@@ -77,7 +97,7 @@ test('les formats de nombre tapés dans une quantité', async ({ browser }, info
   ]
   const { page } = await session(browser, info, 'Assistante')
   await page.goto('/bons-commande/nouveau')
-  await page.locator('#frs').selectOption('FRS-001')
+  await choisirRecherche(page, page.locator('#frs'), 'FRS-001', /^FRS-001 — /)
   await choisirReference(page, 'PP')
   const qte = champNombre(page, { name: 'Quantité en kilos' }).first()
   const constats: Constat[] = []
@@ -106,7 +126,7 @@ test('les formats de nombre tapés dans une quantité', async ({ browser }, info
 test('bon de commande : l’assistante le crée, au format français', async ({ browser }, info) => {
   const { page, veille } = await session(browser, info, 'Assistante')
   await page.goto('/bons-commande/nouveau')
-  await page.locator('#frs').selectOption('FRS-001')
+  await choisirRecherche(page, page.locator('#frs'), 'FRS-001', /^FRS-001 — /)
   await saisir(page.getByLabel('Observations'), 'Commande e2e : livraison en deux palettes, quai 3, avant 10 h.')
   // Une reference que les scenarios du banc ne sortent pas (regle des 50 kg par jour).
   await choisirReference(page, '6666')
@@ -134,16 +154,37 @@ test('bon de commande : l’assistante le crée, au format français', async ({ 
   expect(Number(lignes[0].prix_unitaire_devise)).toBeCloseTo(3.75, 4)
   expect(Number(lignes[0].remise_pct)).toBeCloseTo(2.5, 4)
 
-  await page.getByRole('button', { name: /Soumettre [aà] validation/ }).click()
-  await expect(page.getByText('A valider').or(page.getByText('En attente'))).toBeVisible()
+  // LE CIRCUIT DU 21/10/2026 : le bon part au controle, pas directement a la direction.
+  await page.getByRole('button', { name: /Envoyer au contr[oô]le/ }).click()
+  await expect(page.getByText('Au contrôle', { exact: true })).toBeVisible()
   expect(veille.erreurs).toEqual([])
   await page.context().close()
 })
 
-test('bon de commande : la direction le valide à un autre taux, puis l’envoie', async ({ browser }, info) => {
+test('bon de commande : la direction le contrôle, saisit la réponse du fournisseur, le valide à un autre taux, puis l’envoie', async ({ browser }, info) => {
   test.skip(!idBc, 'pas de bon créé')
   const { page, veille } = await session(browser, info, 'Choukri')
   await page.goto(`/bons-commande/${idBc}`)
+  // Le controle par un autre compte que le createur, puis la demande de prix.
+  await page.getByRole('button', { name: /Contr[oô]l[ée] : demande de prix/ }).click()
+  await expect(page.getByText('Réponse du fournisseur')).toBeVisible()
+  // La reponse du fournisseur, tapee au format francais : le prix confirme
+  // remplace celui de la ligne, le prix d'avant reste pour l'ecart.
+  await saisir(page.getByRole('textbox', { name: 'Prix confirmé ligne 1' }), '3,8')
+  await page.getByRole('button', { name: 'Enregistrer la réponse' }).click()
+  await expect
+    .poll(async () => {
+      const r = await lireApi<{ lignes?: Record<string, number>[] } | Record<string, number>[]>(
+        page,
+        `/api/bons-commande/${idBc}/lignes`,
+      )
+      const l = (Array.isArray(r) ? r : (r.lignes ?? []))[0]
+      return [Number(l.prix_unitaire_devise), Number(l.prix_unitaire_avant_demande), Number(l.quantite_commandee_kg)]
+    })
+    .toEqual([3.8, 3.75, 1234.5])
+  await page.getByRole('button', { name: 'Soumettre à validation', exact: true }).click()
+  // L'ecart se signale a la direction, il ne bloque pas.
+  await expect(page.getByText('1 écart(s) de prix')).toBeVisible()
   await page.getByRole('button', { name: 'Valider', exact: true }).click()
   const taux = page.locator('input[inputmode=decimal]').first()
   await saisir(taux, '10,05')
@@ -167,7 +208,7 @@ test('bon de commande : la direction le valide à un autre taux, puis l’envoie
   expect(entete.motif_taux_engage).toBe('Taux confirmé par la banque')
 
   await page.getByRole('button', { name: 'Envoyer au fournisseur' }).click()
-  await expect(page.getByText('Envoye').first()).toBeVisible()
+  await expect(page.getByText(/^Envoy[ée]$/).first()).toBeVisible()
   expect(veille.erreurs).toEqual([])
   await page.context().close()
 })
@@ -176,20 +217,19 @@ test('réception : le magasin reprend le bon, pèse au format français et soume
   test.skip(!numeroBc, 'pas de bon envoyé')
   const { page, veille } = await session(browser, info, 'Magasinie')
   await page.goto('/receptions/nouvelle')
-  await page.getByRole('combobox', { name: 'Fournisseur *' }).selectOption('FRS-001')
-  await saisir(page.getByLabel('Bon de livraison'), 'BL-E2E-0001')
-  await saisir(page.getByLabel('Transporteur'), 'Transports Atlas Tanger')
-  await saisir(champNombre(page, { name: 'Nombre de colis' }), '3')
-  await saisir(champNombre(page, { name: /^Poids brut/ }), '1 260,8')
-  const bons = page.getByRole('combobox', { name: 'Bon de commande' })
-  const option = bons.locator('option', { hasText: numeroBc })
-  await bons.selectOption({ label: (await option.textContent())!.trim() })
-  await page.getByRole('button', { name: 'Reprendre les lignes' }).click()
+  // Le fournisseur et le bon se cherchent (24/10/2026) ; choisir le bon reprend ses lignes.
+  await choisirRecherche(page, page.locator('#frs'), 'FRS-001', /^FRS-001 — /)
+  await saisir(page.locator('#bl'), 'BL-E2E-0001')
+  await saisir(page.locator('#tr'), 'Transports Atlas Tanger')
+  await saisir(page.locator('#colis'), '3')
+  await saisir(page.locator('#brut'), '1 260,8')
+  await choisirRecherche(page, page.getByRole('combobox', { name: 'Bon de commande' }), numeroBc)
 
+  // LA SAISIE SUR LA LIGNE (24/10/2026) : la ligne reprise se saisit dans la grille.
   const pesee = champNombre(page, { name: 'Quantité pesée, en kilos' }).first()
   await saisir(champNombre(page, { name: 'Quantité du bon de livraison, en kilos' }).first(), '1 234,5')
   await saisir(pesee, '1 230,25')
-  await saisir(page.getByLabel('Lot fournisseur').first(), `LOT-E2E-${PASSAGE}`)
+  await saisir(page.getByRole('textbox', { name: 'Lot fournisseur' }).first(), `LOT-E2E-${PASSAGE}`)
   // Les bobines comptees : pesee, palettes et bobines sont liees ; on verifie
   // que compter les bobines n'ecrase pas la pesee tapee juste avant.
   const bobines = champNombre(page, { name: 'Nombre de bobines' }).first()
@@ -290,13 +330,12 @@ test('référence : la direction crée une fiche, poids et prix au format franç
   await saisir(page.getByRole('textbox', { name: /^Référence(?! fournisseur)/ }), code)
   await saisir(page.getByRole('textbox', { name: /^(?:Designation|Désignation) \*$/ }), 'Polypropylène 1500 deniers texturé, beige sable, bobine conique 2,6 kg')
   await page.getByRole('combobox', { name: /^Catégorie mati[eè]re \*$/ }).selectOption({ index: 1 })
-  await page.getByRole('combobox', { name: 'Fournisseur *' }).selectOption('FRS-001')
+  await choisirRecherche(page, page.getByRole('combobox', { name: 'Fournisseur *' }), 'FRS-001', /^FRS-001 — /)
   await saisir(champNombre(page, { name: /^Densité/ }), '0,0125')
   await saisir(champNombre(page, { name: /^Poids par unité/ }), '2,597')
   await saisir(champNombre(page, { name: /^Unités par palette/ }), '240')
   await saisir(champNombre(page, { name: /^Stock minimum/ }), '1 500')
-  await saisir(champNombre(page, { name: 'Couverture minimale (mois)' }), '1,5')
-  await saisir(champNombre(page, { name: /^Marge de sécurité/ }), '12,5')
+  await saisir(champNombre(page, { name: /^Couverture cible \(mois\)/ }), '1,5')
   await saisir(champNombre(page, { name: 'Prix par unité *' }), '3,85')
   await page.getByRole('combobox', { name: 'Devise *' }).selectOption('USD')
   const constats = [...veille.constats, ...(await mesurer(page))]
@@ -334,8 +373,9 @@ test('référence : la direction crée une fiche, poids et prix au format franç
   expect(Number(r.poids_bobine_kg), 'poids par unité').toBeCloseTo(2.597, 4)
   expect(Number(r.bobines_par_palette), 'unités par palette').toBe(240)
   expect(Number(r.stock_min_kg), 'stock minimum').toBeCloseTo(1500, 4)
-  expect(Number(r.couverture_min_mois), 'couverture').toBeCloseTo(1.5, 4)
-  expect(Number(r.marge_securite_pct), 'marge').toBeCloseTo(12.5, 4)
+  expect(Number(r.couverture_cible_mois), 'couverture cible').toBeCloseTo(1.5, 4)
+  // La marge de sécurité de l'article est retirée (2026-10-27l) ; celle de la qualité reste.
+  expect(r.marge_securite_pct, 'marge article retirée').toBeUndefined()
   expect(Number(r.prix_catalogue), 'prix').toBeCloseTo(3.85, 4)
   expect(veille.erreurs).toEqual([])
   await page.context().close()
@@ -353,8 +393,8 @@ test('mouvement : le magasin sort 12,5 kg hors machine, avec un motif', async ({
   await saisir(champNombre(page, { name: 'Quantité en kilos' }).first(), '12,5')
   await choisirOption(page.getByRole('combobox', { name: /^Motif/ }).first(), /Sortie hors machine/)
   await choisirOption(page.getByRole('combobox', { name: 'Motif de la ligne' }).first(), /chantillon/i)
-  const lot = page.locator('tbody select').filter({ has: page.locator('option', { hasText: 'Choisir un lot' }) }).first()
-  if (await lot.count()) await choisirOption(lot, new RegExp(`LOT-E2E-${PASSAGE}`))
+  // Le lot se cherche (24/10/2026) : le premier a sortir est propose d'office, on prend le notre.
+  await choisirRecherche(page, page.getByRole('combobox', { name: 'Lot fournisseur' }).first(), `LOT-E2E-${PASSAGE}`)
   const constats = [...veille.constats, ...(await mesurer(page))]
   await page.screenshot({ path: info.outputPath('mouvement.png'), fullPage: true })
   consigner(info, 'saisie : sortie hors machine', constats, info.outputPath('mouvement.png'))
@@ -388,8 +428,7 @@ test('transfert : le magasin expédie 120,5 kg, le fil est en route, puis récep
   await page.getByRole('button', { name: 'Ajouter une ligne' }).click()
   await choisirReference(page, refRecue)
   await saisir(champNombre(page, { name: 'Quantité en kilos' }).first(), '120,5')
-  const lot = page.locator('tbody select').filter({ has: page.locator('option', { hasText: /lot/i }) }).first()
-  if (await lot.count()) await choisirOption(lot, new RegExp(`LOT-E2E-${PASSAGE}`)).catch(() => undefined)
+  await choisirRecherche(page, page.getByRole('combobox', { name: 'Lot fournisseur' }).first(), `LOT-E2E-${PASSAGE}`)
   const constats = [...veille.constats, ...(await mesurer(page))]
   // La ligne se valide par son bouton ✓ ; en 1366, il est hors de l'ecran, a droite
   // du tableau coupe : on le signale, puis on fait defiler comme l'utilisateur.
@@ -420,10 +459,17 @@ test('transfert : le magasin expédie 120,5 kg, le fil est en route, puis récep
   const ligne = page.getByRole('row', { name: new RegExp(numero) })
     .or(page.getByRole('article').filter({ hasText: numero }))
 
-  // L'expedition, depuis la liste, avec sa confirmation.
+  // L'expedition, depuis la liste, avec sa confirmation. LA DATE PREVUE DE DISPONIBILITE
+  // est exigee a l'expedition (27/10/2026) : le brouillon n'en porte pas, elle se saisit
+  // SUR LA LIGNE (jour de Casablanca + 5), puis la confirmation.
+  const dispo = new Date(Date.now() + 5 * 86_400_000).toLocaleDateString('sv-SE', { timeZone: 'Africa/Casablanca' })
   await ligne.getByRole('button', { name: /^Exp[ée]dier$/ }).click()
+  await page.getByLabel(/^Disponible au magasin destinataire/).fill(dispo)
+  await page.getByRole('button', { name: /^Exp[ée]dier avec cette date$/ }).click()
   await page.getByRole('alertdialog').or(page.getByRole('dialog')).getByRole('button', { name: /^Exp[ée]dier$/ }).click()
   await expect.poll(async () => (await stock('tous')).enRoute).toBeCloseTo(avant.enRoute + 120.5, 4)
+  const expedie = (await lireApi<Record<string, unknown>[]>(page, '/api/transferts')).find((t) => t.numero_transfert === numero)!
+  expect(String(expedie.date_disponibilite_prevue ?? '').slice(0, 10), 'date prévue de disponibilité').toBe(dispo)
   const enRoute = await stock('tous')
   expect(enRoute.total, 'le fil en route a quitté les magasins').toBeCloseTo(avant.total - 120.5, 4)
 
@@ -446,7 +492,11 @@ test('inventaire : Choukri compte Polyfashions (−2,25 kg justifié), Mohamed v
   await page.getByRole('button', { name: 'Nouvel inventaire' }).first().click()
   await page.getByRole('combobox', { name: 'Magasin *', exact: true }).selectOption('Polyfashions')
   await page.getByRole('combobox', { name: /^Type/ }).last().selectOption('TOURNANT')
-  await page.getByRole('button', { name: /^Cr[ée]er$/ }).click()
+  // LA LISTE DU TOURNANT (2026-10-24b) : la proposition arrive ; notre reference s'y ajoute par
+  // recherche si elle n'est pas due, et la liste se valide avec la creation.
+  await expect(page.getByText(/Proposition : \d+ référence/)).toBeVisible({ timeout: 15_000 })
+  await ajouterALaListe(page, refRecue)
+  await page.getByRole('button', { name: /^Valider la liste et cr[ée]er$/ }).click()
   // L'inventaire cree s'ouvre sur SA page (13/10/2026), ses lignes deja preparees.
   await expect(page).toHaveURL(/\/inventaires\/[0-9a-f-]{36}$/)
   const inv = { id_inventaire: page.url().split('/').pop()! }
@@ -502,6 +552,44 @@ test('inventaire : Choukri compte Polyfashions (−2,25 kg justifié), Mohamed v
   await page.context().close()
 })
 
+test('inventaire ciblé : Choukri choisit une famille et une référence, la liste fait les lignes, puis l’annule', async ({ browser }, info) => {
+  test.skip(!refRecue, 'pas de référence reçue')
+  const { page, veille } = await session(browser, info, 'Choukri')
+  await page.goto('/inventaires')
+  await page.getByRole('button', { name: 'Nouvel inventaire' }).first().click()
+  await page.getByRole('combobox', { name: 'Magasin *', exact: true }).selectOption('Morocco')
+  await page.getByRole('combobox', { name: /^Type/ }).last().selectOption('CIBLE')
+  // Sans liste, pas de creation.
+  await expect(page.getByRole('button', { name: /^Valider la liste et cr[ée]er$/ })).toBeDisabled()
+  // Une famille entiere (la premiere qui a du stock ici), puis une reference par recherche.
+  const famille = page.getByRole('combobox', { name: 'Famille à ajouter' })
+  await expect.poll(async () => famille.locator('option').count(), { timeout: 15_000 }).toBeGreaterThan(1)
+  await famille.selectOption({ index: 1 })
+  await page.getByRole('button', { name: 'Ajouter la famille' }).click()
+  await ajouterALaListe(page, refRecue)
+  const retirer = page.getByRole('button', { name: /^Retirer / })
+  const choisies = (await retirer.evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')!.replace('Retirer ', ''))))
+  expect(choisies, 'la liste du ciblé').toContain(refRecue)
+  consigner(info, 'saisie : liste d’un inventaire ciblé', [...veille.constats, ...(await mesurer(page))])
+  await page.getByRole('button', { name: /^Valider la liste et cr[ée]er$/ }).click()
+  await expect(page).toHaveURL(/\/inventaires\/[0-9a-f-]{36}$/)
+  const id = page.url().split('/').pop()!
+  // Relu au serveur : la liste est celle de l'ecran, les lignes n'en sortent pas.
+  const liste = await lireApi<{ code_reference: string }[]>(page, `/api/inventaires/${id}/references`)
+  expect(liste.map((r) => r.code_reference).sort()).toEqual([...choisies].sort())
+  const lignes = await lireApi<{ code_reference: string }[]>(page, `/api/inventaires/${id}/lignes`)
+  expect(lignes.length, 'aucune ligne préparée').toBeGreaterThan(0)
+  expect(lignes.filter((l) => !choisies.includes(l.code_reference)), 'ligne hors de la liste').toEqual([])
+  await expect(page.getByText(/Références choisies \(\d+\)/)).toBeVisible()
+  // Annule : le magasin se libere pour la suite.
+  await page.getByRole('button', { name: 'Annuler', exact: true }).first().click()
+  await saisir(page.locator('#motif-action'), 'Essai de liste ciblée (e2e)')
+  await page.getByRole('dialog').getByRole('button', { name: /^Annuler l.inventaire$/ }).click()
+  await expect.poll(async () => (await lireApi<{ statut: string }>(page, `/api/inventaires/${id}`)).statut).toBe('ANNULE')
+  expect(veille.erreurs).toEqual([])
+  await page.context().close()
+})
+
 test('retour fournisseur : la direction rend 10,5 kg, un autre compte valide', async ({ browser }, info) => {
   test.skip(!refRecue || !idReception, 'pas de réception validée')
   const { page, veille } = await session(browser, info, 'Choukri')
@@ -509,12 +597,13 @@ test('retour fournisseur : la direction rend 10,5 kg, un autre compte valide', a
     Number((await lireApi<Record<string, unknown>[]>(page, '/api/catalogue?actif=1&limite=2000')).find((l) => l.code_reference === refRecue)!.stock_total_kg)
   const avant = await totalRef()
   await page.goto('/retours-fournisseur/nouveau')
-  await page.locator('#rfo-fournisseur').selectOption({ index: 1 })
+  // Le fournisseur se cherche (24/10/2026) : celui du bon recu.
+  await choisirRecherche(page, page.locator('#rfo-fournisseur'), 'FRS-001', /^FRS-001 — /)
   await saisir(page.locator('#rfo-motif'), 'Bobines tachées — e2e')
   await page.getByRole('combobox', { name: 'Magasin' }).first().selectOption('Morocco')
-  await page.getByRole('combobox', { name: 'Référence' }).first().selectOption(refRecue)
-  const lot = page.getByRole('combobox', { name: 'Lot' }).first()
-  if (await lot.locator('option', { hasText: `LOT-E2E-${PASSAGE}` }).count()) await choisirOption(lot, new RegExp(`LOT-E2E-${PASSAGE}`))
+  await choisirRecherche(page, page.getByRole('combobox', { name: 'Référence', exact: true }).first(), refRecue,
+    new RegExp(`^${echapper(refRecue)}(?: — |$)`))
+  await choisirRecherche(page, page.getByRole('combobox', { name: 'Lot', exact: true }).first(), `LOT-E2E-${PASSAGE}`)
   await saisir(page.getByRole('textbox', { name: 'Quantité kg' }).first(), '10,5')
   await page.getByRole('combobox', { name: 'Motif de la ligne' }).first().selectOption('R1')
   consigner(info, 'saisie : retour fournisseur', [...veille.constats, ...(await mesurer(page))])

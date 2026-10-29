@@ -356,7 +356,7 @@ pub async fn enregistrer_droits(
             // et le modele ne le touchera plus.
             "INSERT INTO droit_champ (id_utilisateur, module, champ, niveau,
                                       date_modification, id_utilisateur_modif, origine)
-             SELECT $1, $2, $3, $4, $5, $6,
+             SELECT $1, $2, $3, $4, fn_instant($5), $6,
                     CASE WHEN COALESCE(m.niveau, cc.niveau_defaut) = $4 THEN 'MODELE' ELSE 'MANUEL' END
                FROM champ_configurable cc
                JOIN utilisateur u ON u.id_utilisateur = $1
@@ -440,7 +440,7 @@ pub async fn appliquer_modele_role(
     let n = sqlx::query(
         "INSERT INTO droit_champ (id_utilisateur, module, champ, niveau,
                                   date_modification, id_utilisateur_modif, origine)
-         SELECT $1, m.module, m.champ, m.niveau, $4, $5, 'MODELE'
+         SELECT $1, m.module, m.champ, m.niveau, fn_instant($4), $5, 'MODELE'
            FROM modele_droit_champ m
           WHERE m.code_role_user = $2
             AND ($3 IS NULL OR m.module = $3)",
@@ -473,7 +473,7 @@ async fn appliquer_modele(
     Ok(sqlx::query(
         "INSERT INTO droit_champ (id_utilisateur, module, champ, niveau,
                                   date_modification, id_utilisateur_modif, origine)
-         SELECT $1, m.module, m.champ, m.niveau, $3, $4, 'MODELE'
+         SELECT $1, m.module, m.champ, m.niveau, fn_instant($3), $4, 'MODELE'
            FROM modele_droit_champ m WHERE m.code_role_user = $2",
     )
     .bind(id_utilisateur)

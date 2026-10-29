@@ -22,10 +22,10 @@ import { api } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../components/Layout'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
-import { Alerte, Bouton, Carte, CarteCorps, Chargement, EtatVide, Squelette } from '../composants/ui/base'
+import { Alerte, Badge, Bouton, Carte, CarteCorps, Chargement, EtatVide, Squelette } from '../composants/ui/base'
 import { exporterCsv } from '../lib/export'
-import { fmt } from '../components/ui'
-import { cn } from '../lib/utils'
+import { cn, fmt } from '../lib/utils'
+import { TEXTE_TON, libelleStatut, tonStatut } from '../lib/statuts'
 
 const MODULE = 'COCKPIT'
 
@@ -41,18 +41,6 @@ interface Controle {
 type LigneDetail = Record<string, unknown>
 
 const ORDRE: Record<string, number> = { BLOQUANT: 0, CRITIQUE: 1, ATTENTION: 2 }
-
-const TEINTE: Record<string, string> = {
-  BLOQUANT: 'text-danger',
-  CRITIQUE: 'text-alerte',
-  ATTENTION: 'text-alerte',
-}
-
-const FOND: Record<string, string> = {
-  BLOQUANT: 'bg-danger/12 text-danger',
-  CRITIQUE: 'bg-alerte/15 text-alerte',
-  ATTENTION: 'bg-alerte/12 text-alerte',
-}
 
 /**
  * Ce que chaque niveau engage, dit une fois plutot que repete par ligne.
@@ -71,24 +59,21 @@ const SENS: Record<string, string> = {
 }
 
 function Pastille({ c }: { c: Controle }) {
+  // Le ton vient de la table des statuts (criticite) : CRITIQUE y est danger,
+  // comme partout ailleurs (24/10/2026).
   if (c.anomalies === 0) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-[3px] bg-succes/12 px-1.5 py-px text-[11px] font-medium text-succes">
+      <Badge ton="succes">
         <CheckCircle2 className="size-3" />
         au vert
-      </span>
+      </Badge>
     )
   }
   return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 rounded-[3px] px-1.5 py-px text-[11px] font-medium tabular-nums',
-        FOND[c.criticite],
-      )}
-    >
+    <Badge ton={tonStatut('criticite', c.criticite)} className="tabular-nums" title={libelleStatut('criticite', c.criticite)}>
       <TriangleAlert className="size-3" />
       {fmt.nombre(c.anomalies, 0)}
-    </span>
+    </Badge>
   )
 }
 
@@ -321,14 +306,14 @@ export function Controles() {
                         <span
                           className={cn(
                             'w-9 shrink-0 font-mono text-[12px] font-semibold',
-                            c.anomalies > 0 ? TEINTE[c.criticite] : 'text-attenue-texte',
+                            c.anomalies > 0 ? TEXTE_TON[tonStatut('criticite', c.criticite)] : 'text-attenue-texte',
                           )}
                         >
                           {c.code}
                         </span>
                         <span className="min-w-0 flex-1 truncate text-[13px]">{c.controle}</span>
                         <span className="hidden shrink-0 text-[10px] uppercase tracking-wider text-attenue-texte sm:inline">
-                          {c.criticite}
+                          {libelleStatut('criticite', c.criticite)}
                         </span>
                         <Pastille c={c} />
                         {c.anomalies > 0 && (

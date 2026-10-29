@@ -100,7 +100,7 @@ rotation AS (
       JOIN ligne_mouvement lm ON lm.id_mouvement = m.id_mouvement
       JOIN reference r ON r.code_reference = lm.code_reference
      WHERE t.signe = -1
-       AND m.date_mouvement >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
+       AND m.date_mouvement::text >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
                                        'YYYY-MM-DD')
 ),
 -- LE STOCK DORMANT : ce qui n'a pas bouge depuis soixante jours. Il ne se
@@ -111,7 +111,7 @@ dormant AS (
                    SELECT 1 FROM ligne_mouvement lm
                      JOIN mouvement m ON m.id_mouvement = lm.id_mouvement
                     WHERE lm.code_reference = e.code_reference
-                      AND m.date_mouvement >= to_char(
+                      AND m.date_mouvement::text >= to_char(
                           (now() AT TIME ZONE 'UTC') - interval '60 days', 'YYYY-MM-DD'))
            ), 0)                                                  AS dormant_mad,
            NULLIF(sum(e.valeur_mad), 0)                           AS total_mad
@@ -121,20 +121,20 @@ dormant AS (
 -- celui des six precedents. Une comparaison mois a mois serait du bruit.
 prix AS (
     SELECT sum(h.prix_kg_mad * h.quantite_achetee_kg) FILTER (
-               WHERE h.date_achat >= to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
+               WHERE h.date_achat::text >= to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
                                             'YYYY-MM-DD'))
            / NULLIF(sum(h.quantite_achetee_kg) FILTER (
-               WHERE h.date_achat >= to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
+               WHERE h.date_achat::text >= to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
                                             'YYYY-MM-DD')), 0)    AS recent,
            sum(h.prix_kg_mad * h.quantite_achetee_kg) FILTER (
-               WHERE h.date_achat < to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
+               WHERE h.date_achat::text < to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
                                            'YYYY-MM-DD')
-                 AND h.date_achat >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
+                 AND h.date_achat::text >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
                                             'YYYY-MM-DD'))
            / NULLIF(sum(h.quantite_achetee_kg) FILTER (
-               WHERE h.date_achat < to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
+               WHERE h.date_achat::text < to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
                                            'YYYY-MM-DD')
-                 AND h.date_achat >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
+                 AND h.date_achat::text >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
                                             'YYYY-MM-DD')), 0)    AS ancien
       FROM historique_prix h
      WHERE h.quantite_achetee_kg > 0 AND h.prix_kg_mad > 0

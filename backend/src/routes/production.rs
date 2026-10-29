@@ -90,6 +90,10 @@ pub struct LigneComposition {
 #[derive(Debug, Deserialize)]
 pub struct DocumentQualite {
     pub code_qualite: String,
+    /// LA VERSION LUE PAR L'ECRAN (verrou optimiste, 19/10/2026) : obligatoire
+    /// pour modifier un document existant, ignoree a la creation.
+    #[serde(default)]
+    pub version: Option<i64>,
     pub nom: String,
     pub description: Option<String>,
     pub statut: Option<String>,
@@ -227,6 +231,11 @@ pub async fn enregistrer_qualite(
         .execute(&mut *tx)
         .await?;
     } else {
+        crate::domain::concurrence::exiger_version(
+            &mut tx, "qualite", "code_qualite", code,
+            Some(crate::domain::concurrence::exigee(d.version)?), "Cette qualite",
+        )
+        .await?;
         sqlx::query(
             "UPDATE qualite SET
                  nom = $2, description = $3,
@@ -236,7 +245,7 @@ pub async fn enregistrer_qualite(
                  seuil_alerte_jours   = COALESCE($7, seuil_alerte_jours),
                  seuil_critique_jours = COALESCE($8, seuil_critique_jours),
                  stock_securite_jours = COALESCE($9, stock_securite_jours),
-                 date_modification = $10,
+                 date_modification = fn_instant($10),
                  id_utilisateur_modification = $11
               WHERE code_qualite = $1",
         )
@@ -383,10 +392,10 @@ pub async fn enregistrer_qualite(
         sqlx::query(
             "UPDATE qualite SET
                  statut = $2,
-                 date_cloture = CASE WHEN $2 = 'CLOTURE' THEN COALESCE(date_cloture, $3) END,
+                 date_cloture = CASE WHEN $2 = 'CLOTURE' THEN COALESCE(date_cloture, fn_instant($3)) END,
                  id_utilisateur_cloture = CASE WHEN $2 = 'CLOTURE'
                                                THEN COALESCE(id_utilisateur_cloture, $4) END,
-                 date_modification = $3, id_utilisateur_modification = $4
+                 date_modification = fn_instant($3), id_utilisateur_modification = $4
               WHERE code_qualite = $1",
         )
         .bind(code)
@@ -443,8 +452,8 @@ pub async fn composition_qualite(
                         COALESCE(r.cmup_mad, ROUND(r.prix_catalogue_kg * COALESCE((
                             SELECT t.taux FROM taux_change t
                              WHERE t.code_devise = r.code_devise_catalogue
-                               AND to_char(current_date, 'YYYY-MM-DD') >= t.date_debut
-                               AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') <= t.date_fin)
+                               AND current_date >= t.date_debut
+                               AND (t.date_fin IS NULL OR current_date < t.date_fin)
                              ORDER BY t.date_debut DESC LIMIT 1), 1.0), 4)) AS prix_kg_mad,
                         CASE WHEN r.cmup_mad IS NOT NULL THEN 'CMUP' ELSE 'CATALOGUE' END AS source_prix
                    FROM reference r) px ON px.code_reference = rc.code_reference
@@ -471,11 +480,17 @@ pub async fn supprimer_qualite(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(code): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::QUALITES, Action::Ecrire).await?;
+    let version = super::entites::version_exigee(q.version.map(serde_json::Value::String).as_ref())?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "qualite", "code_qualite", &code, Some(version), "Cette qualite",
+    )
+    .await?;
 
     let plans: i64 = sqlx::query_scalar(
         "SELECT (SELECT COUNT(*) FROM ligne_plan_production WHERE code_qualite = $1)
@@ -508,8 +523,8 @@ pub async fn supprimer_qualite(
     }
 
     let res = sqlx::query(
-        "UPDATE qualite SET statut = 'CLOTURE', date_cloture = $2,
-                            id_utilisateur_cloture = $3, date_modification = $2,
+        "UPDATE qualite SET statut = 'CLOTURE', date_cloture = fn_instant($2),
+                            id_utilisateur_cloture = $3, date_modification = fn_instant($2),
                             id_utilisateur_modification = $3
           WHERE code_qualite = $1 AND statut <> 'CLOTURE'",
     )
@@ -588,9 +603,11 @@ pub async fn modifier_qualite(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(code): Path<String>,
-    Json(charge): Json<Map<String, Value>>,
+    Json(mut charge): Json<Map<String, Value>>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::QUALITES, Action::Ecrire).await?;
+    // La version lue (verrou optimiste, 19/10/2026) n'est pas un champ de la qualite.
+    let version = super::entites::version_exigee(charge.remove("version").as_ref())?;
     let retenus = user
         .filtrer_ecriture(&state.db, module::QUALITES, &charge)
         .await?;
@@ -611,6 +628,10 @@ pub async fn modifier_qualite(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "qualite", "code_qualite", &code, Some(version), "Cette qualite",
+    )
+    .await?;
 
     let sql = format!(
         "UPDATE qualite AS c SET {} FROM jsonb_populate_record(NULL::qualite, $2::jsonb) AS p
@@ -656,7 +677,7 @@ pub async fn cloturer_qualite(
 
     // `actif` est desormais CALCULE depuis le statut : l'ecrire est refuse.
     let res = sqlx::query(
-        "UPDATE qualite SET statut = 'CLOTURE', date_cloture = $2, id_utilisateur_cloture = $3
+        "UPDATE qualite SET statut = 'CLOTURE', date_cloture = fn_instant($2), id_utilisateur_cloture = $3
           WHERE code_qualite = $1 AND statut <> 'CLOTURE'",
     )
     .bind(&code)
@@ -700,6 +721,9 @@ pub struct Densite {
     pub code_role: String,
     pub densite: f64,
     pub unite_densite: String,
+    /// La version de la QUALITE lue par l'ecran (verrou optimiste, 19/10/2026).
+    #[serde(default)]
+    pub version: Option<i64>,
 }
 
 /// Cree ou met a jour la densite d'un role. Une seule route pour les deux :
@@ -723,6 +747,12 @@ pub async fn definir_densite(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // UNE DENSITE EST UNE LIGNE DE LA QUALITE : c'est l'en-tete qui se verrouille.
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "qualite", "code_qualite", &code,
+        Some(crate::domain::concurrence::exigee(d.version)?), "Cette qualite",
+    )
+    .await?;
 
     sqlx::query(
         "INSERT INTO ligne_qualite
@@ -752,11 +782,18 @@ pub async fn supprimer_densite(
     State(state): State<AppState>,
     user: Utilisateur,
     Path((code, role)): Path<(String, String)>,
+    axum::extract::Query(q): axum::extract::Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::QUALITES, Action::Ecrire).await?;
+    let version = super::entites::version_exigee(q.version.map(serde_json::Value::String).as_ref())?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // UNE DENSITE EST UNE LIGNE DE LA QUALITE : c'est l'en-tete qui se verrouille.
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "qualite", "code_qualite", &code, Some(version), "Cette qualite",
+    )
+    .await?;
 
     // Retirer une densite utilisee par une recette validee rendrait le MRP
     // incalculable sur cette qualite.
@@ -908,7 +945,7 @@ pub async fn creer_plan(
               seuil_alerte_jours, seuil_critique_jours,
               seuil_tier1_mad, seuil_tier2_mad, seuil_tier3_mad,
               id_utilisateur_creation)
-         SELECT $1, $2, $3, $4, $5, $6, $7,
+         SELECT $1, $2, $3, $4, $5, fn_jour_casablanca($6), fn_jour_casablanca($7),
                 (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_MargeSecurite'),
                 (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_CouvMinMois'),
                 (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_TauxPerte'),
@@ -957,6 +994,10 @@ pub struct CoefSaison {
 pub struct DocumentPlan {
     /// Absent = creation.
     pub id_plan: Option<String>,
+    /// LA VERSION LUE PAR L'ECRAN (verrou optimiste, 19/10/2026) : obligatoire
+    /// pour modifier un document existant, ignoree a la creation.
+    #[serde(default)]
+    pub version: Option<i64>,
     pub libelle: String,
     pub scenario_nom: Option<String>,
     /// Mois de depart de la periode glissante, au format AAAA-MM ou AAAA-MM-JJ.
@@ -1142,12 +1183,17 @@ pub async fn enregistrer_plan(
     // --- Entete --------------------------------------------------------------
     let (id, cree) = match d.id_plan.as_deref().filter(|s| !s.is_empty()) {
         Some(id) => {
+            crate::domain::concurrence::exiger_version(
+                &mut tx, "plan_production", "id_plan", id,
+                Some(crate::domain::concurrence::exigee(d.version)?), "Ce plan",
+            )
+            .await?;
             sqlx::query(
                 "UPDATE plan_production SET
                      libelle = $2, scenario_nom = $3, annee = $4,
-                     date_debut = $5, date_fin = $6, mois_horizon = $7,
+                     date_debut = fn_jour_casablanca($5), date_fin = fn_jour_casablanca($6), mois_horizon = $7,
                      croissance_annuelle_pct = $8,
-                     date_modification = $9, id_utilisateur_modification = $10
+                     date_modification = fn_instant($9), id_utilisateur_modification = $10
                   WHERE id_plan = $1",
             )
             .bind(id)
@@ -1182,7 +1228,7 @@ pub async fn enregistrer_plan(
                       seuil_alerte_jours, seuil_critique_jours,
                       seuil_tier1_mad, seuil_tier2_mad, seuil_tier3_mad,
                       id_utilisateur_creation)
-                 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                 SELECT $1, $2, $3, $4, $5, fn_jour_casablanca($6), fn_jour_casablanca($7), $8, $9,
                         (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_MargeSecurite'),
                         (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_CouvMinMois'),
                         (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_TauxPerte'),
@@ -1220,7 +1266,7 @@ pub async fn enregistrer_plan(
     for b in &bases {
         sqlx::query(
             "INSERT INTO plan_qualite (id_plan, code_qualite, m2_base_mensuel, date_figee)
-             VALUES ($1, $2, $3, $4)",
+             VALUES ($1, $2, $3, fn_instant($4))",
         )
         .bind(&id)
         .bind(&b.code_qualite)
@@ -1301,10 +1347,16 @@ pub async fn enregistrer_plan(
         .execute(&mut *tx)
         .await?;
 
+    // La version a jour : l'ecran reste ouvert et la presentera au prochain enregistrement.
+    let version: i64 = sqlx::query_scalar("SELECT version::bigint FROM plan_production WHERE id_plan = $1")
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await?;
     tx.commit().await?;
 
     Ok(Json(json!({
         "id_plan": id,
+        "version": version,
         "cree": cree,
         "date_debut": depart.to_string(),
         "date_fin": date_fin.to_string(),
@@ -1336,7 +1388,7 @@ pub async fn recalculer_plan(
     user.poser_contexte(&mut tx).await?;
 
     let (statut, date_debut, horizon, croissance): (String, String, i64, f64) = sqlx::query_as(
-        "SELECT statut, date_debut, mois_horizon, croissance_annuelle_pct::float8
+        "SELECT statut, date_debut::text, mois_horizon, croissance_annuelle_pct::float8
            FROM plan_production WHERE id_plan = $1",
     )
     .bind(&id)
@@ -1415,7 +1467,7 @@ pub async fn recalculer_plan(
 
     let total: f64 = cases.iter().map(|c| c.m2_prevus).sum();
     sqlx::query(
-        "UPDATE plan_production SET m2_total_annuel = $2, date_modification = $3,
+        "UPDATE plan_production SET m2_total_annuel = $2, date_modification = fn_instant($3),
                                     id_utilisateur_modification = $4
           WHERE id_plan = $1",
     )
@@ -1459,9 +1511,9 @@ pub async fn cloturer_plan(
 
     // Le trigger trg_transition_plan verifie que la transition est declaree.
     sqlx::query(
-        "UPDATE plan_production SET statut = 'CLOTURE', date_cloture = $2,
+        "UPDATE plan_production SET statut = 'CLOTURE', date_cloture = fn_instant($2),
                                     id_utilisateur_cloture = $3,
-                                    date_modification = $2, id_utilisateur_modification = $3
+                                    date_modification = fn_instant($2), id_utilisateur_modification = $3
           WHERE id_plan = $1",
     )
     .bind(&id)
@@ -1592,9 +1644,9 @@ pub async fn changer_statut_plan(
         // R08 : le trigger refuse la mise en service si une qualite planifiee n'a
         // pas sa recette figee. Le message renvoye guide vers /figer-recettes.
         sqlx::query(
-            "UPDATE plan_production SET statut = 'EN_COURS', date_validation = $2,
+            "UPDATE plan_production SET statut = 'EN_COURS', date_validation = fn_instant($2),
                                         id_utilisateur_validation = $3,
-                                        date_modification = $2,
+                                        date_modification = fn_instant($2),
                                         id_utilisateur_modification = $3
               WHERE id_plan = $1",
         )
@@ -1607,10 +1659,10 @@ pub async fn changer_statut_plan(
         sqlx::query(
             "UPDATE plan_production SET
                  statut = $2,
-                 date_cloture = CASE WHEN $2 = 'CLOTURE' THEN COALESCE(date_cloture, $3) END,
+                 date_cloture = CASE WHEN $2 = 'CLOTURE' THEN COALESCE(date_cloture, fn_instant($3)) END,
                  id_utilisateur_cloture = CASE WHEN $2 = 'CLOTURE'
                                                THEN COALESCE(id_utilisateur_cloture, $4) END,
-                 date_modification = $3, id_utilisateur_modification = $4
+                 date_modification = fn_instant($3), id_utilisateur_modification = $4
               WHERE id_plan = $1",
         )
         .bind(&id)
@@ -1629,11 +1681,17 @@ pub async fn supprimer_plan(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLANS, Action::Ecrire).await?;
+    let version = super::entites::version_exigee(q.version.map(serde_json::Value::String).as_ref())?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "plan_production", "id_plan", &id, Some(version), "Ce plan",
+    )
+    .await?;
 
     let statut: String = sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = $1")
         .bind(&id)

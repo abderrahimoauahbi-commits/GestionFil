@@ -15,9 +15,10 @@
 -- -----------------------------------------------------------------------------
 -- 1. PARAMETRES
 -- -----------------------------------------------------------------------------
+-- P_MrpInclureStockMachine n'est plus pose (27/10/2026, migration
+-- 2026-10-27e_source_unique_moteur.sql) : parametre sans lecteur, le fil sur
+-- machine compte toujours au dernier constat (moteur de couverture).
 INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, unite, description, categorie, modifiable_par) VALUES
-  ('P_MrpInclureStockMachine', 'Compter le fil sur machine dans les besoins d''achat', '1', 'ENTIER', NULL,
-   '1 : le fil charge sur machine compte comme stock disponible pour le calcul des besoins ; 0 : il est ignore.', 'STOCK', 'DIRECTION'),
   ('P_AncienneteTauxJours', 'Anciennete maximale du taux de reference', '7', 'ENTIER', 'jours',
    'Au-dela, un bon de commande en devise ne se valide pas tant que le taux du jour n''est pas saisi. Le taux de chaque facture d''import reste celui de sa facture.', 'ACHAT', 'DIRECTION'),
   ('P_MachineEcartVertKg',   'Ecart machine : vert jusqu''a (kg)',   '10', 'DECIMAL', 'kg', 'Le seuil vert est le plus grand de ce poids et du pourcentage vert de la ligne.', 'MACHINE', 'DIRECTION'),
@@ -25,7 +26,17 @@ INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, un
   ('P_MachineEcartRougeKg',  'Ecart machine : rouge au-dela de (kg)', '50', 'DECIMAL', 'kg', 'Le seuil rouge est le plus grand de ce poids et du pourcentage rouge de la ligne.', 'MACHINE', 'DIRECTION'),
   ('P_MachineEcartRougePct', 'Ecart machine : rouge au-dela de (%)',  '5',  'DECIMAL', '%',  'Pourcentage du poids de la ligne.', 'MACHINE', 'DIRECTION'),
   ('P_DechetSeuilValiderKg', 'Dechet : seuil de validation (kg)', '50', 'DECIMAL', 'kg',
-   'Au-dela, un dechet saisi a la main demande le droit de valider l''inventaire, comme un ajustement negatif.', 'STOCK', 'DIRECTION')
+   'Au-dela, un dechet saisi a la main demande le droit de valider l''inventaire, comme un ajustement negatif.', 'STOCK', 'DIRECTION'),
+  -- 22/10/2026 (migration 2026-10-22b) : le signal C61.
+  ('P_EcartOfPct', 'OF : ecart reel / prevu signale', '15', 'DECIMAL', '%',
+   'Un OF cloture dont la consommation reelle s''ecarte du prevu (metrage x recette) de plus de ce pourcentage est signale (C61). Signal seulement.', 'PROD', 'DIRECTION'),
+  -- 23/10/2026 (migration 2026-10-24b) : la proposition de l'inventaire tournant, par classe ABC.
+  ('P_ComptageTournantA', 'Inventaire tournant : classe A comptee tous les', '30', 'ENTIER', 'jours',
+   'Une reference de classe A en stock est proposee au tournant si elle n''a pas ete comptee dans ce magasin depuis ce nombre de jours (ou jamais).', 'STOCK', 'DIRECTION'),
+  ('P_ComptageTournantB', 'Inventaire tournant : classe B comptee tous les', '90', 'ENTIER', 'jours',
+   'Une reference de classe B en stock est proposee au tournant si elle n''a pas ete comptee dans ce magasin depuis ce nombre de jours (ou jamais).', 'STOCK', 'DIRECTION'),
+  ('P_ComptageTournantC', 'Inventaire tournant : classe C comptee tous les', '180', 'ENTIER', 'jours',
+   'Une reference de classe C - ou sans classe ABC - en stock est proposee au tournant si elle n''a pas ete comptee dans ce magasin depuis ce nombre de jours (ou jamais).', 'STOCK', 'DIRECTION')
 ON CONFLICT (code_parametre) DO NOTHING;
 
 -- -----------------------------------------------------------------------------

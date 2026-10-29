@@ -119,8 +119,9 @@ pub async fn creer_taux(
     // (ouvert s'il n'y en a pas). Saisir l'historique BAM apres coup butait sur
     // « periodes chevauchantes ». Les receptions deja valorisees gardent leur taux.
     sqlx::query(
-        "UPDATE taux_change SET date_fin = $2
-          WHERE code_devise = $1 AND date_debut < $2 AND (date_fin IS NULL OR date_fin > $2)",
+        "UPDATE taux_change SET date_fin = fn_jour_casablanca($2)
+          WHERE code_devise = $1 AND date_debut < fn_jour_casablanca($2)
+            AND (date_fin IS NULL OR date_fin > fn_jour_casablanca($2))",
     )
     .bind(&devise)
     .bind(&debut)
@@ -129,8 +130,8 @@ pub async fn creer_taux(
 
     sqlx::query(
         "INSERT INTO taux_change (code_devise, taux, date_debut, source, date_fin)
-         VALUES ($1, $2, $3, $4,
-                 (SELECT min(t.date_debut) FROM taux_change t WHERE t.code_devise = $1 AND t.date_debut > $3))",
+         VALUES ($1, $2, fn_jour_casablanca($3), $4,
+                 (SELECT min(t.date_debut) FROM taux_change t WHERE t.code_devise = $1 AND t.date_debut > fn_jour_casablanca($3)))",
     )
     .bind(&devise)
     .bind(t.taux)
@@ -388,6 +389,9 @@ pub async fn parametres(State(state): State<AppState>, user: Utilisateur) -> App
 pub struct ModifParametre {
     pub valeur_courante: String,
     pub motif: Option<String>,
+    /// La version lue avec le reglage (verrou optimiste, groupe 3, 20/10/2026).
+    #[serde(default)]
+    pub version: Option<i64>,
 }
 
 pub async fn modifier_parametre(
@@ -405,29 +409,34 @@ pub async fn modifier_parametre(
         ));
     }
 
+    let version = crate::domain::concurrence::exigee(m.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
     // Les triggers refusent les parametres verrouilles (P_DateSaisie) et
-    // historisent tout changement.
-    let res = sqlx::query(
+    // historisent tout changement. L'ECRITURE PORTE LA CONDITION (groupe 3,
+    // 20/10/2026) : deux reglages simultanes, le second est refuse en nommant
+    // le premier au lieu de l'ecraser.
+    let nouvelle: Option<i64> = sqlx::query_scalar(
         "UPDATE parametre
             SET valeur_courante = $2, id_utilisateur_modif = $3, motif_modif = $4
-          WHERE code_parametre = $1",
+          WHERE code_parametre = $1 AND version = $5
+      RETURNING version::bigint",
     )
     .bind(&code)
     .bind(&m.valeur_courante)
     .bind(&user.id)
     .bind(&m.motif)
-    .execute(&mut *tx)
+    .bind(version)
+    .fetch_optional(&mut *tx)
     .await?;
 
-    if res.rows_affected() == 0 {
-        return Err(AppError::Introuvable(format!("parametre {code}")));
-    }
+    let Some(nouvelle) = nouvelle else {
+        return Err(crate::domain::concurrence::refus(&mut tx, "parametre", "code_parametre", &code, "Ce reglage").await);
+    };
     tx.commit().await?;
 
-    Ok(Json(json!({ "code_parametre": code, "valeur": m.valeur_courante })))
+    Ok(Json(json!({ "code_parametre": code, "valeur": m.valeur_courante, "version": nouvelle })))
 }
 
 pub async fn historique_parametre(

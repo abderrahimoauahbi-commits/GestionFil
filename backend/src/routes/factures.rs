@@ -42,6 +42,11 @@ pub struct LigneSaisie {
 
 #[derive(Debug, Deserialize)]
 pub struct FactureSaisie {
+    /// L'IDENTIFIANT TIRE PAR L'ECRAN a l'ouverture du formulaire (audit P3,
+    /// 19/10/2026) : le meme envoi rejoue rend le meme document, pas un second.
+    /// Absent : le serveur en tire un.
+    #[serde(default)]
+    pub id_document: Option<String>,
     pub numero_facture: String,
     pub code_fournisseur: String,
     #[serde(default)]
@@ -67,6 +72,10 @@ pub struct FactureSaisie {
     pub confirmer_taux: bool,
     #[serde(default)]
     pub lignes: Vec<LigneSaisie>,
+    /// La version lue avec la facture (verrou optimiste, groupe 3, 20/10/2026) :
+    /// exigee a la modification, ignoree a la creation.
+    #[serde(default)]
+    pub version: Option<i64>,
 }
 
 /// La devise d'une facture : celle qu'on dit, sinon celle du fournisseur.
@@ -224,6 +233,14 @@ pub async fn creer(
     Json(f): Json<FactureSaisie>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
+    let id = crate::domain::idempotence::identifiant(f.id_document.as_deref())?;
+    if let Some(v) = crate::domain::idempotence::deja_enregistre(
+        &state.db, &crate::domain::idempotence::FACTURE, &id, &user.id,
+    )
+    .await?
+    {
+        return Ok(Json(v));
+    }
     if f.numero_facture.trim().is_empty() {
         return Err(AppError::Invalide("Le numero de la facture est obligatoire.".into()));
     }
@@ -260,8 +277,8 @@ pub async fn creer(
         "INSERT INTO facture_fournisseur
              (numero_facture, code_fournisseur, date_facture, code_devise, taux_change,
               montant_devise, frais_devise, facture_nette, id_dossier_import, notes,
-              id_utilisateur_creation)
-         VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 0), $8, NULLIF($9, ''), $10, $11)
+              id_utilisateur_creation, id_facture)
+         VALUES ($1, $2, fn_jour_casablanca($3), $4, $5, $6, COALESCE($7, 0), $8, NULLIF($9, ''), $10, $11, $12)
          RETURNING id_facture",
     )
     .bind(f.numero_facture.trim())
@@ -275,6 +292,7 @@ pub async fn creer(
     .bind(f.id_dossier_import.as_deref().unwrap_or(""))
     .bind(&f.notes)
     .bind(&user.id)
+    .bind(&id)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -341,8 +359,15 @@ pub async fn modifier(
         (devise, taux)
     };
 
+    let version = crate::domain::concurrence::exigee(f.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // La premiere ecriture prend la facture a la version lue : deux personnes
+    // sur le meme brouillon, la seconde est refusee en nommant la premiere.
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "facture_fournisseur", "id_facture", &id, Some(version), "Cette facture",
+    )
+    .await?;
 
     let statut: String =
         sqlx::query_scalar("SELECT statut FROM facture_fournisseur WHERE id_facture = $1 FOR UPDATE")
@@ -359,7 +384,7 @@ pub async fn modifier(
 
     sqlx::query(
         "UPDATE facture_fournisseur
-            SET numero_facture = $2, date_facture = $3, code_devise = $4, taux_change = $5,
+            SET numero_facture = $2, date_facture = fn_jour_casablanca($3), code_devise = $4, taux_change = $5,
                 montant_devise = $6, frais_devise = COALESCE($7, 0), facture_nette = $8,
                 id_dossier_import = NULLIF($9, ''), notes = $10
           WHERE id_facture = $1",
@@ -378,8 +403,10 @@ pub async fn modifier(
     .await?;
 
     poser_lignes(&mut tx, &id, &f.lignes).await?;
+    let version =
+        crate::domain::concurrence::version_actuelle(&mut tx, "facture_fournisseur", "id_facture", &id).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_facture": id, "lignes": f.lignes.len() })))
+    Ok(Json(json!({ "id_facture": id, "lignes": f.lignes.len(), "version": version })))
 }
 
 /// `DELETE /api/factures-fournisseur/{id}` — un brouillon seulement.
@@ -391,10 +418,16 @@ pub async fn supprimer(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    Query(q): Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
+    let version = super::entites::version_exigee(q.version.map(Value::String).as_ref())?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "facture_fournisseur", "id_facture", &id, Some(version), "Cette facture",
+    )
+    .await?;
     let statut: String =
         sqlx::query_scalar("SELECT statut FROM facture_fournisseur WHERE id_facture = $1 FOR UPDATE")
             .bind(&id)

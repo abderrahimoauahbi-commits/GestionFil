@@ -26,6 +26,7 @@
 CREATE TABLE bon_commande (
     id_bc               text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
+    version             integer NOT NULL DEFAULT 1,  -- verrou optimiste (2026-10-17d)
     numero_bc           text    NOT NULL UNIQUE,
     date_bc             text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     code_fournisseur    text    NOT NULL REFERENCES fournisseur(code_fournisseur),
@@ -38,7 +39,8 @@ CREATE TABLE bon_commande (
     montant_total_mad   numeric(18,2)    CHECK (montant_total_mad IS NULL OR montant_total_mad >= 0),
 
     statut              text    NOT NULL DEFAULT 'BROUILLON'
-                                CHECK (statut IN ('BROUILLON','EN_ATTENTE_VALIDATION','VALIDE','ENVOYE','LIVRE_PARTIEL','CLOTURE','ANNULE')),
+                                -- EN_CONTROLE et DEMANDE_PRIX : le controle et la demande de prix (migration 2026-10-21b).
+                                CHECK (statut IN ('BROUILLON','EN_CONTROLE','DEMANDE_PRIX','EN_ATTENTE_VALIDATION','VALIDE','ENVOYE','LIVRE_PARTIEL','CLOTURE','ANNULE')),
     motif_creation      text    NOT NULL DEFAULT 'MRP'
                                 CHECK (motif_creation IN ('MRP','OPPORTUNITE_PRIX','ANTICIPATION_RISQUE','MANUEL')),
 
@@ -64,7 +66,7 @@ CREATE TABLE bon_commande (
     CHECK (id_utilisateur_validation IS NULL
            OR id_utilisateur_validation <> id_utilisateur_creation),
     -- Un BC au-dela de BROUILLON/EN_ATTENTE est necessairement valide et trace
-    CHECK (statut IN ('BROUILLON','EN_ATTENTE_VALIDATION','ANNULE')
+    CHECK (statut IN ('BROUILLON','EN_CONTROLE','DEMANDE_PRIX','EN_ATTENTE_VALIDATION','ANNULE')
            OR (id_utilisateur_validation IS NOT NULL AND date_validation IS NOT NULL))
 );
 
@@ -74,6 +76,10 @@ CREATE INDEX ix_bc_statut      ON bon_commande(statut, date_bc DESC);
 -- -----------------------------------------------------------------------------
 -- ligne_bc
 -- -----------------------------------------------------------------------------
+-- UNE LIGNE DE MARCHANDISE ACTIVE PAR REFERENCE ET PAR BON, et un bon soumis fige
+-- (decisions du 21/10/2026) : declencheurs trg_ligne_bc_une_par_reference,
+-- trg_ligne_bc_figee et trg_bc_entete_figee, migration 2026-10-21d ; C60 signale
+-- les doublons d'avant la regle.
 CREATE TABLE ligne_bc (
     id_ligne_bc         text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
@@ -217,12 +223,17 @@ CREATE TABLE plan_achat (
     montant_total_mad   numeric(18,2)    GENERATED ALWAYS AS (quantite_suggeree_kg * prix_estime_mad) STORED,
 
     date_besoin_prevue  text    NOT NULL,
+    -- La date limite de commande de la proposition du moteur de couverture (D
+    -- moins le delai fournisseur) ; l'urgence s'en deduit (2026-10-27c).
+    date_limite_commande date,
     urgence             text    NOT NULL CHECK (urgence IN ('TIER 1','TIER 2','TIER 3','TIER 4')),
     risque_identifie    text,
     action_recommandee  text,
 
+    -- ANNULE_BC : la proposition close avec son bon annule (decision du
+    -- 27/10/2026, 2026-10-27f) — liee a lui, plus ouverte, etat final.
     statut              text    NOT NULL DEFAULT 'PROPOSE'
-                                CHECK (statut IN ('PROPOSE','EN_REVISION','VALIDE','COMMANDE','IGNORE')),
+                                CHECK (statut IN ('PROPOSE','EN_REVISION','VALIDE','COMMANDE','IGNORE','ANNULE_BC')),
     id_bc_genere        text    REFERENCES bon_commande(id_bc),
     id_utilisateur_validation text REFERENCES utilisateur(id_utilisateur),
     date_validation     text,

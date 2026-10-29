@@ -404,9 +404,18 @@ table,
   app-region: no-drag;
 }
 
+/* L'INDICE DU CATALOGUE PASSE AVANT LA NOTE LOCALE (27/10/2026) : une étiquette
+   qui porte son ⓘ (composants/ui/Indice.tsx) cache le « ? » qu'un écran y avait
+   logé à la main — une seule aide par champ. Sans ⓘ, la note reste. */
+label:has([data-indice]) button[aria-label='Aide'] {
+  display: none;
+}
+
 @media print {
   .sans-impression,
-  .impression-masquee {
+  .impression-masquee,
+  [data-indice],
+  [data-indice-hote] {
     display: none !important;
   }
 

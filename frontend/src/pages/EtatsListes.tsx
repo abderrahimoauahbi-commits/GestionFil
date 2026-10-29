@@ -24,22 +24,26 @@ import { api } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EtatImprimable, TableEtat } from '../composants/Etat'
 import { Alerte, Chargement, Selecteur } from '../composants/ui/base'
-import { fmt } from '../components/ui'
+import { fmt } from '../lib/utils'
 import { couleurEcart, libelleLot, useTolerancesLot } from '../lib/lots'
 import { useEtatDepuisParam } from '../lib/navigation'
 import { libelleSeuil } from './lots/modele'
+import { libelleStatut } from '../lib/statuts'
 
 /* -------------------------------------------------------------------------- */
 /* Etat des stocks                                                             */
 /* -------------------------------------------------------------------------- */
 
+/** Une ligne du stock projeté : l'état au moteur de couverture (27/10/2026). */
 interface LigneStock {
   code_reference: string
   designation: string | null
   fournisseur_nom: string | null
   stock_physique_net_kg: number | null
-  stock_projete_kg: number | null
-  stock_min_kg: number | null
+  disponible_kg: number | null
+  couvert_jusqu_au: string | null
+  couvert_tout_horizon: boolean | null
+  plan_non_couvert_kg: number | null
   jours_couverture: number | null
   statut: string
   valeur_totale_mad?: number | null
@@ -64,19 +68,18 @@ export function EtatStockImprime() {
   return (
     <div>
       <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
-        <span className="text-[12px] text-attenue-texte">Restreindre a un statut :</span>
-        <Selecteur aria-label="Restreindre à un statut" value={filtre} onChange={(e) => setFiltre(e.target.value)} className="w-52">
+        <span className="text-[12px] text-attenue-texte">Restreindre à un état :</span>
+        <Selecteur aria-label="Restreindre à un état" value={filtre} onChange={(e) => setFiltre(e.target.value)} className="w-52">
           <option value="">Toutes les références</option>
-          <option value="RUPTURE">Ruptures</option>
-          <option value="CRITIQUE">Critiques</option>
-          <option value="ATTENTION">Attention</option>
-          <option value="OK">Au vert</option>
+          <option value="PLAN_NON_COUVERT">Plan non couvert</option>
+          <option value="SOUS_SECURITE">Sous la sécurité</option>
+          <option value="COUVERT">Couvert</option>
         </Selecteur>
       </div>
 
       <EtatImprimable
         titre="État des stocks"
-        sousTitre={filtre ? `Restreint aux references en statut ${filtre}` : undefined}
+        sousTitre={filtre ? `Restreint aux références à l’état « ${libelleStatut('statut_stock', filtre)} »` : undefined}
         enTete={
           <div className="flex flex-wrap gap-x-8 gap-y-1">
             <span>
@@ -112,22 +115,21 @@ export function EtatStockImprime() {
               valeur: (l) => fmt.nombre(l.stock_physique_net_kg ?? 0, 1),
             },
             {
-              entete: 'Projeté kg',
+              entete: 'Disponible kg',
               numerique: true,
-              valeur: (l) => fmt.nombre(l.stock_projete_kg ?? 0, 1),
+              valeur: (l) => fmt.nombre(l.disponible_kg ?? 0, 1),
             },
             {
-              entete: 'Minimum kg',
-              numerique: true,
-              valeur: (l) => (l.stock_min_kg == null ? '—' : fmt.nombre(l.stock_min_kg, 1)),
-            },
-            {
-              entete: 'Couv. j',
-              numerique: true,
+              entete: 'Couvert jusqu’au',
               valeur: (l) =>
-                l.jours_couverture == null ? '—' : fmt.nombre(l.jours_couverture, 0),
+                l.couvert_tout_horizon ? 'tout l’horizon' : l.couvert_jusqu_au ? fmt.date(l.couvert_jusqu_au) : 'rupture',
             },
-            { entete: 'Statut', valeur: (l) => l.statut },
+            {
+              entete: 'Non couvert kg',
+              numerique: true,
+              valeur: (l) => ((l.plan_non_couvert_kg ?? 0) > 0.05 ? fmt.nombre(l.plan_non_couvert_kg ?? 0, 0) : '—'),
+            },
+            { entete: 'État', valeur: (l) => libelleStatut('statut_stock', l.statut) },
             ...(valeurVisible
               ? [
                   {
@@ -467,7 +469,7 @@ interface Ref {
   prix_catalogue?: number | null
   code_devise_catalogue?: string | null
   stock_min_kg: number | null
-  couverture_min_mois: number | null
+  couverture_cible_mois: number | null
   actif: number
   [k: string]: unknown
 }
@@ -525,10 +527,10 @@ export function EtatCatalogue() {
             valeur: (r) => (r.stock_min_kg == null ? '—' : fmt.nombre(r.stock_min_kg, 0)),
           },
           {
-            entete: 'Couv. min',
+            entete: 'Couv. cible',
             numerique: true,
             valeur: (r) =>
-              r.couverture_min_mois == null ? '—' : `${fmt.nombre(r.couverture_min_mois, 1)} m`,
+              r.couverture_cible_mois == null ? '—' : `${fmt.nombre(r.couverture_cible_mois, 1)} m`,
           },
         ]}
         lignes={lignes}

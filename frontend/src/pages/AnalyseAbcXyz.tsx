@@ -12,6 +12,11 @@
  * merite aucun stock. Traiter les deux pareil met la premiere en rupture et
  * immobilise du capital sur la seconde.
  *
+ * LA SOURCE : LE RÉEL (27/10/2026). Les deux classements et les colonnes « Réel /
+ * mois » et « Valeur réelle » lisent le grand livre de la consommation sur les 12
+ * mois pleins glissants (les 12 mois calendaires complets avant le mois en cours),
+ * rebut compris, retours déduits, valeur au livre. Le plan n'y entre plus.
+ *
  * LA MATRICE EST LA VUE PRINCIPALE, pas la liste. Neuf cases se lisent d'un
  * coup ; cent vingt-quatre lignes ne se lisent pas. La liste vient apres,
  * filtree par la case qu'on a choisie.
@@ -26,8 +31,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { EnTetePage } from '../components/Layout'
 import { TableDroits, type Colonne } from '../components/TableDroits'
 import { Alerte, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Chargement } from '../composants/ui/base'
-import { fmt } from '../components/ui'
-import { cn } from '../lib/utils'
+import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'STOCK'
 
@@ -39,7 +43,8 @@ interface Ligne {
   classe_xyz: string | null
   statut: string
   jours_couverture: number | null
-  conso_mensuelle_kg: number | null
+  /** Réel / mois : grand livre, 12 mois pleins ÷ 12. */
+  reel_mois_kg: number | null
   valeur_conso_annuelle_mad?: number | null
   part_pct?: number | null
   pct_cumule?: number | null
@@ -66,6 +71,8 @@ const SENS_XYZ: Record<string, string> = {
 
 export function AnalyseAbcXyz() {
   const droits = useDroits(MODULE)
+  // Le recalcul ecrit les classes sur la fiche article : le serveur exige CATALOGUE / ECRIRE.
+  const droitsCatalogue = useDroits('CATALOGUE')
   const qc = useQueryClient()
   const [case_, setCase] = useState<string | null>(null)
 
@@ -163,15 +170,15 @@ export function AnalyseAbcXyz() {
     },
     { champ: 'fournisseur_nom', entete: 'Fournisseur', secondaire: true },
     {
-      champ: 'conso_mensuelle_kg',
-      entete: 'Conso / mois',
+      champ: 'reel_mois_kg',
+      entete: 'Réel / mois',
       numerique: true,
       rendu: (l) =>
-        l.conso_mensuelle_kg == null ? '—' : `${fmt.nombre(l.conso_mensuelle_kg, 0)} kg`,
+        l.reel_mois_kg == null ? '—' : `${fmt.nombre(l.reel_mois_kg, 0)} kg`,
     },
     {
       champ: 'valeur_conso_annuelle_mad',
-      entete: 'Valeur annuelle',
+      entete: 'Valeur réelle 12 mois',
       numerique: true,
       rendu: (l) =>
         l.valeur_conso_annuelle_mad == null
@@ -207,9 +214,9 @@ export function AnalyseAbcXyz() {
     <div>
       <EnTetePage
         titre="Analyse ABC / XYZ"
-        sous_titre="Le poids dans la dépense croise à la régularité de la demande"
+        sous_titre="Le poids dans la dépense croisé à la régularité de la consommation — réel des 12 mois pleins (grand livre)"
         actions={
-          droits.peutEcrire && (
+          droitsCatalogue.peutEcrire && (
             <Bouton
               variante="contour"
               onClick={() => recalculer.mutate()}
@@ -224,10 +231,10 @@ export function AnalyseAbcXyz() {
 
       {matrice.nonClassees > 0 && (
         <Alerte ton="info" className="mb-3">
-          {matrice.nonClassees} reference(s) sans consommation ne peuvent pas etre classees en
-          XYZ : la regularite se mesure sur un historique, et elles n en ont pas. Elles sont
-          rangees en C par convention — zero pour cent de la depense — et regroupees dans la case
-          « non classées ».
+          {matrice.nonClassees} référence(s) sans consommation réelle sur les 12 mois pleins ne
+          peuvent pas être classées en XYZ : la régularité se mesure sur un historique, et elles
+          n’en ont pas. Elles sont rangées en C par convention — zéro pour cent de la dépense — et
+          regroupées dans la case « non classées ».
         </Alerte>
       )}
 

@@ -497,7 +497,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
                  (code_reference, code_categorie, code_fournisseur, designation, type_fil,
                   couleur, titrage, unite_catalogue, poids_bobine_kg, bobines_par_palette,
                   densite_kg_ml, prix_catalogue, code_devise_catalogue, stock_min_kg,
-                  couverture_min_mois, actif, suivi_lot, id_utilisateur_creation)
+                  couverture_cible_mois, actif, suivi_lot, id_utilisateur_creation)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,0,$17)
              ON CONFLICT (code_reference) DO UPDATE SET
                  code_categorie = excluded.code_categorie,
@@ -511,7 +511,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
                  prix_catalogue = excluded.prix_catalogue,
                  code_devise_catalogue = excluded.code_devise_catalogue,
                  stock_min_kg = excluded.stock_min_kg,
-                 couverture_min_mois = excluded.couverture_min_mois,
+                 couverture_cible_mois = excluded.couverture_cible_mois,
                  actif = excluded.actif",
         )
         .bind(&code_ref)
@@ -528,6 +528,8 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
         .bind(prix)
         .bind(f_cat.txt(l, "Devise").unwrap_or_else(|| "USD".into()))
         .bind(f_cat.nombre(l, "Stock Min").filter(|v| *v > 0.0))
+        // La colonne « Couv Min (mois) » du classeur alimente la couverture
+        // cible du MRP (2026-10-27l) : la couverture souhaitée à la réception.
         .bind(f_cat.nombre(l, "Couv Min (mois)"))
         .bind(i64::from(f_cat.booleen(l, "Actif")))
         .bind(&utilisateur_import)
@@ -818,7 +820,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
         // Mise en service : declenche les controles R07 (somme = 100 % par role),
         // roles avec densite, et densite_kg_ml presente pour les roles en ml/m2.
         let activation = sqlx::query(
-            "UPDATE qualite SET statut = 'ACTIF', date_modification = $2,
+            "UPDATE qualite SET statut = 'ACTIF', date_modification = fn_instant($2),
                                 id_utilisateur_modification = $3
               WHERE code_qualite = $1 AND statut <> 'ACTIF'",
         )
@@ -876,7 +878,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
             "INSERT INTO mouvement
                  (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt,
                   code_magasin, code_motif, reference_document, id_utilisateur, est_initial)
-             VALUES ($1, 'MVT-INIT-XLSX-0001', $2, 'STOCK_INIT', 'MP-01', 'INIT',
+             VALUES ($1, 'MVT-INIT-XLSX-0001', fn_jour_casablanca($2), 'STOCK_INIT', 'MP-01', 'INIT',
                      'Reprise GESTION Fil.xlsx', $3, 1)",
         )
         .bind(&id_mvt)

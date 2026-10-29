@@ -281,7 +281,7 @@ CMUP et la proposition est marquée « prix à saisir ».
 
 **Décision** — Au-delà du plan, la demande se prolonge à la moyenne du plan × le coefficient du mois
 (table `saison_mois`, réglable, défaut 1). Signalés : part prolongée > 50 % d'une proposition (C49),
-écart plan/réel > 50 % après 6 mois (C50) ; rapport « stocks minimums à revoir » au besoin mensuel du
+écart plan/réel > 50 % après 6 mois (C50) ; rapport « stocks minimums à revoir » (retiré le 27/10/2026, `2026-10-27l`) au besoin mensuel du
 plan. Le détail de chaque proposition se lit pas à pas (F16).
 
 **Où** — 09k, 09o ; `PlanAchatDetail.tsx`. **Contrôle** — banc `plan_detail`.

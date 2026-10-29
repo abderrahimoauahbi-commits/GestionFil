@@ -38,6 +38,10 @@ export interface Machine {
   etat: string
   motif_etat: string | null
   date_etat: string | null
+  /** La version lue (verrou optimiste, groupe 3, 20/10/2026). */
+  version: number
+  /** La largeur en metres (CRM1 : 4,20), facultative (22/10/2026). */
+  largeur_m?: number | null
 }
 
 /**
@@ -89,6 +93,13 @@ export interface LigneEtat {
   date_constat: string
   responsable: string | null
   poids_catalogue_kg: number | null
+  /** L'OF que la ligne sert, et sa voie (22/10/2026). */
+  id_of?: string | null
+  numero_of?: string | null
+  largeur_voie_m?: number | null
+  /** La qualite que la ligne sert (23/10/2026) : celle de son OF, ou choisie sans OF. */
+  code_qualite?: string | null
+  qualite_nom?: string | null
 }
 
 /** CONSO reste lisible pour les anciennes fiches ; on n'en cree plus. */
@@ -108,6 +119,10 @@ export interface Fiche {
   date_fiche: string
   code_magasin: string | null
   numero_of: string | null
+  /** L'OF choisi (lien), defaut des lignes (22/10/2026). */
+  id_of?: string | null
+  /** La qualite par defaut des lignes, sans OF (23/10/2026). */
+  code_qualite?: string | null
   responsable: string
   observations: string | null
   nb_lignes: number
@@ -154,13 +169,18 @@ export interface LigneCalculee {
   effet_ecart: string
   code_motif: string
   motif_texte: string | null
-}
-
-/** La couleur d'un niveau d'ecart machine, en classes de theme. */
-export const TON_ECART: Record<string, string> = {
-  VERT: 'text-succes',
-  ORANGE: 'text-alerte',
-  ROUGE: 'text-danger',
+  /** LA REGLE DE FRONTIERE (22/10/2026) : l'OF nouveau, et l'OF de la periode
+      mesuree — l'OF sortant, a qui l'ecart appartient. */
+  id_of?: string | null
+  numero_of?: string | null
+  id_of_periode?: string | null
+  numero_of_periode?: string | null
+  largeur_voie_m?: number | null
+  /** Bobines que tient la voie : une aide, jamais une consommation. */
+  bobines_voie?: number | null
+  /** LA QUALITE, MEME FRONTIERE (23/10/2026) : la nouvelle, et celle de la periode, a qui l'ecart appartient. */
+  code_qualite?: string | null
+  code_qualite_periode?: string | null
 }
 
 export interface Apercu {
@@ -168,6 +188,9 @@ export interface Apercu {
   capacite: number
   bobines_apres: number
   blocages: string[]
+  /** Ce qui se signale sans bloquer : les voies (C63, 22/10/2026). */
+  signaux?: string[]
+  largeur_machine?: number | null
   /** Les lots bloques qu'une derogation debloquerait (audit v4). */
   derogations?: import('./Derogation').DerogationPossible[]
 }
@@ -192,12 +215,17 @@ export interface LigneConso {
   non_qualifie_kg: number
   regularisation_kg: number
   erreur_saisie_kg: number
+  /** La correction (MJ_CORRECTION) : hors consommation, montrée à part (27/10/2026). */
+  correction_kg?: number
 }
 
 /** Le detail d'une fiche : ses lignes, ses decisions, son journal. */
 export interface FicheDetail {
-  entete: Fiche & { nb_validations: number; capacite_bobines: number; date_creation?: string | null }
-  lignes: (LigneEnvoi & { designation: string; poids_catalogue_kg: number | null })[]
+  entete: Fiche & { nb_validations: number; capacite_bobines: number; date_creation?: string | null
+                    largeur_m?: number | null; numero_of_lien?: string | null }
+  lignes: (LigneEnvoi & { designation: string; poids_catalogue_kg: number | null; numero_of?: string | null
+                         /** Le poids d'une bobine du lot (23/10/2026). */
+                         poids_lot_kg?: number | null })[]
   decisions: {
     numero_validation: number
     statut: 'ACTIVE' | 'RETIREE' | 'ANNULEE'
@@ -211,7 +239,9 @@ export interface FicheDetail {
   }[]
   lignes_decision: (LigneCalculee & { designation: string; motif: string })[]
   etats: { moment: 'AVANT' | 'APRES'; code_reference: string; designation: string; lot_fournisseur: string
-           nb_bobines: number; pourcentage: number | null; kg: number }[]
+           nb_bobines: number; pourcentage: number | null; kg: number
+           numero_of?: string | null; largeur_voie_m?: number | null
+           code_qualite?: string | null; qualite_nom?: string | null }[]
   journal: { evenement: string; horodatage: string; code_emplacement: string | null; motif: string | null
              auteur: string | null; detail: string | null }[]
 }
@@ -229,6 +259,11 @@ export interface LigneEnvoi {
   code_motif?: string | null
   motif_texte?: string | null
   effet_ecart?: string | null
+  /** L'OF de la ligne (vide : celui que la ligne sert deja) et sa voie en metres, au chargement (22/10/2026). */
+  id_of?: string | null
+  largeur_voie_m?: number | null
+  /** La qualite de la ligne (vide : celle de l'OF ou de l'etat) — 23/10/2026. */
+  code_qualite?: string | null
   /** Pose seulement apres un refus R02-LOT confirme par l'operateur. */
   lot_force?: boolean
   motif_lot_force?: string
@@ -265,6 +300,50 @@ export interface LigneSaisie {
   avant_pourcentage: number | null
   avant_kg: number
   avant_date: string | null
+  /** L'OF de la ligne (22/10/2026) : vide = celui qu'elle sert deja. Depuis le
+      24/10/2026, la fiche n'a plus d'OF d'en-tete : il se choisit sur la ligne. */
+  id_of?: string
+  /** Le numero de l'OF choisi, garde avec lui (texte d'historique de la fiche). */
+  numero_of?: string
+  /** La voie, en metres (0 : aucune). */
+  largeur_voie?: number
+  /** L'OF que la ligne sert avant la decision (son numero), pour l'ecran. */
+  avant_numero_of?: string | null
+  /** Le meme, en lien : l'OF qu'une ligne neuve se voit proposer (24/10/2026). */
+  avant_id_of?: string | null
+  /** LA QUALITE de la ligne (23/10/2026) : vide = celle qu'elle sert deja. */
+  code_qualite?: string
+  /** La qualite que la ligne sert avant la decision. */
+  avant_code_qualite?: string | null
+  avant_qualite_nom?: string | null
+}
+
+/**
+ * LE NOMBRE DE BOBINES D'UNE VOIE (22/10/2026) : capacite de l'etage / largeur
+ * de la machine x largeur de la voie, ENTIER ARRONDI A L'INFERIEUR — une bobine
+ * ne se coupe pas. 1 344 / 4,20 x 1,20 = 384. Une aide au magasinier, JAMAIS une
+ * consommation. Meme calcul que le serveur (`decision_machine::bobines_voie`) et
+ * la base (`fn_bobines_voie`) ; le millionieme absorbe l'erreur du flottant.
+ */
+export function bobinesVoie(
+  capacite: number | null | undefined,
+  largeurMachine: number | null | undefined,
+  largeurVoie: number | null | undefined,
+): number | null {
+  if (!capacite || capacite <= 0 || !largeurMachine || largeurMachine <= 0 || !largeurVoie || largeurVoie <= 0) return null
+  return Math.floor((capacite * largeurVoie) / largeurMachine + 1e-6)
+}
+
+/** Un OF qu'une fiche peut choisir : prevu ou lance. */
+export interface OfOuvert {
+  id_of: string
+  numero: string
+  statut: 'PREVU' | 'LANCE'
+  code_qualite: string
+  qualite_nom: string | null
+  date_of: string
+  date_fin_prevue: string | null
+  metrage_m2: number
 }
 
 // =============================================================================
@@ -282,6 +361,17 @@ export function pctMoyen(kg: number, bobines: number, nominal: number): number |
  * meme regle que le serveur).
  */
 export const toleranceArrondi = (nb: number, nominal: number) => Math.max(0, nb) * nominal * 0.00005 + 0.0005
+
+/**
+ * LA FIN D'UNE LIGNE PAR LE CONSTAT (decision du 26/10/2026) : un constat a 0 %
+ * FERME la ligne — ses bobines vides quittent l'etage, et tout ce qui restait
+ * est l'ecart, que le motif qualifie. Meme regle que le serveur
+ * (`decision_machine::ferme_au_constat`), qui pose lui-meme 0 bobine. Le reste
+ * jete au rebut sort, lui, par un dechargement vers le dechet.
+ */
+export function fermeAuConstat(type: TypeFiche, l: Pick<LigneSaisie, 'pourcentage' | 'avant_bobines'>): boolean {
+  return type === 'MAJ' && l.avant_bobines > 0 && l.pourcentage === 0
+}
 
 /** Ce que la ligne deviendra, et l'ecart, selon le type de fiche. */
 export function estimer(type: TypeFiche, l: LigneSaisie) {
@@ -321,8 +411,10 @@ function estimerBrut(type: TypeFiche, l: LigneSaisie) {
       ecart: l.avant_kg - kgMouv - kgApres,
     }
   }
-  const kgApres = l.presentes * nom * (l.pourcentage / 100)
-  return { kgMouv: 0, nbApres: l.presentes, kgApres, theorique: pctMoyen(l.avant_kg, l.presentes, nom), ecart: l.avant_kg - kgApres }
+  // A 0 %, la ligne se ferme : plus aucune bobine, tout ce qui restait est l'ecart (26/10/2026).
+  const nbApres = fermeAuConstat(type, l) ? 0 : l.presentes
+  const kgApres = nbApres * nom * (l.pourcentage / 100)
+  return { kgMouv: 0, nbApres, kgApres, theorique: pctMoyen(l.avant_kg, nbApres, nom), ecart: l.avant_kg - kgApres }
 }
 
 /**
@@ -334,9 +426,6 @@ export function ecartPoidsBobine(l: { poids: number; poids_catalogue?: number | 
   if (cat == null || !(cat > 0) || !(l.poids > 0)) return null
   return ((l.poids - cat) / cat) * 100
 }
-
-/** La classe de texte d'une couleur d'ecart (vert, orange, rouge). */
-export const CLASSE_ECART = { vert: 'text-succes', orange: 'text-alerte', rouge: 'text-danger' } as const
 
 // =============================================================================
 // LES APPELS
@@ -375,6 +464,8 @@ export const machinesApi = {
       etat_avant?: { code_reference: string; lot_fournisseur: string; nb_bobines: number; kg: number }[]
       mouvements?: { numero_mouvement: string; code_type_mvt: string; code_magasin: string; kg: number }[]
     }>(`/api/machines/fiches/${idFiche}/retrait-apercu`),
+  /** Les OF qu'une fiche peut choisir : prevus et lances (22/10/2026). */
+  ofOuverts: () => api.get<OfOuvert[]>('/api/machines/of-ouverts'),
   consommation: (code?: string) =>
     api.get<LigneConso[]>(
       `/api/machines/consommation${code ? `?code_machine=${encodeURIComponent(code)}` : ''}`,
@@ -414,7 +505,11 @@ export interface MachineSaisie {
   code_machine?: string
   nom: string
   notes?: string | null
+  /** En metres ; `null` l'efface (22/10/2026). */
+  largeur_m?: number | null
   zones: ZoneSaisie[]
+  /** Exigee a la correction (verrou optimiste) ; ignoree a la declaration. */
+  version?: number
 }
 
 export const LIBELLE_ROLE: Record<RoleZone, string> = {
@@ -433,6 +528,20 @@ export function lignesAEnvoyer(type: TypeFiche, lignes: LigneSaisie[]): LigneSai
   return type === 'MAJ' ? lignes : lignes.filter((l) => l.mouvementees > 0)
 }
 
+/**
+ * LE NUMERO D'OF DE LA FICHE, texte d'historique (24/10/2026). La fiche n'a plus
+ * d'OF d'en-tete : chaque ligne porte le sien. Quand toutes les lignes envoyees
+ * servent le meme OF (choisi sur la ligne, ou garde de l'etage), la fiche en
+ * garde le numero, comme le faisait l'OF d'en-tete ; sinon, rien. Le texte
+ * d'une fiche reprise d'avant les OF en lien reste le sien.
+ */
+export function numeroOfCommun(type: TypeFiche, lignes: LigneSaisie[]): string | null {
+  const numeros = new Set(lignesAEnvoyer(type, lignes).map((l) => (l.id_of ? l.numero_of ?? '' : l.avant_numero_of ?? '')))
+  if (numeros.size !== 1) return null
+  const [n] = [...numeros]
+  return n || null
+}
+
 /** Le corps attendu par l'API, construit depuis les lignes saisies. */
 export function corpsFiche(
   type: TypeFiche,
@@ -447,7 +556,10 @@ export function corpsFiche(
     code_emplacement: zone,
     date_fiche: entete.date,
     code_magasin: type === 'MAJ' ? null : entete.magasin || null,
-    numero_of: entete.of || null,
+    numero_of: entete.of || numeroOfCommun(type, lignes),
+    /* PLUS D'OF NI DE QUALITE D'EN-TETE (24/10/2026) : chaque ligne porte les siens. */
+    id_of: null,
+    code_qualite: null,
     responsable: entete.responsable,
     observations: entete.observations || null,
     lignes: lignesAEnvoyer(type, lignes).map((l): LigneEnvoi => ({
@@ -458,10 +570,19 @@ export function corpsFiche(
       pct_retirees: type === 'DECHARGE' ? l.pct_retirees : null,
       destination: type === 'DECHARGE' ? l.destination || null : null,
       pourcentage: type === 'DECHARGE' && l.mouvementees >= l.avant_bobines ? null : l.pourcentage,
-      nb_bobines_presentes: type === 'MAJ' ? l.presentes : 0,
+      /* LE CONSTAT NE CHANGE PAS LE NOMBRE DE BOBINES (24/10/2026) : celui de
+         l'etat ; il change par un chargement ou un dechargement. Seule
+         exception : a 0 %, le constat ferme la ligne (26/10/2026). */
+      nb_bobines_presentes: type === 'MAJ' && !fermeAuConstat(type, l) ? l.avant_bobines : 0,
       code_motif: l.code_motif || null,
       motif_texte: l.motif_texte.trim() || null,
       effet_ecart: l.effet_ecart || null,
+      id_of: l.id_of || null,
+      /* LA VOIE SE DEFINIT AU CHARGEMENT (24/10/2026) : le constat et le
+         dechargement gardent celle de l'etat (le serveur aussi). */
+      largeur_voie_m: type === 'CHARGE' && l.largeur_voie && l.largeur_voie > 0 ? l.largeur_voie : null,
+      /* Avec un OF, la qualite est la sienne : on n'en envoie pas d'autre. */
+      code_qualite: l.id_of ? null : l.code_qualite || null,
     })),
   }
 }
@@ -564,6 +685,13 @@ export function depuisEtat(e: LigneEtat, type: TypeFiche): LigneSaisie {
     avant_pourcentage: e.pourcentage,
     avant_kg: e.kg,
     avant_date: e.date_constat,
+    id_of: '',
+    largeur_voie: e.largeur_voie_m ?? 0,
+    avant_numero_of: e.numero_of ?? null,
+    avant_id_of: e.id_of || null,
+    code_qualite: '',
+    avant_code_qualite: e.code_qualite ?? null,
+    avant_qualite_nom: e.qualite_nom ?? null,
   }
 }
 
@@ -594,6 +722,13 @@ export function ligneNeuve(
     avant_pourcentage: null,
     avant_kg: 0,
     avant_date: null,
+    id_of: '',
+    largeur_voie: 0,
+    avant_numero_of: null,
+    avant_id_of: null,
+    code_qualite: '',
+    avant_code_qualite: null,
+    avant_qualite_nom: null,
   }
 }
 

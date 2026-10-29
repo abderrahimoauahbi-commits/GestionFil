@@ -27,7 +27,7 @@ import {
 import { useConfirmation } from '../../composants/ui/surcouches'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
-import { echec, useRafraichir } from './dialogues'
+import { echec, useRafraichir, useVersionDossier } from './dialogues'
 import {
   NATURE_PIECE,
   SAISIE_ASSISTEE_VISIBLE,
@@ -59,6 +59,9 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
   const champFichier = useRef<HTMLInputElement>(null)
   const [nature, setNature] = useState<Piece['nature']>('AUTRE')
   const [survol, setSurvol] = useState(false)
+  // Une piece passe par la version du dossier (verrou optimiste), chaque depot
+  // presentant celle que le precedent a laissee.
+  const version = useVersionDossier()
 
   const deposer = useMutation({
     mutationFn: async (fichiers: File[]) => {
@@ -66,11 +69,14 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
       for (const f of fichiers) {
         const donnees = new FormData()
         donnees.append('nature', nature)
+        donnees.append('version', String(version.lire() ?? ''))
         donnees.append('fichier', f)
         resultats.push(
-          await api.envoyerFichier<{ doublon?: boolean; message?: string }>(
-            `/api/import/dossiers/${idDossier}/pieces`,
-            donnees,
+          version.suivre(
+            await api.envoyerFichier<{ doublon?: boolean; message?: string; version?: number }>(
+              `/api/import/dossiers/${idDossier}/pieces`,
+              donnees,
+            ),
           ),
         )
       }
@@ -83,16 +89,17 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
       if (neufs > 0) toast.success(`${neufs} document(s) déposé(s)`)
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
 
   const supprimer = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/import/pieces/${id}`),
+    mutationFn: async (id: string) =>
+      version.suivre(await api.delete(`/api/import/pieces/${id}?version=${version.lire() ?? ''}`)),
     onSuccess: () => {
       toast.success('Pièce retirée')
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
 
   /** Ouvre la piece dans un onglet, puis rend la memoire. */
@@ -197,15 +204,15 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
             Aucune pièce. Déposez ici le scan du dossier : facture, DUM, quittance, factures de frais.
           </p>
         ) : (
+          /* SANS LARGEUR MINIMALE (24/10/2026) : taille et deposant passent sous
+             la date (↳). */
           <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
-            <table className="w-full min-w-[48rem] text-[12.5px]">
+            <table className="w-full text-[12.5px]">
               <thead>
                 <tr className="border-b border-bordure">
                   <th className={cn(th, 'text-left')}>Document</th>
                   <th className={cn(th, 'w-52 text-left')}>Nature</th>
-                  <th className={cn(th, 'w-24 text-right')}>Taille</th>
-                  <th className={cn(th, 'w-32 text-left')}>Déposé le</th>
-                  <th className={cn(th, 'w-28 text-left')}>Par</th>
+                  <th className={cn(th, 'w-40 text-left')}>Déposé le</th>
                   <th className={cn(th, SAISIE_ASSISTEE_VISIBLE ? 'w-36' : 'w-24')} />
                 </tr>
               </thead>
@@ -226,9 +233,12 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
                         {NATURE_PIECE[p.nature]}
                       </span>
                     </td>
-                    <td className={cn(td, 'text-right tabular-nums')}>{poids(p.taille_octets)}</td>
-                    <td className={td}>{fmt.date(p.date_depot)}</td>
-                    <td className={cn(td, 'text-attenue-texte')}>{p.depose_par ?? '—'}</td>
+                    <td className={td}>
+                      {fmt.date(p.date_depot)}
+                      <div className="text-[11px] tabular-nums text-attenue-texte">
+                        ↳ {p.depose_par ?? '—'} · {poids(p.taille_octets)}
+                      </div>
+                    </td>
                     <td className={td}>
                       <div className="flex justify-end gap-0.5">
                         <Bouton

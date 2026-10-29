@@ -24,7 +24,7 @@ import { useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { EtatImprimable, TableEtat } from '../composants/Etat'
 import { Alerte, Chargement } from '../composants/ui/base'
-import { fmt } from '../components/ui'
+import { fmt } from '../lib/utils'
 
 interface Inventaire {
   id_inventaire: string

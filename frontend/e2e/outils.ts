@@ -211,8 +211,27 @@ export async function mesurer(page: Page): Promise<Constat[]> {
         })
         continue
       }
+      // HORS DE LA ZONE QUI DEFILE (20/10/2026) : remonte au-dessus du cadre de la
+      // page, l'element est coupe par lui, pas recouvert — la barre du haut, qui
+      // est a cet endroit de la fenetre, n'y est pour rien.
+      let zone = b.parentElement
+      while (zone && zone !== document.body && !/(auto|scroll)/.test(getComputedStyle(zone).overflowY))
+        zone = zone.parentElement
+      if (zone && zone !== document.body) {
+        const rz = zone.getBoundingClientRect()
+        const cy = r.top + r.height / 2
+        if (cy < rz.top || cy > rz.bottom) continue
+      }
       if (r.top >= 0 && r.bottom <= vh) {
         const dessus = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+        // SOUS UNE BARRE COLLEE (20/10/2026) : le bandeau de la page en haut, la
+        // barre « Enregistrer » en bas. La page defilee, un champ passe dessous :
+        // c'est le defilement, pas un defaut — on l'atteint en defilant.
+        let colle = false
+        for (let x: Element | null = dessus; x && x !== document.body; x = x.parentElement) {
+          if (/^(sticky|fixed)$/.test(getComputedStyle(x).position)) { colle = true; break }
+        }
+        if (colle) continue
         if (dessus && !b.contains(dessus) && !dessus.contains(b)) {
           // Candidat seulement : verifie ensuite par un essai de clic (verifierMasques).
           const ref = String(out.length)
@@ -316,6 +335,27 @@ export async function saisir(champ: Locator, texte: string) {
   await champ.press('Control+a')
   await champ.pressSequentially(texte, { delay: 15 })
 }
+
+/**
+ * CHOISIR DANS UN CHAMP DE RECHERCHE (ChoixRecherche, 24/10/2026) : les listes
+ * qui grandissent (fournisseurs, lots, bons, OF, qualites, references en stock)
+ * ne sont plus des `<select>`. On tape, le serveur cherche, puis on clique
+ * l'option dont le TITRE (« code — libellé », sans l'information en retrait) est
+ * celui qu'on attend — un texte exact, ou un motif. Une option absente fait
+ * echouer le test : le choix n'est jamais saute sans le dire.
+ */
+export async function choisirRecherche(page: Page, champ: Locator, texte: string, titre: string | RegExp = texte) {
+  await champ.click()
+  await champ.fill(texte)
+  const porte = typeof titre === 'string' ? page.getByText(titre, { exact: true }) : page.getByText(titre)
+  const o = page.getByRole('listbox').getByRole('option').filter({ has: porte }).first()
+  await expect(o, `aucune option ${String(titre)} après avoir tapé « ${texte} »`).toBeVisible({ timeout: 15_000 })
+  await o.click()
+  await expect(page.getByRole('listbox')).toHaveCount(0)
+}
+
+/** Un texte pris tel quel dans une expression reguliere. */
+export const echapper = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** Lire au serveur, avec le jeton de la session (pour verifier ce qui a ete enregistre). */
 export async function lireApi<T = unknown>(page: Page, chemin: string): Promise<T> {

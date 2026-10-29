@@ -22,7 +22,7 @@ use crate::error::{AppError, AppResult};
 use crate::routes::json::lignes_en_json;
 use crate::AppState;
 use axum::body::Body;
-use axum::extract::{Multipart, Path, State};
+use axum::extract::{Multipart, Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -82,7 +82,9 @@ fn repertoire(id_dossier: &str) -> std::path::PathBuf {
 ///
 /// Le corps est un formulaire multipart : le fichier dans `fichier`, et
 /// facultativement `nature`, `id_frais`, `id_facture`, `id_reception`,
-/// `libelle` pour dire ce que le document est.
+/// `libelle` pour dire ce que le document est. Le champ `version` porte la
+/// version lue du DOSSIER (verrou optimiste, 20/10/2026) : la piece passe par
+/// son en-tete, comme un frais.
 pub async fn deposer(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -174,6 +176,15 @@ pub async fn deposer(
         let _ = tokio::fs::remove_file(&chemin).await;
         return Err(AppError::Invalide("Le fichier est vide.".into()));
     }
+    let version = match crate::domain::concurrence::exigee(
+        champs.get("version").and_then(|v| v.trim().parse::<i64>().ok()),
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&chemin).await;
+            return Err(e);
+        }
+    };
     let sha = hex::encode(empreinte.finalize());
 
     // Le meme scan depose deux fois : on le dit, et on garde le premier.
@@ -196,6 +207,10 @@ pub async fn deposer(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    if let Err(e) = crate::domain::importation::prendre_dossier(&mut tx, &id_dossier, Some(version)).await {
+        let _ = tokio::fs::remove_file(&chemin).await;
+        return Err(e);
+    }
     let insertion = sqlx::query(
         "INSERT INTO piece_jointe (id_piece, id_dossier, id_facture, id_reception, nature,
                                    id_frais, libelle, nom_fichier, type_mime, taille_octets,
@@ -223,9 +238,11 @@ pub async fn deposer(
         let _ = tokio::fs::remove_file(&chemin).await;
         return Err(e.into());
     }
+    let version = crate::domain::importation::version_dossier(&mut tx, &id_dossier).await?;
     tx.commit().await?;
 
-    Ok(Json(json!({ "id_piece": id_piece, "nom_fichier": nom_fichier, "taille_octets": taille })))
+    Ok(Json(json!({ "id_piece": id_piece, "nom_fichier": nom_fichier, "taille_octets": taille,
+                    "version": version })))
 }
 
 /// `GET /api/import/pieces/{id}` — le document lui-meme.
@@ -263,27 +280,37 @@ pub async fn telecharger(
         .into_response())
 }
 
-/// `DELETE /api/import/pieces/{id}` — retire la piece et son fichier.
+/// `DELETE /api/import/pieces/{id}?version=` — retire la piece et son fichier.
+/// La version est celle du dossier.
 pub async fn supprimer(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    Query(q): Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let version = super::entites::version_exigee(q.version.map(Value::String).as_ref())?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    let id_dossier: String = sqlx::query_scalar("SELECT id_dossier FROM piece_jointe WHERE id_piece = $1")
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::Introuvable(format!("piece {id}")))?;
+    crate::domain::importation::prendre_dossier(&mut tx, &id_dossier, Some(version)).await?;
     let chemin: Option<String> =
         sqlx::query_scalar("DELETE FROM piece_jointe WHERE id_piece = $1 RETURNING chemin")
             .bind(&id)
             .fetch_optional(&mut *tx)
             .await?;
     let chemin = chemin.ok_or_else(|| AppError::Introuvable(format!("piece {id}")))?;
+    let version = crate::domain::importation::version_dossier(&mut tx, &id_dossier).await?;
     tx.commit().await?;
     // Le fichier part APRES la base : si l'effacement echoue, il reste un
     // fichier sans ligne, ce qui ne trompe personne — l'inverse afficherait une
     // piece introuvable.
     let _ = tokio::fs::remove_file(&chemin).await;
-    Ok(Json(json!({ "supprime": id })))
+    Ok(Json(json!({ "supprime": id, "version": version })))
 }
 
 /// CE QUE LE DOSSIER DEVRAIT CONTENIR, deduit de ce qu'il porte deja.
@@ -394,7 +421,7 @@ pub async fn lecture(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Lire).await?;
     let ligne = sqlx::query(
-        "SELECT l.resultat, l.duree_s::float8 AS duree_s, l.date_lecture, u.login AS lu_par
+        "SELECT l.resultat, l.duree_s::float8 AS duree_s, fn_iso(l.date_lecture) AS date_lecture, u.login AS lu_par
            FROM piece_lecture l
            LEFT JOIN utilisateur u ON u.id_utilisateur = l.id_utilisateur
           WHERE l.id_piece = $1",
@@ -482,7 +509,7 @@ pub async fn lire(
          ON CONFLICT (id_piece) DO UPDATE
             SET resultat = excluded.resultat, duree_s = excluded.duree_s,
                 id_utilisateur = excluded.id_utilisateur,
-                date_lecture = to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')",
+                date_lecture = now()",
     )
     .bind(&id)
     .bind(&corps)

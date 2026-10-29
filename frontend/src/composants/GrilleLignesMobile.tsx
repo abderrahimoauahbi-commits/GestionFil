@@ -22,7 +22,9 @@ import {
   type ProprietesGrille,
   type RefLigne,
   UNITES_LIBRES,
+  autreLigneMemeReference,
   depuisReference,
+  fondreLigne,
   estEbauche,
   estPrete,
   kgDe,
@@ -32,7 +34,7 @@ import {
 } from './GrilleLignes'
 import { ChampRecherche, type Suggestion } from './ChampRecherche'
 import { AvisColisage } from './AvisColisage'
-import { couleurEcart } from '../lib/lots'
+import { classeNiveauEcart, couleurEcart } from '../lib/lots'
 import {
   depuisBobines,
   depuisKg,
@@ -42,6 +44,11 @@ import {
 } from '../lib/conditionnement'
 import { Badge, Bouton, Champ, Etiq, Selecteur } from './ui/base'
 import { cn, fmt } from '../lib/utils'
+import { libelleStatut } from '../lib/statuts'
+
+/** Les états d'une référence au moteur de couverture (27/10/2026). */
+const ETATS_MOTEUR = ['RUPTURE_INEVITABLE', 'SOUS_SECURITE', 'SOUS_CIBLE', 'COUVERT']
+
 
 export function GrilleLignesMobile({
   codeFournisseur,
@@ -71,6 +78,7 @@ export function GrilleLignesMobile({
   referenceFigee = false,
   unitesAutorisees,
   doublonsReference = false,
+  fusionParReference = false,
   libelles,
   poidsBobine,
   controleColisage = false,
@@ -78,7 +86,7 @@ export function GrilleLignesMobile({
   const [ouverte, setOuverte] = useState<string | null>(null)
   const ligne = lignes.find((l) => l.cle === ouverte) ?? null
 
-  const prises = doublonsReference
+  const prises = doublonsReference || fusionParReference
     ? new Set<string>()
     : (dejaPrises ?? new Set(lignes.map((l) => l.code_reference).filter(Boolean)))
 
@@ -105,6 +113,7 @@ export function GrilleLignesMobile({
         return {
           ...l,
           valide: false,
+          saisiePar: source,
           qte: source === 'quantite' ? valeur : pourChamp(r.kg, 2),
           palettes: source === 'palettes' ? valeur : pourChamp(r.palettes),
           bobines: source === 'bobines' ? valeur : pourChamp(r.bobines),
@@ -121,7 +130,8 @@ export function GrilleLignesMobile({
       detail:
         [
           r.designation,
-          r.stock_projete_kg != null ? `projeté ${fmt.nombre(r.stock_projete_kg, 0)} kg` : null,
+          // L'état au moteur de couverture (27/10/2026) : la 1re rupture du plan.
+          r.premiere_rupture ? `rupture le ${fmt.date(r.premiere_rupture)}` : null,
           etranger ? `habituellement chez ${r.fournisseur_nom ?? r.code_fournisseur}` : null,
         ]
           .filter(Boolean)
@@ -129,10 +139,19 @@ export function GrilleLignesMobile({
       mention:
         suggere > 0
           ? `plan : ${fmt.nombre(suggere, 0)} kg`
-          : r.statut_stock && r.statut_stock !== 'OK'
-            ? r.statut_stock
+          : r.statut_stock && r.statut_stock !== 'COUVERT'
+            ? // Un état du moteur se traduit ; une mention libre (le stock du magasin
+              // d'une sortie, « RUPTURE » quand il est vide) passe telle quelle.
+              ETATS_MOTEUR.includes(r.statut_stock)
+              ? libelleStatut('statut_stock', r.statut_stock)
+              : r.statut_stock
             : undefined,
-      ton: suggere > 0 ? 'primaire' : r.statut_stock === 'RUPTURE' ? 'alerte' : 'neutre',
+      ton:
+        suggere > 0
+          ? 'primaire'
+          : r.statut_stock === 'RUPTURE_INEVITABLE' || r.statut_stock === 'RUPTURE'
+            ? 'alerte'
+            : 'neutre',
       desactivee: prises.has(r.code_reference),
       charge: r,
     }
@@ -271,7 +290,15 @@ export function GrilleLignesMobile({
           surCorrection={surCorrection}
           valeurOrigine={valeurOrigine}
           surValider={() => {
-            maj(ligne.cle, { valide: true })
+            /* UNE LIGNE PAR REFERENCE (bon de commande, 21/10/2026) : la ligne
+               qui repete une reference se fond dans celle qui la porte. */
+            const i = fusionParReference && !ligne.idExistant ? autreLigneMemeReference(lignes, ligne) : -1
+            if (i >= 0) {
+              const cible = lignes[i].cle
+              setLignes((ls) =>
+                ls.filter((x) => x.cle !== ligne.cle).map((x) => (x.cle === cible ? fondreLigne(x, ligne) : x)),
+              )
+            } else maj(ligne.cle, { valide: true })
             setOuverte(null)
           }}
           surEnregistrer={surEnregistrerLigne ? () => surEnregistrerLigne(ligne) : undefined}
@@ -460,7 +487,9 @@ function FeuilleLigne(p: {
               valeur=""
               chercher={p.chercher}
               cleCache={[p.mode, p.codeFournisseur, p.prises.size]}
-              chercherAVide
+              // Recherche vide : seulement la ou elle ne coute rien (plan en memoire,
+              // propositions d'un document de stock) — comme au bureau (24/10/2026).
+              chercherAVide={p.sansSource || p.mode === 'PLAN'}
               surChoix={p.surChoixRef}
               placeholder={
                 p.libelles?.recherche ??
@@ -619,7 +648,7 @@ function FeuilleLigne(p: {
                   <p className="mt-1 text-[11px] tabular-nums text-attenue-texte">
                     Poids/bobine {fmt.nombre(reel, 3)} kg
                     {pct != null && (
-                      <span className={cn('ml-1', c === 'rouge' ? 'text-danger' : c === 'orange' ? 'text-alerte' : 'text-succes')}>
+                      <span className={cn('ml-1', classeNiveauEcart(c) ?? 'text-succes')}>
                         ({pct > 0 ? '+' : ''}
                         {fmt.nombre(pct, 2)} % / cat. {fmt.nombre(cat, 3)})
                       </span>

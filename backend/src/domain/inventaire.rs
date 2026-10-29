@@ -93,13 +93,69 @@ pub async fn preparer(tx: &mut sqlx::PgConnection, id_inventaire: &str) -> AppRe
     // lot refuserait a la cloture. Depuis le 01/10/2026 les fils sont suivis
     // au lot : un lot trouve en rayon se saisit au comptage, qui lui ouvre sa
     // ligne (theorique zero) — voir `saisir_comptage`.
+    //
+    // LE POIDS D'UNE BOBINE FIGE SUR LA LIGNE EST CELUI DU LOT (2026-10-24a) :
+    // `fn_lot_poids_bobine`, le lot sinon la fiche article, jamais 1. C'est lui
+    // qui convertit les bobines comptees ; le comptage le relit a son heure.
+    //
+    // CE QUE GELE L'INVENTAIRE (2026-10-24a, 2026-10-24b) : un GLOBAL, tout le
+    // magasin ; un TOURNANT ou un CIBLE, les references de SA LISTE. Sans liste,
+    // tout le magasin.
+    //
+    // TOURNANT ET CIBLE COMPTENT LEUR LISTE (decision du 23/10/2026, 2026-10-24b) :
+    // les references CHOISIES (`inventaire_reference`, validee par
+    // `choisir_references`) — pour une reference suivie au lot, ses lots en stock
+    // dans le magasin ; pour une autre, sa ligne meme a theorique zero (on l'a
+    // choisie pour la compter). Sans liste, rien ne se prepare : la base refuse
+    // aussi toute ligne d'une reference non choisie (INV-SELECTION).
     let global = type_inventaire == "GLOBAL";
+    if !global {
+        let (numero, nb_choisies): (String, i64) = sqlx::query_as(
+            "SELECT i.numero_inventaire,
+                    (SELECT COUNT(*) FROM inventaire_reference s WHERE s.id_inventaire = i.id_inventaire)
+               FROM inventaire i WHERE i.id_inventaire = $1",
+        )
+        .bind(id_inventaire)
+        .fetch_one(&mut *tx)
+        .await?;
+        if nb_choisies == 0 {
+            return Err(AppError::RegleMetier(format!(
+                "INV-SELECTION : l'inventaire {numero} ({}) n'a aucune référence choisie : choisissez et validez sa liste avant de préparer ses lignes.",
+                if type_inventaire == "TOURNANT" { "tournant" } else { "ciblé" }
+            )));
+        }
+        let res = sqlx::query(
+            "INSERT INTO ligne_inventaire
+                 (id_inventaire, code_reference, code_magasin, lot_fournisseur, quantite_theorique_kg,
+                  nb_bobines_theorique, poids_unitaire_theorique_kg)
+             SELECT $1, sl.code_reference, sl.code_magasin, sl.lot_fournisseur, sl.quantite_kg,
+                    sl.nb_bobines, fn_lot_poids_bobine(sl.code_reference, sl.lot_fournisseur)
+               FROM inventaire_reference s
+               JOIN reference r ON r.code_reference = s.code_reference AND r.suivi_lot = 1
+               JOIN stock_lot sl ON sl.code_reference = s.code_reference
+                                AND sl.code_magasin = $2 AND sl.quantite_kg > 0
+              WHERE s.id_inventaire = $1
+             UNION ALL
+             SELECT $1, r.code_reference, $2, NULL, COALESCE(sm.quantite_kg, 0),
+                    sm.nb_bobines, NULLIF(r.poids_bobine_kg, 0)
+               FROM inventaire_reference s
+               JOIN reference r ON r.code_reference = s.code_reference AND r.suivi_lot = 0
+               LEFT JOIN stock_magasin sm ON sm.code_reference = r.code_reference
+                                         AND sm.code_magasin   = $2
+              WHERE s.id_inventaire = $1",
+        )
+        .bind(id_inventaire)
+        .bind(&magasin)
+        .execute(&mut *tx)
+        .await?;
+        return Ok(res.rows_affected() as i64);
+    }
     let res = sqlx::query(
         "INSERT INTO ligne_inventaire
              (id_inventaire, code_reference, code_magasin, lot_fournisseur, quantite_theorique_kg,
               nb_bobines_theorique, poids_unitaire_theorique_kg)
          SELECT $1, sl.code_reference, sl.code_magasin, sl.lot_fournisseur, sl.quantite_kg,
-                sl.nb_bobines, NULLIF(r.poids_bobine_kg, 0)
+                sl.nb_bobines, fn_lot_poids_bobine(sl.code_reference, sl.lot_fournisseur)
            FROM stock_lot sl
            JOIN reference r ON r.code_reference = sl.code_reference AND r.suivi_lot = 1
           WHERE sl.code_magasin = $2 AND sl.quantite_kg > 0
@@ -119,6 +175,128 @@ pub async fn preparer(tx: &mut sqlx::PgConnection, id_inventaire: &str) -> AppRe
     .await?;
 
     Ok(res.rows_affected() as i64)
+}
+
+/// Ce que rend le choix de la liste.
+#[derive(Debug, Serialize)]
+pub struct ResultatListe {
+    pub references_choisies: usize,
+    pub lignes_a_compter: i64,
+}
+
+/// VALIDER LA LISTE D'UN TOURNANT OU D'UN CIBLE, PUIS PREPARER SES LIGNES
+/// (decision du 23/10/2026, migration 2026-10-24b). Dans la transaction de
+/// l'appelant, contexte pose.
+///
+/// La liste REMPLACE celle d'avant — permis tant que l'inventaire est en
+/// brouillon et que ses lignes ne sont pas preparees (la base le garde :
+/// `trg_inventaire_reference_garde`). Une reference est `PROPOSITION` si le
+/// tournant la proposait (due dans `v_inventaire_candidat`), `CHOIX` sinon ; la
+/// classe ABC de la fiche et le dernier comptage du magasin sont notes pour la
+/// trace. Rien n'est prepare sans cette validation.
+pub async fn choisir_references(
+    tx: &mut sqlx::PgConnection,
+    id_utilisateur: &str,
+    id_inventaire: &str,
+    references: &[String],
+) -> AppResult<ResultatListe> {
+    let (numero, statut, magasin, type_inventaire): (String, String, String, String) = sqlx::query_as(
+        "SELECT numero_inventaire, statut, code_magasin, type_inventaire FROM inventaire
+          WHERE id_inventaire = $1 FOR UPDATE",
+    )
+    .bind(id_inventaire)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("inventaire {id_inventaire}")))?;
+
+    if type_inventaire == "GLOBAL" {
+        return Err(AppError::RegleMetier(format!(
+            "L'inventaire {numero} est global : il compte tout le magasin, il ne choisit pas ses références."
+        )));
+    }
+    if statut != "BROUILLON" {
+        return Err(AppError::RegleMetier(format!(
+            "La liste d'un inventaire se choisit en brouillon (statut actuel : {statut})."
+        )));
+    }
+    let lignes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ligne_inventaire WHERE id_inventaire = $1")
+        .bind(id_inventaire)
+        .fetch_one(&mut *tx)
+        .await?;
+    if lignes > 0 {
+        return Err(AppError::RegleMetier(format!(
+            "Les lignes de l'inventaire {numero} sont préparées : sa liste de références est figée."
+        )));
+    }
+
+    // Sans doublon ni blanc, dans l'ordre recu.
+    let mut choisies: Vec<String> = Vec::new();
+    for r in references {
+        let r = r.trim();
+        if !r.is_empty() && !choisies.iter().any(|c| c == r) {
+            choisies.push(r.to_string());
+        }
+    }
+    if choisies.is_empty() {
+        return Err(AppError::RegleMetier(format!(
+            "Choisissez au moins une référence à compter : un inventaire {} sans liste ne se prépare pas.",
+            if type_inventaire == "TOURNANT" { "tournant" } else { "ciblé" }
+        )));
+    }
+    let inconnues: Vec<String> = sqlx::query_scalar(
+        "SELECT c FROM unnest($1::text[]) c
+          WHERE NOT EXISTS (SELECT 1 FROM reference r WHERE r.code_reference = c)
+          ORDER BY c",
+    )
+    .bind(&choisies)
+    .fetch_all(&mut *tx)
+    .await?;
+    if !inconnues.is_empty() {
+        return Err(AppError::Invalide(format!(
+            "référence(s) inconnue(s) : {}",
+            inconnues.join(", ")
+        )));
+    }
+
+    sqlx::query("DELETE FROM inventaire_reference WHERE id_inventaire = $1")
+        .bind(id_inventaire)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "INSERT INTO inventaire_reference
+             (id_inventaire, code_reference, origine, classe_abc, dernier_comptage, id_utilisateur)
+         SELECT $1, r.code_reference,
+                CASE WHEN $4 = 'TOURNANT' AND COALESCE(c.du, false) THEN 'PROPOSITION' ELSE 'CHOIX' END,
+                r.classe_abc,
+                (SELECT max(COALESCE(li.date_comptage, i.date_cloture))
+                   FROM ligne_inventaire li JOIN inventaire i ON i.id_inventaire = li.id_inventaire
+                  WHERE i.statut = 'CLOTURE' AND i.code_magasin = $3
+                    AND li.code_reference = r.code_reference AND li.quantite_comptee_kg IS NOT NULL),
+                $5
+           FROM unnest($2::text[]) WITH ORDINALITY AS x(code, rang)
+           JOIN reference r ON r.code_reference = x.code
+           LEFT JOIN v_inventaire_candidat c ON c.code_magasin = $3 AND c.code_reference = x.code
+          ORDER BY x.rang",
+    )
+    .bind(id_inventaire)
+    .bind(&choisies)
+    .bind(&magasin)
+    .bind(&type_inventaire)
+    .bind(id_utilisateur)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE inventaire SET date_selection = fn_instant($2), id_utilisateur_selection = $3
+          WHERE id_inventaire = $1",
+    )
+    .bind(id_inventaire)
+    .bind(maintenant())
+    .bind(id_utilisateur)
+    .execute(&mut *tx)
+    .await?;
+
+    let n = preparer(tx, id_inventaire).await?;
+    Ok(ResultatListe { references_choisies: choisies.len(), lignes_a_compter: n })
 }
 
 /// Le comptage est-il complet et justifie ? Rend un refus clair sinon. Lu a
@@ -188,7 +366,7 @@ pub async fn valider(db: &Db, user: &Utilisateur, id_inventaire: &str) -> AppRes
     exiger_comptage_complet(&mut tx, id_inventaire).await?;
     sqlx::query(
         "UPDATE inventaire
-            SET statut = 'VALIDE', id_utilisateur_validation = $2, date_validation = $3
+            SET statut = 'VALIDE', id_utilisateur_validation = $2, date_validation = fn_instant($3)
           WHERE id_inventaire = $1",
     )
     .bind(id_inventaire)
@@ -274,7 +452,7 @@ pub async fn annuler(db: &Db, user: &Utilisateur, id_inventaire: &str, motif: &s
     sqlx::query(
         "UPDATE inventaire
             SET statut = 'ANNULE', motif_annulation = $2,
-                id_utilisateur_annulation = $3, date_annulation = $4
+                id_utilisateur_annulation = $3, date_annulation = fn_instant($4)
           WHERE id_inventaire = $1",
     )
     .bind(id_inventaire)
@@ -290,10 +468,14 @@ pub async fn annuler(db: &Db, user: &Utilisateur, id_inventaire: &str, motif: &s
 
 /// Cloture l'inventaire et genere les mouvements d'ajustement.
 ///
-/// L'ECART SE LIT A L'HEURE DU COMPTAGE (regle 10, 08/10/2026). Chaque ligne a
-/// recu, au moment ou elle a ete comptee, le theorique du stock a cet instant
-/// (`saisir_comptage`) : les mouvements faits apres le comptage restent
-/// acquis et ne sont pas recomptes. Le magasin n'est pas gele.
+/// LE MAGASIN EST GELE PENDANT L'INVENTAIRE (decision du 23/10/2026, garde en
+/// base, migrations 2026-10-23g et 2026-10-24a) : de l'ouverture a la cloture ou
+/// a l'annulation, aucun mouvement n'y entre ni n'en sort — tout le magasin pour
+/// un GLOBAL, les seules references de SA LISTE pour un TOURNANT ou un CIBLE
+/// (2026-10-24b ; tout le magasin s'il n'a pas de liste). Seuls passent les ajustements ecrits
+/// ici, rattaches a l'inventaire par `mouvement.id_inventaire` ; la base verifie
+/// que chaque ligne est un ecart de cet inventaire. Le theorique lu au comptage
+/// (`saisir_comptage`, regle 10) ne bouge donc plus jusqu'a la cloture.
 pub async fn cloturer(
     db: &Db,
     user: &Utilisateur,
@@ -379,10 +561,12 @@ pub async fn cloturer(
         // SQLite — deux horloges et deux troncatures a la milliseconde, donc un
         // refus intermittent pour datation dans le futur.
         sqlx::query(
+            // `id_inventaire` RATTACHE L'AJUSTEMENT A SON INVENTAIRE : c'est ce
+            // qui le laisse passer sur un magasin gele (2026-10-23g).
             "INSERT INTO mouvement
                  (id_mouvement, numero_mouvement, code_type_mvt,
-                  code_magasin, code_motif, reference_document, id_utilisateur)
-             VALUES ($1, $2, $3, $4, 'INVENTAIRE', $5, $6)",
+                  code_magasin, code_motif, reference_document, id_utilisateur, id_inventaire)
+             VALUES ($1, $2, $3, $4, 'INVENTAIRE', $5, $6, $7)",
         )
         .bind(&id_mouvement)
         .bind(&numero_mouvement)
@@ -390,6 +574,7 @@ pub async fn cloturer(
         .bind(&magasin)
         .bind(&numero)
         .bind(&user.id)
+        .bind(id_inventaire)
         .execute(&mut *tx)
         .await?;
 
@@ -437,18 +622,25 @@ pub async fn cloturer(
         mouvements.push(numero_mouvement);
     }
 
+    // LES SEULES REFERENCES COMPTEES (2026-10-24b) : la date se posait sur tout le
+    // magasin, meme pour un tournant qui n'avait compte que quelques references.
     sqlx::query(
-        "UPDATE stock_magasin SET date_dernier_inventaire = $2 WHERE code_magasin = $1",
+        "UPDATE stock_magasin sm SET date_dernier_inventaire = fn_instant($2)
+          WHERE sm.code_magasin = $1
+            AND EXISTS (SELECT 1 FROM ligne_inventaire li
+                         WHERE li.id_inventaire = $3 AND li.code_reference = sm.code_reference
+                           AND li.quantite_comptee_kg IS NOT NULL)",
     )
     .bind(&magasin)
     .bind(&horodatage)
+    .bind(id_inventaire)
     .execute(&mut *tx)
     .await?;
 
     // date_cloture est renseignee explicitement : le CHECK de la table l'exige,
     // et le trigger AFTER du CDC ne pouvait pas le faire.
     sqlx::query(
-        "UPDATE inventaire SET statut = 'CLOTURE', date_cloture = $2 WHERE id_inventaire = $1",
+        "UPDATE inventaire SET statut = 'CLOTURE', date_cloture = fn_instant($2) WHERE id_inventaire = $1",
     )
     .bind(id_inventaire)
     .bind(&horodatage)

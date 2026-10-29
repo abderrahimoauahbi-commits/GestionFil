@@ -30,7 +30,12 @@ use crate::error::{AppError, AppResult};
 /// document engage. `None` pour l'annulation, qui se juge a part.
 fn rang(entite: &str, statut: &str) -> Option<u8> {
     let ordre: &[&str] = match entite {
-        "bon_commande" => &["BROUILLON", "EN_ATTENTE_VALIDATION", "VALIDE", "ENVOYE", "LIVRE_PARTIEL", "CLOTURE"],
+        // Le controle et la demande de prix (21/10/2026) precedent la validation :
+        // en dessous du seuil, ils se defont par simple ecriture.
+        "bon_commande" => &[
+            "BROUILLON", "EN_CONTROLE", "DEMANDE_PRIX", "EN_ATTENTE_VALIDATION", "VALIDE", "ENVOYE", "LIVRE_PARTIEL",
+            "CLOTURE",
+        ],
         "reception" => &["BROUILLON", "A_CONTROLER", "VALIDE", "CLOTURE"],
         "plan_production" => &["BROUILLON", "SIMULATION", "EN_COURS", "CLOTURE"],
         "qualite" => &["BROUILLON", "ACTIF", "CLOTURE"],
@@ -43,7 +48,7 @@ fn rang(entite: &str, statut: &str) -> Option<u8> {
 /// Le premier etat qui engage : en dessous, tout se defait par simple ecriture.
 fn seuil_engage(entite: &str) -> u8 {
     match entite {
-        "bon_commande" => 2,    // VALIDE
+        "bon_commande" => 4,    // VALIDE
         "reception" => 2,       // VALIDE : la marchandise est en stock
         "plan_production" => 2, // EN_COURS : il alimente le MRP
         "qualite" => 1,         // ACTIF : elle se planifie
@@ -137,7 +142,9 @@ mod tests {
 
     #[test]
     fn avancer_n_est_pas_reculer() {
-        assert!(!est_retour_arriere("bon_commande", "BROUILLON", "EN_ATTENTE_VALIDATION"));
+        assert!(!est_retour_arriere("bon_commande", "BROUILLON", "EN_CONTROLE"));
+        assert!(!est_retour_arriere("bon_commande", "EN_CONTROLE", "DEMANDE_PRIX"));
+        assert!(!est_retour_arriere("bon_commande", "EN_CONTROLE", "EN_ATTENTE_VALIDATION"));
         assert!(!est_retour_arriere("bon_commande", "VALIDE", "ENVOYE"));
         assert!(!est_retour_arriere("reception", "BROUILLON", "A_CONTROLER"));
         assert!(!est_retour_arriere("plan_production", "SIMULATION", "EN_COURS"));
@@ -147,6 +154,9 @@ mod tests {
     fn defaire_un_brouillon_reste_une_ecriture() {
         assert!(!est_retour_arriere("bon_commande", "BROUILLON", "ANNULE"));
         assert!(!est_retour_arriere("bon_commande", "EN_ATTENTE_VALIDATION", "BROUILLON"));
+        assert!(!est_retour_arriere("bon_commande", "EN_CONTROLE", "BROUILLON"));
+        assert!(!est_retour_arriere("bon_commande", "DEMANDE_PRIX", "BROUILLON"));
+        assert!(!est_retour_arriere("bon_commande", "DEMANDE_PRIX", "ANNULE"));
         assert!(!est_retour_arriere("reception", "A_CONTROLER", "BROUILLON"));
         assert!(!est_retour_arriere("reception", "A_CONTROLER", "ANNULE"));
         assert!(!est_retour_arriere("plan_production", "SIMULATION", "BROUILLON"));

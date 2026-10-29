@@ -190,6 +190,9 @@ export function ParcMachines() {
                       {m.nb_etages > 0 && (
                         <span className="text-[11px]"> · {m.nb_etages} ét.</span>
                       )}
+                      {m.largeur_m != null && (
+                        <span className="text-[11px]"> · {nb(m.largeur_m, 2)} m</span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right">{nb(m.capacite_bobines, 0)}</td>
                     <td className="px-3 py-2 text-right">
@@ -294,6 +297,9 @@ export function ParcMachines() {
                       {m.nb_etages > 0 && (
                         <span className="text-attenue-texte"> · {m.nb_etages} ét.</span>
                       )}
+                      {m.largeur_m != null && (
+                        <span className="text-attenue-texte"> · {nb(m.largeur_m, 2)} m</span>
+                      )}
                     </dd>
                   </div>
                 </dl>
@@ -371,12 +377,14 @@ function PanneauEtat({
       api.patch(`/api/machines/${encodeURIComponent(machine.code_machine)}/etat`, {
         etat,
         motif: motif.trim() || null,
+        version: machine.version,
       }),
     onSuccess: apres,
   })
 
   const supprimer = useMutation({
-    mutationFn: () => api.delete(`/api/machines/${encodeURIComponent(machine.code_machine)}`),
+    mutationFn: () =>
+      api.delete(`/api/machines/${encodeURIComponent(machine.code_machine)}?version=${machine.version}`),
     onSuccess: apres,
   })
 

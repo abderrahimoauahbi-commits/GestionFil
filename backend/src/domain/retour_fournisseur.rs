@@ -17,7 +17,7 @@
 use crate::auth::Utilisateur;
 use crate::db::{arrondi_kg, maintenant};
 use crate::error::{AppError, AppResult};
-use crate::routes::stock::numeroter;
+use crate::domain::numerotation::numeroter;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::PgConnection;
@@ -41,11 +41,20 @@ pub struct LigneRetourSaisie {
 
 #[derive(Debug, Deserialize)]
 pub struct RetourSaisie {
+    /// L'IDENTIFIANT TIRE PAR L'ECRAN a l'ouverture du formulaire (audit P3,
+    /// 19/10/2026) : le meme envoi rejoue rend le meme document, pas un second.
+    /// Absent : le serveur en tire un.
+    #[serde(default)]
+    pub id_document: Option<String>,
     pub code_fournisseur: String,
     pub date_retour: Option<String>,
     pub motif: Option<String>,
     pub observations: Option<String>,
     pub lignes: Vec<LigneRetourSaisie>,
+    /// La version lue avec le brouillon (verrou optimiste, groupe 3, 20/10/2026) :
+    /// exigee a la modification, ignoree a la creation.
+    #[serde(default)]
+    pub version: Option<i64>,
 }
 
 fn lot_de(l: &LigneRetourSaisie) -> Option<String> {
@@ -187,8 +196,9 @@ pub async fn enregistrer(c: &mut PgConnection, user: &Utilisateur, id: Option<&s
             let numero = numeroter(c, "retour_fournisseur", "numero", "RFO").await?;
             let id: String = sqlx::query_scalar(
                 "INSERT INTO retour_fournisseur
-                        (numero, date_retour, code_fournisseur, motif, observations, id_utilisateur_creation)
-                 VALUES ($1, $2, $3, btrim($4), NULLIF(btrim($5), ''), $6)
+                        (numero, date_retour, code_fournisseur, motif, observations, id_utilisateur_creation,
+                         id_retour)
+                 VALUES ($1, fn_jour_casablanca($2), $3, btrim($4), NULLIF(btrim($5), ''), $6, $7)
                  RETURNING id_retour",
             )
             .bind(&numero)
@@ -197,6 +207,7 @@ pub async fn enregistrer(c: &mut PgConnection, user: &Utilisateur, id: Option<&s
             .bind(s.motif.as_deref().unwrap_or(""))
             .bind(&s.observations)
             .bind(&user.id)
+            .bind(crate::domain::idempotence::identifiant(s.id_document.as_deref())?)
             .fetch_one(&mut *c)
             .await?;
             (id, numero)
@@ -204,7 +215,7 @@ pub async fn enregistrer(c: &mut PgConnection, user: &Utilisateur, id: Option<&s
         Some(id) => {
             let numero: String = sqlx::query_scalar(
                 "UPDATE retour_fournisseur
-                    SET date_retour = $2, code_fournisseur = $3, motif = btrim($4), observations = NULLIF(btrim($5), '')
+                    SET date_retour = fn_jour_casablanca($2), code_fournisseur = $3, motif = btrim($4), observations = NULLIF(btrim($5), '')
                   WHERE id_retour = $1
               RETURNING numero",
             )
@@ -220,7 +231,8 @@ pub async fn enregistrer(c: &mut PgConnection, user: &Utilisateur, id: Option<&s
         }
     };
     poser_lignes(c, &id, s).await?;
-    Ok(json!({ "id_retour": id, "numero": numero, "statut_retour": "BROUILLON" }))
+    let version = crate::domain::concurrence::version_actuelle(c, "retour_fournisseur", "id_retour", &id).await?;
+    Ok(json!({ "id_retour": id, "numero": numero, "statut_retour": "BROUILLON", "version": version }))
 }
 
 /// La sortie au prix du retour, en centimes : ce que le stock restant porte
@@ -242,7 +254,7 @@ pub fn porter_au_stock(delta_c: i64, cmup_avant: f64, reste_kg: f64) -> (i64, i6
 /// du stock restant.
 pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppResult<Value> {
     let entete: Option<(String, String, String, String, String, Option<String>, String)> = sqlx::query_as(
-        "SELECT numero, statut, code_fournisseur, motif, date_retour, observations, id_utilisateur_creation
+        "SELECT numero, statut, code_fournisseur, motif, date_retour::text, observations, id_utilisateur_creation
            FROM retour_fournisseur WHERE id_retour = $1 FOR UPDATE",
     )
     .bind(id)
@@ -269,6 +281,8 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
     .await?;
     // Le stock, rejuge maintenant : il a pu bouger depuis la saisie.
     let saisie = RetourSaisie {
+        id_document: None,
+        version: None,
         code_fournisseur: fournisseur,
         date_retour: Some(date_retour.clone()),
         motif: Some(motif.clone()),
@@ -302,7 +316,7 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
             "INSERT INTO mouvement
                  (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
                   code_motif, reference_document, observations_globales, id_utilisateur)
-             VALUES ($1, $2, $3, 'RETOUR_FOURN', $4, 'RETOUR_FOUR', $5, $6, $7)",
+             VALUES ($1, $2, fn_jour_casablanca($3), 'RETOUR_FOURN', $4, 'RETOUR_FOUR', $5, $6, $7)",
         )
         .bind(&id_mvt)
         .bind(&numero_mvt)
@@ -356,7 +370,7 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
                 None => (None, 0, 0),
             };
             if stock_c != 0 {
-                sqlx::query("UPDATE stock_magasin SET cmup_mad = $3, date_maj = $4 WHERE code_reference = $1 AND code_magasin = $2")
+                sqlx::query("UPDATE stock_magasin SET cmup_mad = $3, date_maj = fn_instant($4) WHERE code_reference = $1 AND code_magasin = $2")
                     .bind(reference)
                     .bind(magasin)
                     .bind(cmup_apres)
@@ -369,7 +383,7 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
                                           FROM stock_magasin sm
                                          WHERE sm.code_reference = $1 AND sm.quantite_kg > 0
                                            AND sm.cmup_mad IS NOT NULL),
-                            date_dernier_cmup = $2
+                            date_dernier_cmup = fn_instant($2)
                       WHERE code_reference = $1",
                 )
                 .bind(reference)
@@ -397,7 +411,7 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
     }
     sqlx::query(
         "UPDATE retour_fournisseur
-            SET statut = 'VALIDE', id_utilisateur_validation = $2, date_validation = $3
+            SET statut = 'VALIDE', id_utilisateur_validation = $2, date_validation = fn_instant($3)
           WHERE id_retour = $1",
     )
     .bind(id)

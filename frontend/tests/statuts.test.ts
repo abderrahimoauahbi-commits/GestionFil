@@ -1,9 +1,9 @@
 /**
  * OU UN BON S'EFFACE, ET OU IL S'ANNULE (src/lib/statuts.ts).
  *
- * L'ecran ne propose « Supprimer » qu'en BROUILLON ou EN_ATTENTE_VALIDATION ;
- * au-dela, le numero est parti chez un fournisseur et le bon s'annule. Le
- * serveur tient la meme regle (supprimer_bc, backend/src/routes/stock.rs) et a
+ * L'ecran ne propose « Supprimer » qu'en BROUILLON (un bon en validation est fige
+ * depuis le 21/10/2026) ; au-dela, le numero est parti chez un fournisseur et le bon s'annule. Le
+ * serveur tient la meme regle (supprimer_bc, backend/src/routes/bons_commande.rs) et a
  * le dernier mot : le second test lit sa garde et echoue si les deux listes
  * divergent — c'est la promesse ecrite dans statuts.ts.
  *
@@ -11,24 +11,184 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { SUPPRIMABLES, estSupprimable } from '../src/lib/statuts.ts'
+import { readFileSync, readdirSync } from 'node:fs'
+import {
+  SOURCE_STATUTS,
+  STATUTS,
+  SUPPRIMABLES,
+  estSupprimable,
+  humaniser,
+  libelleStatut,
+  statutMetier,
+  tonStatut,
+  type EntiteStatut,
+} from '../src/lib/statuts.ts'
 
-test('estSupprimable : brouillon et attente de validation seulement', () => {
+test('estSupprimable : brouillon seulement', () => {
   assert.equal(estSupprimable('BROUILLON'), true)
-  assert.equal(estSupprimable('EN_ATTENTE_VALIDATION'), true)
-  for (const statut of ['VALIDE', 'ANNULE', 'RECU', 'CLOTURE', '', 'brouillon', ' BROUILLON'])
+  for (const statut of ['EN_ATTENTE_VALIDATION', 'EN_CONTROLE', 'DEMANDE_PRIX', 'VALIDE', 'ANNULE', 'RECU', 'CLOTURE', '', 'brouillon', ' BROUILLON'])
     assert.equal(estSupprimable(statut), false, statut)
 })
 
 test('l\'ecran et le serveur ont la meme liste', () => {
-  const source = readFileSync(new URL('../../backend/src/routes/stock.rs', import.meta.url), 'utf-8')
+  const source = readFileSync(new URL('../../backend/src/routes/bons_commande.rs', import.meta.url), 'utf-8')
   const debut = source.indexOf('pub async fn supprimer_bc(')
-  assert.ok(debut >= 0, 'supprimer_bc introuvable dans stock.rs')
+  assert.ok(debut >= 0, 'supprimer_bc introuvable dans bons_commande.rs')
   const fin = source.indexOf('\npub async fn ', debut + 1)
   const corps = source.slice(debut, fin < 0 ? undefined : fin)
   const garde = corps.split('\n').find((l) => /^\s*if statut != "/.test(l))
   assert.ok(garde, 'garde « if statut != … » introuvable dans supprimer_bc')
   const serveur = [...garde.matchAll(/statut != "([A-Z_]+)"/g)].map((m) => m[1]).sort()
   assert.deepEqual(serveur, [...SUPPRIMABLES].sort())
+})
+
+// =============================================================================
+// LA TABLE DES STATUTS METIER (24/10/2026)
+// =============================================================================
+
+const racine = new URL('../../', import.meta.url)
+const lire = (chemin: string) => readFileSync(new URL(chemin, racine), 'utf-8')
+
+/**
+ * Les codes que la BASE permet, colonne par colonne : chaque contrainte CHECK
+ * « pure » (`col IN (...)`, eventuellement `col IS NULL OR col IN (...)`) du
+ * schema db/pg puis des migrations, dans l'ordre ou elles se jouent — la
+ * derniere definition d'une colonne fait foi (une migration qui retire un code
+ * le retire ici aussi). Les contraintes conditionnelles (`statut IN (...) OR
+ * date_validation IS NOT NULL`) ne disent pas la liste et sont ignorees.
+ */
+function codesDeLaBase(): Map<string, string[]> {
+  const dossier = 'db/pg/'
+  const schema = readdirSync(new URL(dossier, racine))
+    .filter((f) => /^\d{3}[a-z]?_.*\.sql$/.test(f))
+    .sort()
+    .map((f) => dossier + f)
+  const migrations = readdirSync(new URL(dossier + 'migrations/', racine))
+    .filter((f) => f.endsWith('.sql'))
+    .sort()
+    .map((f) => dossier + 'migrations/' + f)
+  const codes = new Map<string, string[]>()
+  for (const fichier of [...schema, ...migrations]) {
+    const texte = lire(fichier).replace(/--[^\n]*/g, '')
+    for (const instruction of texte.split(';')) {
+      const table = /\b(?:CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?|ALTER\s+TABLE(?:\s+IF\s+EXISTS)?(?:\s+ONLY)?)\s+(?:public\.)?(\w+)/i.exec(instruction)?.[1]
+      if (!table) continue
+      const motif =
+        /CHECK\s*\(\s*\(*\s*(?:(\w+)\s+IS\s+NULL\s*\)*\s+OR\s+\(*\s*)?(\w+)\s+(?:IN\s*\(([^)]*)\)|=\s*ANY\s*\(\s*ARRAY\s*\[([^\]]*)\]\s*\))(?![\s)]*(?:OR|AND)\b)/gi
+      for (const m of instruction.matchAll(motif)) {
+        if (m[1] && m[1] !== m[2]) continue
+        const valeurs = [...(m[3] ?? m[4]).matchAll(/'([^']*)'/g)].map((v) => v[1])
+        if (valeurs.length) codes.set(`${table.toLowerCase()}.${m[2].toLowerCase()}`, valeurs)
+      }
+    }
+  }
+  return codes
+}
+
+/** Les codes calcules : relus a la source qui les ecrit. */
+function codesCalcules(source: string): string[] {
+  const [fichier, nom] = source.slice('calcule:'.length).split('#')
+  const texte = lire(fichier)
+  const fin = texte.search(new RegExp(String.raw`\bAS\s+${nom}\b`))
+  assert.ok(fin >= 0, `« AS ${nom} » introuvable dans ${fichier}`)
+  // Le CASE qui ferme sur « END AS nom » : on remonte en comptant les CASE
+  // imbriques (la livraison en a un pour le retard partiel).
+  const jetons = [...texte.slice(0, fin).matchAll(/\b(CASE|END)\b/g)].reverse()
+  let profondeur = 0
+  let debut = 0
+  for (const j of jetons) {
+    profondeur += j[1] === 'END' ? 1 : -1
+    if (profondeur === 0) {
+      debut = j.index
+      break
+    }
+  }
+  return [...new Set([...texte.slice(debut, fin).matchAll(/(?:THEN|ELSE)\s+'([^']+)'/g)].map((m) => m[1]))]
+}
+
+/**
+ * Les codes du moteur de couverture (27/10/2026) : les constantes `pub const X:
+ * &str = "X";` d'un module Rust (`moteur:fichier#module`), relues a la source.
+ */
+function codesMoteur(source: string): string[] {
+  const [fichier, nom] = source.slice('moteur:'.length).split('#')
+  const texte = lire(fichier)
+  const debut = texte.search(new RegExp(String.raw`pub mod ${nom}\s*\{`))
+  assert.ok(debut >= 0, `« pub mod ${nom} » introuvable dans ${fichier}`)
+  const fin = texte.indexOf('\n}', debut)
+  return [...texte.slice(debut, fin).matchAll(/pub const \w+: &str = "([^"]+)";/g)].map((m) => m[1])
+}
+
+/** Une source, ou plusieurs reunies par « + » (le stock : la photo ET le moteur). */
+function codesDeLaSource(source: string, base: Map<string, string[]>): string[] | undefined {
+  const parties = source.split('+').map((s) =>
+    s.startsWith('calcule:') ? codesCalcules(s) : s.startsWith('moteur:') ? codesMoteur(s) : base.get(s),
+  )
+  if (parties.some((p) => !p)) return undefined
+  return [...new Set(parties.flatMap((p) => p ?? []))]
+}
+
+test('chaque code de la base a son libelle dans la table des statuts', () => {
+  const base = codesDeLaBase()
+  for (const entite of Object.keys(STATUTS) as EntiteStatut[]) {
+    const source = SOURCE_STATUTS[entite]
+    const attendus = codesDeLaSource(source, base)
+    assert.ok(attendus && attendus.length > 0, `${entite} : aucune contrainte CHECK pour ${source}`)
+    const table = Object.keys(STATUTS[entite]).sort()
+    assert.deepEqual(table, [...attendus].sort(), `${entite} (${source}) : la table et la base divergent`)
+  }
+})
+
+test('les sources nommees sont celles de la base (statut principal de chaque document)', () => {
+  const base = codesDeLaBase()
+  // Les quelques valeurs relues dans la base de saisie le 24/10/2026 (pg_constraint).
+  assert.deepEqual(base.get('inventaire.statut'), ['BROUILLON', 'VALIDE', 'CLOTURE', 'ANNULE'])
+  assert.deepEqual(base.get('bon_commande.statut')?.length, 9)
+  assert.deepEqual(base.get('ordre_fabrication.statut'), ['PREVU', 'LANCE', 'CLOTURE', 'ANNULE'])
+})
+
+test('un code inconnu ne s affiche jamais brut', () => {
+  assert.equal(humaniser('A_CONTROLER'), 'A controler')
+  assert.equal(humaniser('MEME FOURNISSEUR'), 'Meme fournisseur')
+  assert.equal(humaniser('PARTIEL EN RETARD'), 'Partiel en retard')
+  for (const code of ['NOUVEAU_STATUT', 'EN_ATTENTE_SIGNATURE', 'ABANDONNE']) {
+    const s = statutMetier('bon_commande', code)
+    assert.notEqual(s.libelle, code)
+    assert.equal(s.ton, 'neutre')
+  }
+  assert.equal(libelleStatut('reception', null), '')
+})
+
+test('aucun libelle de la table n est un code brut, et une meme semantique garde son ton', () => {
+  for (const [entite, table] of Object.entries(STATUTS)) {
+    for (const [code, def] of Object.entries(table)) {
+      if (entite === 'classe_abc' || code === 'OK') continue
+      assert.notEqual(def.libelle, code, `${entite}.${code}`)
+      assert.ok(!/_/.test(def.libelle), `${entite}.${code} : « ${def.libelle} »`)
+    }
+  }
+  for (const entite of Object.keys(STATUTS) as EntiteStatut[]) {
+    if ('ANNULE' in STATUTS[entite]) assert.equal(tonStatut(entite, 'ANNULE'), 'danger', entite)
+    if ('ANNULEE' in STATUTS[entite]) assert.equal(tonStatut(entite, 'ANNULEE'), 'danger', entite)
+    if ('CLOTURE' in STATUTS[entite]) assert.equal(tonStatut(entite, 'CLOTURE'), 'neutre', entite)
+    if ('BROUILLON' in STATUTS[entite]) assert.equal(tonStatut(entite, 'BROUILLON'), 'neutre', entite)
+  }
+  assert.equal(tonStatut('statut_stock', 'CRITIQUE'), 'danger')
+  assert.equal(tonStatut('statut_stock', 'RUPTURE_INEVITABLE'), 'danger')
+})
+
+test('les etats et les signaux du moteur de couverture v2 (§ 15.4) ont leur libelle', () => {
+  assert.equal(libelleStatut('statut_stock', 'RUPTURE_INEVITABLE'), 'Rupture inévitable')
+  assert.equal(libelleStatut('statut_stock', 'SOUS_CIBLE'), 'Sous cible')
+  assert.equal(libelleStatut('statut_stock', 'SOUS_SECURITE'), 'Sous sécurité')
+  // Quatre tons distincts, du plus grave au plus calme.
+  assert.deepEqual(
+    ['RUPTURE_INEVITABLE', 'SOUS_SECURITE', 'SOUS_CIBLE', 'COUVERT'].map((c) => tonStatut('statut_stock', c)),
+    ['danger', 'alerte', 'info', 'succes'],
+  )
+  assert.equal(libelleStatut('signal_couverture', 'CIBLE_NON_DEFINIE'), 'Cible non définie')
+  assert.deepEqual(
+    codesMoteur('moteur:backend/src/domain/couverture.rs#etat').sort(),
+    ['COUVERT', 'RUPTURE_INEVITABLE', 'SOUS_CIBLE', 'SOUS_SECURITE'],
+  )
 })

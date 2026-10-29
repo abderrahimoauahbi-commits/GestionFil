@@ -19,6 +19,8 @@ import { Colonnes, TON, compact } from '../../composants/graphiques/Visuels'
 import { cn, fmt } from '../../lib/utils'
 import { OngletsTableauDeBord } from './Onglets'
 import { Bloc, EnPanne, Marge, Vide, libelleMois, useFiles, type Domaine } from './commun'
+import { StatutBadge } from '../../composants/StatutBadge'
+import { tonStatut } from '../../lib/statuts'
 
 interface MoisRisque {
   annee_mois: string
@@ -26,7 +28,8 @@ interface MoisRisque {
   entrees_kg: number
   stock_fin_kg: number
   stock_min_kg: number
-  statut: 'COUVERT' | 'TENDU' | 'RUPTURE'
+  /** L'état du mois au moteur de couverture (27/10/2026). */
+  statut: 'COUVERT' | 'SOUS_SECURITE' | 'PLAN_NON_COUVERT'
 }
 interface Risque {
   code_reference: string
@@ -47,7 +50,8 @@ interface AlerteRef {
   couleur: string | null
   fournisseur_nom: string | null
   stock_physique_net_kg: number | null
-  conso_mensuelle_kg: number | null
+  /** Le plan ramené à un mois de 30 jours, tel que le moteur le consomme (27/10/2026). */
+  plan_mois_kg: number | null
   jours_couverture: number | null
   delai_livraison_jours: number | null
   qte_a_commander_kg: number | null
@@ -79,12 +83,15 @@ export function Risques() {
 
   const risques = useMemo(() => qRisques.data ?? [], [qRisques.data])
   const colonnes = useMemo(() => risques[0]?.mois?.map((m) => m.annee_mois) ?? [], [risques])
-  const tropTard = risques.filter((r) => (r.marge_decision_jours ?? 0) < 0).length
+  // « Trop tard pour commander » (27/10/2026) : la 1re rupture du moteur tombe avant
+  // qu'une commande passée aujourd'hui puisse arriver (aujourd'hui + délai). Le compteur
+  // vient du serveur, sur toutes les références suivies (le mur n'en montre que 60).
+  const tropTard = nn('nb_trop_tard')
   const monoSource = risques.filter((r) => r.risque_sourcing === 'MONO-SOURCE').length
   const parMois = useMemo(
     () => ({
-      rupture: colonnes.map((_, i) => risques.filter((r) => r.mois[i]?.statut === 'RUPTURE').length),
-      tendu: colonnes.map((_, i) => risques.filter((r) => r.mois[i]?.statut === 'TENDU').length),
+      rupture: colonnes.map((_, i) => risques.filter((r) => r.mois[i]?.statut === 'PLAN_NON_COUVERT').length),
+      tendu: colonnes.map((_, i) => risques.filter((r) => r.mois[i]?.statut === 'SOUS_SECURITE').length),
     }),
     [colonnes, risques],
   )
@@ -116,11 +123,11 @@ export function Risques() {
 
       {/* ---- Chiffres clés ---------------------------------------------------- */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <CarteStat Icone={PackageX} libelle="En rupture" valeur={n('nb_ruptures') == null ? '—' : String(nn('nb_ruptures'))} unite={`/ ${nn('nb_references')}`} precision="références sous zéro jour de couverture" ton="danger" barres={parMois.rupture.length >= 3 ? parMois.rupture : undefined} aide="Les barres : les références en rupture prévues, mois par mois, sur l'horizon du plan." />
-        <CarteStat Icone={Flame} libelle="Critiques" valeur={String(nn('nb_critiques'))} precision={`${nn('nb_attention')} autres en attention`} ton="grave" />
+        <CarteStat Icone={PackageX} libelle="Rupture inévitable" valeur={n('nb_rupture_inevitable') == null ? '—' : String(nn('nb_rupture_inevitable'))} unite={`/ ${nn('nb_references')}`} precision={`${nn('nb_sous_cible')} sous la cible`} ton="danger" barres={parMois.rupture.length >= 3 ? parMois.rupture : undefined} aide="Moteur de couverture : la 1re rupture tombe avant aujourd’hui + délai. Les barres : les références dont le plan n’est pas couvert, mois par mois, sur l’horizon du plan." />
+        <CarteStat Icone={Flame} libelle="À commander aujourd’hui" valeur={String(nn('nb_a_commander_aujourdhui'))} precision={`${nn('nb_sous_securite')} sous la sécurité`} ton="grave" />
         <CarteStat Icone={ShoppingCart} libelle="À commander" valeur={String(nn('nb_refs_a_commander'))} unite="réf." precision={`${nn('nb_propositions_a_traiter')} propositions à arbitrer`} ton="alerte" />
         <CarteStat Icone={CircleDollarSign} libelle="Budget à engager" valeur={n('budget_a_engager_mad') == null ? '—' : compact(nn('budget_a_engager_mad'))} unite="MAD" precision="pour couvrir le plan" ton="primaire" />
-        <CarteStat Icone={Timer} libelle="Trop tard pour commander" valeur={String(tropTard)} unite="réf." precision="marge de décision déjà négative" ton={tropTard > 0 ? 'danger' : 'succes'} />
+        <CarteStat Icone={Timer} libelle="Trop tard pour commander" valeur={String(tropTard)} unite="réf." precision="1re rupture avant qu’une commande passée aujourd’hui arrive" ton={tropTard > 0 ? 'danger' : 'succes'} aide="Moteur de couverture : la 1re rupture du plan tombe avant aujourd’hui + délai fournisseur. Commander ne suffit plus : il faut une autre solution (équivalent, transfert, report)." />
         <CarteStat Icone={TriangleAlert} libelle="Mono-source à risque" valeur={String(monoSource)} unite="réf." precision={`sur ${risques.length} références en risque`} ton={monoSource > 0 ? 'alerte' : 'succes'} jauge={risques.length ? (monoSource / risques.length) * 100 : undefined} />
       </div>
 
@@ -168,7 +175,7 @@ export function Risques() {
       </div>
 
       {/* ---- Le risque dans le temps ----------------------------------------- */}
-      <Bloc titre="Références en risque, mois par mois" sousTitre="Combien passent sous leur stock de sécurité (tendues) ou à zéro (rupture), commandes en cours comprises" lien={{ vers: '/plan-achat', libelle: "Plan d'achat" }}>
+      <Bloc titre="Références en risque, mois par mois" sousTitre="Moteur de couverture : combien passent sous la sécurité ou ont un plan non couvert, mois par mois, arrivages comptés à leur date" lien={{ vers: '/plan-achat', libelle: "Plan d'achat" }}>
         {qRisques.isError ? (
           <EnPanne />
         ) : qRisques.isLoading ? (
@@ -181,8 +188,8 @@ export function Risques() {
             libelles={colonnes.map(libelleMois)}
             unite="références"
             series={[
-              { cle: 'r', libelle: 'En rupture', valeurs: parMois.rupture, couleur: TON.danger },
-              { cle: 't', libelle: 'Tendues', valeurs: parMois.tendu, couleur: TON.alerte },
+              { cle: 'r', libelle: 'Plan non couvert', valeurs: parMois.rupture, couleur: TON.danger },
+              { cle: 't', libelle: 'Sous la sécurité', valeurs: parMois.tendu, couleur: TON.alerte },
             ]}
           />
         )}
@@ -225,7 +232,7 @@ export function Risques() {
                     <td className="max-w-60 px-4 py-1.5">
                       <div className="flex items-center gap-1.5">
                         <span className="truncate font-medium text-texte">{r.code_reference}</span>
-                        {r.classe_abc && <Badge ton={r.classe_abc === 'A' ? 'danger' : 'neutre'}>{r.classe_abc}</Badge>}
+                        {r.classe_abc && <Badge ton={tonStatut('classe_abc', r.classe_abc)}>{r.classe_abc}</Badge>}
                       </div>
                       <div className="truncate text-[11px] text-attenue-texte">{r.fournisseur_nom ?? 'sans fournisseur'}</div>
                     </td>
@@ -234,15 +241,15 @@ export function Risques() {
                     {r.mois.map((m) => (
                       <td key={m.annee_mois} className="px-0.5 py-1.5">
                         <Infobulle
-                          contenu={`${libelleMois(m.annee_mois)} · besoin ${fmt.nombre(m.besoin_kg, 0)} kg · entrées ${fmt.nombre(m.entrees_kg, 0)} kg · fin de mois ${fmt.nombre(m.stock_fin_kg, 0)} kg (mini ${fmt.nombre(m.stock_min_kg, 0)})`}
+                          contenu={`${libelleMois(m.annee_mois)} · plan ${fmt.nombre(m.besoin_kg, 0)} kg · arrivages ${fmt.nombre(m.entrees_kg, 0)} kg · fin de mois ${fmt.nombre(m.stock_fin_kg, 0)} kg (sécurité ${fmt.nombre(m.stock_min_kg, 0)})`}
                         >
                           <div
                             className="mx-auto h-6 w-full rounded-[4px]"
                             style={{
                               background:
-                                m.statut === 'RUPTURE'
+                                m.statut === 'PLAN_NON_COUVERT'
                                   ? 'linear-gradient(180deg, hsl(var(--danger)), hsl(var(--danger) / 0.55))'
-                                  : m.statut === 'TENDU'
+                                  : m.statut === 'SOUS_SECURITE'
                                     ? 'linear-gradient(180deg, hsl(var(--alerte)), hsl(var(--alerte) / 0.55))'
                                     : 'hsl(var(--succes) / 0.18)',
                             }}
@@ -294,7 +301,7 @@ export function Risques() {
                   <th className="px-3 py-2 font-medium">Couleur</th>
                   <th className="px-3 py-2 font-medium">Fournisseur</th>
                   <th className="px-3 py-2 text-right font-medium">Stock (kg)</th>
-                  <th className="px-3 py-2 text-right font-medium">Conso / mois</th>
+                  <th className="px-3 py-2 text-right font-medium" title="Le plan de l’horizon ramené à un mois de 30 jours (moteur de couverture)">Plan / mois</th>
                   <th className="px-3 py-2 text-right font-medium">Couv. (j)</th>
                   <th className="px-3 py-2 text-right font-medium">Délai (j)</th>
                   <th className="px-3 py-2 text-right font-medium">À commander (kg)</th>
@@ -309,12 +316,12 @@ export function Risques() {
                     <td className="px-3 py-1.5">{a.couleur ?? '—'}</td>
                     <td className="px-3 py-1.5">{a.fournisseur_nom ?? '—'}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmt.nombre(a.stock_physique_net_kg ?? 0, 0)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{a.conso_mensuelle_kg == null ? '—' : fmt.nombre(a.conso_mensuelle_kg, 0)}</td>
-                    <td className={cn('px-3 py-1.5 text-right tabular-nums', (a.jours_couverture ?? 0) < 0 && 'text-danger')}>{a.jours_couverture == null ? '—' : fmt.nombre(a.jours_couverture, 0)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{a.plan_mois_kg == null ? '—' : fmt.nombre(a.plan_mois_kg, 0)}</td>
+                    <td className={cn('px-3 py-1.5 text-right tabular-nums', a.jours_couverture === 0 && 'text-danger')}>{a.jours_couverture == null ? 'horizon' : fmt.nombre(a.jours_couverture, 0)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{a.delai_livraison_jours ?? '—'}</td>
                     <td className="px-3 py-1.5 text-right font-medium tabular-nums">{a.qte_a_commander_kg == null ? '—' : fmt.nombre(a.qte_a_commander_kg, 0)}</td>
                     <td className="px-4 py-1.5">
-                      <Badge ton={a.statut === 'ATTENTION' ? 'alerte' : 'danger'}>{a.statut}</Badge>
+                      <StatutBadge entite="statut_stock" code={a.statut} />
                     </td>
                   </tr>
                 ))}

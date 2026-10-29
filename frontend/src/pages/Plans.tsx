@@ -70,6 +70,8 @@ import {
 } from '../composants/ui/base'
 import { Aide, Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { StatutBadge } from '../composants/StatutBadge'
+import { libelleStatut } from '../lib/statuts'
 
 const MODULE = 'PLANS'
 
@@ -85,6 +87,7 @@ const MOIS_LONG = [
 type Statut = 'BROUILLON' | 'SIMULATION' | 'EN_COURS' | 'CLOTURE'
 
 interface Plan extends Record<string, unknown> {
+  version: number
   id_plan: string
   annee: number
   numero_version: number
@@ -142,27 +145,14 @@ interface LigneEntete extends Record<string, unknown> {
 
 interface Entete {
   id_plan: string | null
+  /** La version lue (verrou optimiste, 19/10/2026) ; absente a la creation. */
+  version?: number
   libelle: string
   scenario_nom: string
   /** Mois de depart, format AAAA-MM (champ <input type="month">). */
   date_debut: string
   mois_horizon: number
   croissance_annuelle_pct: string
-}
-
-const TON_STATUT: Record<Statut, 'neutre' | 'info' | 'succes' | 'contour'> = {
-  BROUILLON: 'neutre',
-  SIMULATION: 'info',
-  EN_COURS: 'succes',
-  CLOTURE: 'contour',
-}
-
-/** Libelle lisible : le statut brut sert de cle, pas d'affichage. */
-const LIBELLE_STATUT: Record<Statut, string> = {
-  BROUILLON: 'Brouillon',
-  SIMULATION: 'Simulation',
-  EN_COURS: 'En cours',
-  CLOTURE: 'Cloture',
 }
 
 /** Statuts dans lesquels l'entete reste modifiable. */
@@ -181,6 +171,9 @@ const enteteVide = (): Entete => ({
 
 export function Plans() {
   const droits = useDroits(MODULE)
+  // Le calcul du MRP et son archivage relèvent du module MRP côté serveur
+  // (routes/operations.rs, calculer_mrp / snapshot_mrp : MRP, ECRIRE).
+  const droitsMrp = useDroits('MRP')
   const ouvrirEtat = useOuvrirVue()
   const qc = useQueryClient()
   const confirmation = useConfirmation()
@@ -263,6 +256,7 @@ export function Plans() {
     setEnCreation(false)
     setEntete({
       id_plan: p.id_plan,
+      version: p.version,
       libelle: p.libelle,
       scenario_nom: p.scenario_nom ?? '',
       date_debut: (p.date_debut ?? '').slice(0, 7),
@@ -290,10 +284,11 @@ export function Plans() {
 
   const enregistrement = useMutation({
     mutationFn: () =>
-      api.put<{ id_plan: string; cree: boolean; lignes_generees: number; m2_total: number }>(
+      api.put<{ id_plan: string; version: number; cree: boolean; lignes_generees: number; m2_total: number }>(
         '/api/plans',
         {
           id_plan: enCreation ? null : entete.id_plan,
+          version: enCreation ? null : entete.version,
           libelle: entete.libelle.trim(),
           scenario_nom: entete.scenario_nom.trim() || null,
           date_debut: entete.date_debut,
@@ -325,8 +320,9 @@ export function Plans() {
       if (enCreation) {
         setEdition(r.id_plan)
         setEnCreation(false)
-        setEntete((s) => ({ ...s, id_plan: r.id_plan }))
       }
+      // La version a jour : le plan reste ouvert, le prochain enregistrement la presente.
+      setEntete((s) => ({ ...s, id_plan: r.id_plan, version: r.version }))
     },
     onError: (e) => setErreur(e instanceof ErreurApi ? e.message : String(e)),
   })
@@ -335,7 +331,7 @@ export function Plans() {
     mutationFn: (v: { id: string; statut: Statut }) =>
       api.put(`/api/plans/${v.id}/statut`, { statut: v.statut }),
     onSuccess: (_r, v) => {
-      toast.success(`Plan passe en ${LIBELLE_STATUT[v.statut].toLowerCase()}`)
+      toast.success(`Plan passe en ${libelleStatut('plan_production', v.statut).toLowerCase()}`)
       void qc.invalidateQueries({ queryKey: ['plans'] })
     },
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : String(e)),
@@ -390,7 +386,7 @@ export function Plans() {
   })
 
   const suppression = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/plans/${id}`),
+    mutationFn: ({ id, version }: { id: string; version: number }) => api.delete(`/api/plans/${id}?version=${version}`),
     onSuccess: () => {
       toast.success('Plan supprime')
       void qc.invalidateQueries({ queryKey: ['plans'] })
@@ -604,7 +600,7 @@ export function Plans() {
         filtre: 'liste',
         rendu: (p) => (
           <div className="flex items-center gap-1">
-            <Badge ton={TON_STATUT[p.statut]}>{LIBELLE_STATUT[p.statut]}</Badge>
+            <StatutBadge entite="plan_production" code={p.statut} />
             {p.statut === 'EN_COURS' && <Lock className="size-3 text-attenue-texte" />}
           </div>
         ),
@@ -705,7 +701,7 @@ export function Plans() {
               >
                 <Pencil />
               </Bouton>
-              {droits.peutEcrire && p.statut !== 'CLOTURE' && (
+              {droits.peutValider && p.statut !== 'CLOTURE' && (
                 <Bouton
                   variante="discret"
                   taille="icone-xs"
@@ -736,7 +732,7 @@ export function Plans() {
                       titre: `Supprimer ${p.libelle} ?`,
                       destructif: true,
                       description: "Ce plan n'a jamais été valide : il sera effacé.",
-                      action: () => suppression.mutate(p.id_plan),
+                      action: () => suppression.mutate({ id: p.id_plan, version: p.version }),
                     })
                   }
                   aria-label="Supprimer"
@@ -837,7 +833,10 @@ export function Plans() {
                       Figer les recettes
                     </Bouton>
                     {droits.peutValider && (
+                      // Une seule action principale : « Enregistrer » tant que
+                      // l'en-tete ou la grille ont change, la validation ensuite.
                       <Bouton
+                        variante={sansChangement ? 'principal' : 'contour'}
                         onClick={() => transition.mutate({ id: courant.id_plan, statut: 'EN_COURS' })}
                       >
                         <ShieldCheck />
@@ -855,28 +854,29 @@ export function Plans() {
                   taille="md"
                   consequence="Les besoins calcules restent, mais devront être recalculés après correction."
                 />
-                {statut === 'EN_COURS' && (
-                  <>
-                    <Bouton
-                      variante="contour"
-                      onClick={() => etape.mutate({ id: courant.id_plan, chemin: 'mrp' })}
-                    >
-                      <Calculator />
-                      Calculer le MRP
-                    </Bouton>
-                    <Bouton
-                      variante="contour"
-                      onClick={() => etape.mutate({ id: courant.id_plan, chemin: 'snapshot' })}
-                    >
-                      <Camera />
-                      Archiver
-                    </Bouton>
-                  </>
-                )}
+              </>
+            )}
+            {courant && statut === 'EN_COURS' && droitsMrp.peutEcrire && (
+              <>
+                <Bouton
+                  variante="contour"
+                  onClick={() => etape.mutate({ id: courant.id_plan, chemin: 'mrp' })}
+                >
+                  <Calculator />
+                  Calculer le MRP
+                </Bouton>
+                <Bouton
+                  variante="contour"
+                  onClick={() => etape.mutate({ id: courant.id_plan, chemin: 'snapshot' })}
+                >
+                  <Camera />
+                  Archiver
+                </Bouton>
               </>
             )}
             {modifiable && (
               <Bouton
+                variante={sansChangement ? 'contour' : 'principal'}
                 onClick={() => enregistrement.mutate()}
                 chargement={enregistrement.isPending}
                 disabled={problemes.length > 0 || sansChangement}
@@ -940,7 +940,7 @@ export function Plans() {
                   <span className="text-bordure">|</span>
                 </>
               )}
-              <Badge ton={TON_STATUT[statut]}>{LIBELLE_STATUT[statut]}</Badge>
+              <StatutBadge entite="plan_production" code={statut} />
             </div>
           </CarteEntete>
 

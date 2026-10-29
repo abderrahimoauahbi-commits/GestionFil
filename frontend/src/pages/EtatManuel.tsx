@@ -19,6 +19,8 @@ import { useMemo, useState } from 'react'
 import { EtatImprimable } from '../composants/Etat'
 import { Selecteur } from '../composants/ui/base'
 import { SUJETS } from '../aide/contenu'
+import { sujetDans } from '../aide/indice'
+import { TUTORIEL } from '../aide/tutoriel'
 import type { Sujet } from '../aide/types'
 
 /**
@@ -28,22 +30,48 @@ import type { Sujet } from '../aide/types'
  */
 const CHAPITRES: { titre: string; prefixes: string[] }[] = [
   {
-    titre: 'Catalogue et données de base',
-    prefixes: ['/catalogue', '/categories', '/couleurs', '/fournisseurs', '/equivalences', '/referentiels', '/qualites'],
+    titre: 'Fiches de base',
+    prefixes: [
+      '/catalogue', '/categories', '/couleurs', '/fournisseurs', '/equivalences', '/referentiels',
+      '/roles-bom', '/matrice-prix', '/historique-prix', '/etats/qualite', '/etats/couleur', '/etats/catalogue',
+    ],
   },
-  { titre: 'Achats', prefixes: ['/plan-achat', '/besoins', '/bons-commande'] },
-  { titre: 'Importation', prefixes: ['/import'] },
-  { titre: 'Réceptions et stock', prefixes: ['/receptions', '/mouvements', '/transferts', '/stock', '/inventaires'] },
-  { titre: 'Analyse', prefixes: ['/statistiques', '/valorisation', '/etats', '/'] },
-  { titre: 'Réglages', prefixes: ['/utilisateurs'] },
+  {
+    titre: 'Production et planification',
+    prefixes: ['/qualites', '/recettes', '/plans', '/ordres-fabrication', '/besoins', '/plan-achat', '/stock'],
+  },
+  { titre: 'Achats', prefixes: ['/bons-commande', '/factures-fournisseur', '/retours-fournisseur'] },
+  { titre: 'Importation', prefixes: ['/import', '/landed-cost'] },
+  { titre: 'Réceptions', prefixes: ['/receptions', '/etats/receptions'] },
+  {
+    titre: 'Stock',
+    prefixes: [
+      '/mouvements', '/fiche-hors-machine', '/transferts', '/etat-stock', '/inventaires', '/lots', '/autorisations',
+      '/classification', '/etats/stock', '/etats/lots', '/etats/comptage', '/etats/mouvements',
+    ],
+  },
+  { titre: 'Machines', prefixes: ['/machines', '/parc-machines'] },
+  {
+    titre: 'Analyse et états',
+    prefixes: ['/', '/tableau-de-bord', '/statistiques', '/valorisation', '/rapports', '/controles', '/audit', '/etats'],
+  },
+  { titre: 'Réglages', prefixes: ['/configuration', '/utilisateurs', '/roles', '/telecharger', '/chat', '/assistant'] },
 ]
 
-/** Le chapitre d'une fiche : le prefixe le plus PRECIS gagne, comme pour l'aide. */
+/** Le chapitre du guide pas a pas, dans le filtre. */
+const GUIDE = 'Guide pas à pas'
+
+/**
+ * Le chapitre d'une fiche : le prefixe le plus PRECIS gagne, comme pour l'aide.
+ * Un prefixe ne vaut qu'a la frontiere d'un segment (« /roles » ne prend pas
+ * « /roles-bom ») et la racine « / » ne prend que l'accueil : sinon elle
+ * avalait machines, lots et reglages dans « Analyse ».
+ */
 function chapitreDe(sujet: Sujet): string {
   let meilleur = { titre: 'Autres écrans', longueur: -1 }
   for (const c of CHAPITRES) {
     for (const p of c.prefixes) {
-      const correspond = sujet.route === p || sujet.route.startsWith(p === '/' ? '/' : p + '/') || sujet.route.startsWith(p)
+      const correspond = sujet.route === p || (p !== '/' && sujet.route.startsWith(p + '/'))
       if (correspond && p.length > meilleur.longueur) meilleur = { titre: c.titre, longueur: p.length }
     }
   }
@@ -71,7 +99,10 @@ export function EtatManuel() {
     return ordonne
   }, [])
 
+  // Le guide ouvre le manuel complet ; choisi seul, il est seul.
+  const avecGuide = !chapitre || chapitre === GUIDE
   const retenus = chapitre ? parChapitre.filter((c) => c.titre === chapitre) : parChapitre
+  const nbEtapes = TUTORIEL.parties.reduce((n, p) => n + p.etapes.length, 0)
   const nbFiches = retenus.reduce((s, c) => s + c.sujets.length, 0)
   const nbChamps = retenus.reduce(
     (s, c) => s + c.sujets.reduce((t, f) => t + (f.champs?.length ?? 0), 0),
@@ -92,6 +123,12 @@ export function EtatManuel() {
             <span className="text-neutral-600">Champs décrits : </span>
             <span className="font-semibold">{nbChamps}</span>
           </span>
+          {avecGuide && (
+            <span>
+              <span className="text-neutral-600">Étapes du guide : </span>
+              <span className="font-semibold">{nbEtapes}</span>
+            </span>
+          )}
           {/* LE FILTRE NE S'IMPRIME PAS : il sert a choisir ce qu'on imprime,
               il n'a rien a faire sur la feuille. */}
           <span className="print:hidden">
@@ -102,6 +139,7 @@ export function EtatManuel() {
               className="h-7 text-[12px]"
             >
               <option value="">Manuel complet</option>
+              <option value={GUIDE}>{GUIDE}</option>
               {parChapitre.map((c) => (
                 <option key={c.titre} value={c.titre}>
                   {c.titre}
@@ -113,6 +151,7 @@ export function EtatManuel() {
       }
     >
       <div className="space-y-6">
+        {avecGuide && <GuideImprime />}
         {retenus.map((c) => (
           <section key={c.titre}>
             <h2 className="mb-2 border-b-2 border-black pb-0.5 text-[13px] font-bold uppercase tracking-wide">
@@ -257,5 +296,87 @@ function Bloc({ titre, children }: { titre: string; children: React.ReactNode })
       </div>
       <div className="mt-0.5">{children}</div>
     </div>
+  )
+}
+
+/**
+ * LE GUIDE PAS A PAS, SUR PAPIER (27/10/2026). Il nomme les champs sans les
+ * redecrire : leur description est dans la fiche de l'ecran, plus loin dans ce
+ * meme manuel — on y renvoie par son titre.
+ */
+function GuideImprime() {
+  // Le numéro de chaque étape, compté une fois, hors du rendu.
+  const premiers = TUTORIEL.parties.map((_, i) =>
+    TUTORIEL.parties.slice(0, i).reduce((n, p) => n + p.etapes.length, 0),
+  )
+  return (
+    <section>
+      <h2 className="mb-2 border-b-2 border-black pb-0.5 text-[13px] font-bold uppercase tracking-wide">
+        {GUIDE}
+      </h2>
+      <p className="mb-2 text-[10.5px] leading-snug">{TUTORIEL.introduction}</p>
+      <table className="mb-3 w-full border-collapse text-[10px] leading-snug">
+        <tbody>
+          {TUTORIEL.roles.map((r) => (
+            <tr key={r.role} className="border-b border-neutral-200 align-top">
+              <td className="w-24 py-0.5 pr-2 font-semibold">{r.role}</td>
+              <td className="py-0.5">
+                {r.mission} <span className="text-neutral-600">{r.droits}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="space-y-3">
+        {TUTORIEL.parties.map((p, ip) => (
+          <div key={p.titre}>
+            <h3 className="text-[12px] font-bold">{p.titre}</h3>
+            {p.introduction ? <p className="text-[10.5px] leading-snug">{p.introduction}</p> : null}
+            <div className="mt-1 space-y-2">
+              {p.etapes.map((e, ie) => {
+                const numero = premiers[ip] + ie + 1
+                const fiche = sujetDans(SUJETS, e.route)
+                return (
+                  <article
+                    key={numero}
+                    className="break-inside-avoid border-l-2 border-neutral-400 pl-2 text-[10px] leading-snug"
+                  >
+                    <header className="flex flex-wrap items-baseline justify-between gap-x-4">
+                      <span className="text-[11px] font-bold">
+                        {numero}. {e.titre}
+                      </span>
+                      <span className="text-neutral-600">{e.role}</span>
+                    </header>
+                    <div className="text-neutral-600">{e.acces}</div>
+                    <ol className="mt-0.5 list-decimal pl-4">
+                      {e.gestes.map((g, i) => (
+                        <li key={i}>{g}</li>
+                      ))}
+                    </ol>
+                    {e.champs?.length ? (
+                      <p className="mt-0.5">
+                        <span className="font-semibold">Champs : </span>
+                        {e.champs.join(', ')}
+                        {fiche ? <span className="text-neutral-600"> — voir la fiche « {fiche.titre} ».</span> : null}
+                      </p>
+                    ) : null}
+                    <p className="mt-0.5">
+                      <span className="font-semibold">Résultat : </span>
+                      {e.resultat}
+                    </p>
+                    {e.erreur ? (
+                      <p className="mt-0.5 italic">
+                        <span className="font-semibold not-italic">Erreur fréquente : </span>
+                        {e.erreur}
+                      </p>
+                    ) : null}
+                  </article>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }

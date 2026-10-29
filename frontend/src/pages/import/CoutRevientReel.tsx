@@ -21,6 +21,7 @@ import { Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Selecteur } 
 import { useConfirmation } from '../../composants/ui/surcouches'
 import { cn, fmt } from '../../lib/utils'
 import { lireNombre } from '../../lib/nombres'
+import { useVersionDossier } from './dialogues'
 
 interface FactureCout {
   id_facture: string
@@ -71,16 +72,22 @@ export function CoutRevientReel({ idDossier }: { idDossier: string }) {
   const vide = { id_facture: '', date: new Date().toISOString().slice(0, 10), devise: '', mad: '', reference: '' }
   const [p, setP] = useState(vide)
   const rafraichir = () => void qc.invalidateQueries({ queryKey: ['cout-revient-reel', idDossier] })
+  // Un paiement passe par la version du DOSSIER (verrou optimiste) : la facture,
+  // souvent figee quand il arrive, n'est pas modifiee.
+  const version = useVersionDossier()
 
   const ajouter = useMutation({
-    mutationFn: (confirme?: boolean) =>
-      api.post<{ id_paiement: string; avis?: string[] }>(`/api/import/factures/${p.id_facture}/paiements`, {
-        date_paiement: p.date,
-        montant_devise: nombre(p.devise),
-        montant_mad: nombre(p.mad),
-        reference_banque: p.reference || null,
-        taux_confirme: confirme === true,
-      }),
+    mutationFn: async (confirme?: boolean) =>
+      version.suivre(
+        await api.post<{ id_paiement: string; avis?: string[]; version?: number }>(`/api/import/factures/${p.id_facture}/paiements`, {
+          date_paiement: p.date,
+          montant_devise: nombre(p.devise),
+          montant_mad: nombre(p.mad),
+          reference_banque: p.reference || null,
+          taux_confirme: confirme === true,
+          version: version.lire(),
+        }),
+      ),
     onSuccess: (r) => {
       toast.success('Paiement enregistré')
       // A11 : un paiement daté avant le dédouanement est signalé (C53), pas refusé.
@@ -98,16 +105,17 @@ export function CoutRevientReel({ idDossier }: { idDossier: string }) {
         })
         return
       }
-      toast.error(e instanceof ErreurApi ? e.message : 'Enregistrement impossible.')
+      version.echec(e)
     },
   })
   const supprimer = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/import/paiements/${id}`),
+    mutationFn: async (id: string) =>
+      version.suivre(await api.delete(`/api/import/paiements/${id}?version=${version.lire() ?? ''}`)),
     onSuccess: () => {
       toast.success('Paiement supprimé')
       rafraichir()
     },
-    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Suppression impossible.'),
+    onError: version.echec,
   })
 
   const factures = q.data?.factures ?? []

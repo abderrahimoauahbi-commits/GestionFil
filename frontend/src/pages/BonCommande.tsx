@@ -14,7 +14,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Printer, Save, Send, ShieldCheck, Trash2, Undo2 } from 'lucide-react'
+import {
+  ArrowLeft,
+  Ban,
+  ClipboardCheck,
+  CornerUpLeft,
+  FileText,
+  Printer,
+  Save,
+  Send,
+  ShieldCheck,
+  SkipForward,
+  Trash2,
+  Undo2,
+} from 'lucide-react'
 import { SUPPRIMABLES } from '../lib/statuts'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
@@ -43,6 +56,7 @@ import {
   corpsLigne,
   depuisLigneEnregistree,
   estPrete,
+  fusionnerParReference,
   kgDe,
   totalDe,
   type LigneSaisie,
@@ -52,11 +66,15 @@ import { TotauxCommande } from '../composants/TotauxCommande'
 import { facteurVersKg } from '../lib/conditionnement'
 import { auCentime, cn, fmt } from '../lib/utils'
 import { lireNombre } from '../lib/nombres'
+import { StatutBadge } from '../composants/StatutBadge'
+import { libelleStatut } from '../lib/statuts'
 
 const MODULE = 'BONS_COMMANDE'
 
 interface Bc extends Record<string, unknown> {
   id_bc: string
+  /** Compteur de concurrence, incremente par la base a chaque modification (A2). */
+  version?: number
   numero_bc: string
   date_bc: string
   code_fournisseur: string
@@ -80,6 +98,12 @@ interface Bc extends Record<string, unknown> {
   date_cours_engage?: string | null
   source_taux_engage?: 'REFERENCE' | 'SAISI' | null
   motif_taux_engage?: string | null
+  /* LE CONTROLE ET LA DEMANDE DE PRIX (21/10/2026). */
+  controleur?: string | null
+  date_controle?: string | null
+  date_demande_prix?: string | null
+  motif_saut_demande_prix?: string | null
+  motif_renvoi?: string | null
 }
 
 interface LigneBc extends Record<string, unknown> {
@@ -113,17 +137,27 @@ interface LigneBc extends Record<string, unknown> {
   besoin_kg_actuel: number
   ecart_besoin_kg: number | null
   arbitree: number
+  /** Le prix et la remise d'avant la demande de prix (plan ou saisie), poses a son envoi. */
+  prix_unitaire_avant_demande?: number | null
+  remise_pct_avant_demande?: number | null
+  /** Quand la reponse du fournisseur a ete saisie sur la ligne. */
+  date_reponse_prix?: string | null
 }
 
-const TON: Record<string, 'neutre' | 'info' | 'succes' | 'alerte' | 'danger'> = {
-  BROUILLON: 'neutre',
-  EN_ATTENTE_VALIDATION: 'alerte',
-  VALIDE: 'info',
-  ENVOYE: 'info',
-  LIVRE_PARTIEL: 'alerte',
-  CLOTURE: 'succes',
-  ANNULE: 'danger',
+/** Le prix NET d'une ligne (remise deduite) : celui que compare le controle C59. */
+const net = (prix: number, remise: number | null | undefined) => prix * (1 - Number(remise ?? 0) / 100)
+
+/** L'ecart, en %, du prix confirme sur le prix d'avant la demande ; null sans prix d'avant. */
+function ecartPrix(l: LigneBc, prix = l.prix_unitaire_devise, remise = l.remise_pct): number | null {
+  const avant = l.prix_unitaire_avant_demande
+  if (avant == null || !(avant > 0) || prix == null) return null
+  const base = net(Number(avant), l.remise_pct_avant_demande)
+  if (!(base > 0)) return null
+  return ((net(Number(prix), remise) - base) / base) * 100
 }
+
+/** Un nombre tel qu'il se tape : virgule decimale. */
+const enSaisie = (v: number | null | undefined) => (v == null ? '' : String(v).replace('.', ','))
 
 export function BonCommande() {
   const { id = '' } = useParams()
@@ -247,9 +281,11 @@ export function BonCommande() {
 
   /** Corriger la fiche de la reference depuis la commande, comme a la creation. */
   const corrigerReference = useMutation({
-    mutationFn: ({ code, champ, valeur }: { code: string; champ: string; valeur: string }) =>
-      api.patch(`/api/catalogue/${encodeURIComponent(code)}`, { [champ]: valeur }),
-    onSuccess: () => {
+    mutationFn: ({ code, champ, valeur, version }: { code: string; champ: string; valeur: string; version?: number | null }) =>
+      api.patch<{ version: number }>(`/api/catalogue/${encodeURIComponent(code)}`, { [champ]: valeur, version }),
+    onSuccess: (r, v) => {
+      // La fiche a change de version : la correction suivante presentera la nouvelle.
+      setNouvelles((ls) => ls.map((l) => (l.code_reference === v.code ? { ...l, version_reference: r.version } : l)))
       toast.success('Fiche de la référence corrigée')
       void qc.invalidateQueries({ queryKey: ['refs-plan'] })
     },
@@ -296,13 +332,21 @@ export function BonCommande() {
   /* LA VALIDATION D'UN BON EN DEVISE, saisie sur la page (regle 10) : le cours
      du jour est propose ; un autre taux se retient avec son motif. */
   const [validation, setValidation] = useState<{ taux: string; motif: string } | null>(null)
+  /* LE MOTIF D'UN RENVOI EN BROUILLON OU D'UNE DEMANDE DE PRIX SAUTEE
+     (21/10/2026), saisi sur la page. */
+  const [motifAction, setMotifAction] = useState<{
+    cible: 'BROUILLON' | 'EN_ATTENTE_VALIDATION'
+    motif: string
+  } | null>(null)
   const changerStatut = useMutation({
-    mutationFn: (c: string | { statut: string; taux_saisi?: number; motif_taux?: string; confirme_taux?: boolean }) =>
-      api.put(`/api/bons-commande/${id}/statut`, typeof c === 'string' ? { statut: c } : c),
+    mutationFn: (
+      c: string | { statut: string; taux_saisi?: number; motif_taux?: string; confirme_taux?: boolean; motif?: string },
+    ) => api.put(`/api/bons-commande/${id}/statut`, typeof c === 'string' ? { statut: c } : c),
     onSuccess: (_r, c) => {
       const statut = typeof c === 'string' ? c : c.statut
-      toast.success(`Bon passe en ${statut.toLowerCase().replace(/_/g, ' ')}`)
+      toast.success(`Bon passé en « ${libelleStatut('bon_commande', statut).toLowerCase()} »`)
       setValidation(null)
+      setMotifAction(null)
       rafraichir()
     },
     onError: (e, c) => {
@@ -359,21 +403,31 @@ export function BonCommande() {
    * deduction. C'est la deduction « absente de la grille, donc a supprimer »
    * qui avait efface une ligne de 36 tonnes sans rien signaler.
    */
+  // Declaree ici parce que `enregistrer` la lit ; l'effet qui la tient a jour
+  // vient plus bas, apres `aEnregistrer` dont il depend.
+  const [versionLue, setVersionLue] = useState<number | undefined>(undefined)
   const enregistrer = useMutation({
     mutationFn: async () => {
-      const aCreer = nouvelles.filter((n) => !n.idExistant)
-      const aCorriger = nouvelles.filter(
+      // UNE LIGNE PAR REFERENCE (21/10/2026) : une ligne qui repete une reference
+      // part fondue dans celle qui la porte (le serveur fait de meme).
+      const fondues = fusionnerParReference(nouvelles).lignes
+      const aCreer = fondues.filter((n) => !n.idExistant)
+      const aCorriger = fondues.filter(
         (n) => n.idExistant && JSON.stringify(corpsLigne(n)) !== initiales.get(n.idExistant),
       )
-      if (enteteModifie) await api.patch(`/api/bons-commande/${id}`, entete)
+      // LA VERSION S'ENCHAINE (19/10/2026) : en-tete puis lignes, chacun sous le
+      // verrou du document ; chaque reponse rend la version que le suivant presente.
+      let v = versionLue
+      const suivre = (r: { version?: number }) => { v = r.version ?? v }
+      if (enteteModifie) suivre(await api.patch<{ version?: number }>(`/api/bons-commande/${id}`, { ...entete, version: v }))
       for (const ligne of supprimees) {
-        await api.delete(`/api/bons-commande/${id}/lignes/${ligne}`)
+        suivre(await api.delete<{ version?: number }>(`/api/bons-commande/${id}/lignes/${ligne}?version=${v ?? ''}`))
       }
       for (const n of aCorriger) {
-        await api.patch(`/api/bons-commande/${id}/lignes/${n.idExistant}`, corpsLigne(n))
+        suivre(await api.patch<{ version?: number }>(`/api/bons-commande/${id}/lignes/${n.idExistant}`, { ...corpsLigne(n), version: v }))
       }
       for (const n of aCreer) {
-        await api.post(`/api/bons-commande/${id}/lignes`, corpsLigne(n))
+        suivre(await api.post<{ version?: number }>(`/api/bons-commande/${id}/lignes`, { ...corpsLigne(n), version: v }))
       }
       return { crees: aCreer.length, corrigees: aCorriger.length, retirees: supprimees.length }
     },
@@ -463,6 +517,70 @@ export function BonCommande() {
   const aEnregistrer =
     enteteModifie || supprimees.length > 0 || nbAjoutees > 0 || nbModifiees > 0
 
+  /**
+   * LA VERSION SUR LAQUELLE REPOSE LA SAISIE (verrou optimiste, 17/10/2026).
+   *
+   * Elle part avec l'en-tete : si quelqu'un a modifie le bon entre-temps, le
+   * serveur refuse en le nommant, au lieu d'ecraser sa saisie en silence.
+   *
+   * POURQUOI PAS `bc.version` AU MOMENT D'ENREGISTRER. La liste des bons se
+   * relit toute seule (retour sur la fenetre). Envoyer la version du moment
+   * enverrait celle de l'AUTRE, et le serveur croirait la saisie a jour : le
+   * verrou serait desarme sans que personne le voie.
+   *
+   * La regle : tant que rien n'attend d'etre enregistre, il n'y a rien a perdre,
+   * on suit la derniere version — c'est aussi ce qui evite un faux conflit
+   * contre soi-meme apres avoir enregistre ses propres lignes. Des qu'une
+   * modification attend, la version se fige sur celle qu'on a modifiee.
+   */
+  /* LA REPONSE DU FOURNISSEUR (demande de prix, 21/10/2026) : prix et remise
+     confirmes, saisis par ligne, enregistres ensemble. Une valeur ne compte
+     que si elle differe de celle du serveur. */
+  const [reponses, setReponses] = useState<Record<string, { prix?: string; remise?: string }>>({})
+  const prixSaisi = (l: LigneBc) => {
+    const t = reponses[l.id_ligne_bc]?.prix
+    return t === undefined ? (l.prix_unitaire_devise ?? null) : lireNombre(t)
+  }
+  const remiseSaisie = (l: LigneBc) => {
+    const t = reponses[l.id_ligne_bc]?.remise
+    return t === undefined ? Number(l.remise_pct ?? 0) : t.trim() === '' ? 0 : lireNombre(t)
+  }
+  const reponsesModifiees = lignes.filter(
+    (l) =>
+      (reponses[l.id_ligne_bc]?.prix !== undefined && prixSaisi(l) !== (l.prix_unitaire_devise ?? null)) ||
+      (reponses[l.id_ligne_bc]?.remise !== undefined && remiseSaisie(l) !== Number(l.remise_pct ?? 0)),
+  )
+  const reponsesIllisibles = lignes.filter((l) => {
+    const p = prixSaisi(l)
+    const r = remiseSaisie(l)
+    return p == null || !(p > 0) || r == null || !(r >= 0 && r < 100)
+  })
+
+  useEffect(() => {
+    if (bc?.version != null && !aEnregistrer && reponsesModifiees.length === 0) setVersionLue(bc.version)
+  }, [bc?.version, aEnregistrer, reponsesModifiees.length])
+
+  const enregistrerReponse = useMutation({
+    mutationFn: async () => {
+      let v = versionLue
+      for (const l of reponsesModifiees) {
+        const r = await api.patch<{ version?: number }>(`/api/bons-commande/${id}/lignes/${l.id_ligne_bc}`, {
+          prix_unitaire_devise: prixSaisi(l),
+          remise_pct: remiseSaisie(l),
+          version: v,
+        })
+        v = r.version ?? v
+      }
+      return reponsesModifiees.length
+    },
+    onSuccess: (n) => {
+      toast.success('Réponse du fournisseur enregistrée', { description: `${n} ligne(s) mise(s) à jour.` })
+      setReponses({})
+      rafraichir()
+    },
+    onError: echec,
+  })
+
   // Les lignes ajoutees s'affichent avec les autres, marquees « nouvelle ».
   // Les voir dans le tableau evite de saisir deux fois la meme reference sans
   // s'en rendre compte.
@@ -514,9 +632,10 @@ export function BonCommande() {
   const estNouvelle = (l: LigneBc) =>
     nouvelles.some((n) => n.cle === l.id_ligne_bc && !n.idExistant)
 
-  const modifiable =
-    !!droits.peutEcrire &&
-    (bc?.statut === 'BROUILLON' || bc?.statut === 'EN_ATTENTE_VALIDATION')
+  /* LE BROUILLON SEUL SE MODIFIE (21/10/2026) : au controle, en demande de prix
+     et en attente de validation, le bon est fige — le serveur et la base le
+     tiennent aussi. Pour corriger, on le renvoie en brouillon. */
+  const modifiable = !!droits.peutEcrire && bc?.statut === 'BROUILLON'
   /*
    * ON N'AMORCE QUE SUR UN SUCCES, jamais sur « plus en chargement ».
    *
@@ -553,6 +672,9 @@ export function BonCommande() {
      cela cree un bon bloque. Le serveur applique la meme exception — l'ecran
      ne fait que ne pas griser un bouton qui fonctionnerait. */
   const estCreateur = bc?.createur === moi?.login && moi?.role !== 'ADMIN'
+  /* LE CONTROLE SUIT LA MEME REGLE (21/10/2026) : un autre compte que le
+     createur, l'ADMIN excepte. */
+  const estCreateurControle = estCreateur
   const plafond = moi?.plafond_validation_bc_mad ?? null
   const depassePlafond = plafond != null && (bc?.montant_total_mad ?? 0) > plafond
 
@@ -851,16 +973,93 @@ export function BonCommande() {
               <Printer />
               Imprimer
             </Bouton>
+            {/* LE CIRCUIT DU 21/10/2026 : brouillon → contrôle (un autre compte)
+                → demande de prix (ou saut motivé) → validation de la direction. */}
             {droits.peutEcrire && bc.statut === 'BROUILLON' && (
               <Bouton
                 variante="contour"
-                onClick={() => changerStatut.mutate('EN_ATTENTE_VALIDATION')}
-                disabled={lignes.length === 0}
-                title={lignes.length ? undefined : 'Un bon sans ligne ne peut pas etre soumis'}
+                onClick={() => changerStatut.mutate('EN_CONTROLE')}
+                disabled={lignes.length === 0 || aEnregistrer}
+                title={
+                  lignes.length === 0
+                    ? 'Un bon sans ligne ne part pas au contrôle'
+                    : aEnregistrer
+                      ? 'Enregistrez d’abord vos modifications'
+                      : undefined
+                }
               >
                 <Send />
-                Soumettre à validation
+                Envoyer au contrôle
               </Bouton>
+            )}
+            {droits.peutEcrire && bc.statut === 'EN_CONTROLE' && (
+              <>
+                <Bouton
+                  onClick={() => changerStatut.mutate('DEMANDE_PRIX')}
+                  disabled={estCreateurControle}
+                  title={estCreateurControle ? 'B4 : un autre compte que le créateur contrôle le bon' : undefined}
+                >
+                  <ClipboardCheck />
+                  Contrôlé : demande de prix
+                </Bouton>
+                <Bouton
+                  variante="contour"
+                  onClick={() => setMotifAction({ cible: 'EN_ATTENTE_VALIDATION', motif: '' })}
+                  disabled={estCreateurControle}
+                  title={estCreateurControle ? 'B4 : un autre compte que le créateur contrôle le bon' : undefined}
+                >
+                  <SkipForward />
+                  Sauter la demande de prix
+                </Bouton>
+              </>
+            )}
+            {droits.peutEcrire && bc.statut === 'DEMANDE_PRIX' && (
+              <>
+                <Bouton
+                  variante="contour"
+                  onClick={() => ouvrir(`/bons-commande/${id}/etat?document=demande-prix`)}
+                >
+                  <FileText />
+                  Imprimer la demande de prix
+                </Bouton>
+                {/* UNE SEULE ACTION PRINCIPALE : tant qu'une reponse n'est pas
+                    enregistree, c'est « Enregistrer la reponse » ; ensuite, ceci. */}
+                <Bouton
+                  variante={reponsesModifiees.length > 0 ? 'contour' : 'principal'}
+                  onClick={() => changerStatut.mutate('EN_ATTENTE_VALIDATION')}
+                  disabled={reponsesModifiees.length > 0}
+                  title={reponsesModifiees.length > 0 ? 'Enregistrez d’abord la réponse du fournisseur' : undefined}
+                >
+                  <Send />
+                  Soumettre à validation
+                </Bouton>
+              </>
+            )}
+            {droits.peutEcrire && ['EN_CONTROLE', 'DEMANDE_PRIX', 'EN_ATTENTE_VALIDATION'].includes(bc.statut) && (
+              <>
+                <Bouton variante="contour" onClick={() => setMotifAction({ cible: 'BROUILLON', motif: '' })}>
+                  <CornerUpLeft />
+                  Renvoyer en brouillon
+                </Bouton>
+                <Bouton
+                  variante="contour"
+                  className="text-danger hover:bg-danger/10"
+                  onClick={() =>
+                    confirmation.demander({
+                      titre: `Annuler ${bc.numero_bc} ?`,
+                      destructif: true,
+                      libelleConfirmer: 'Annuler le bon',
+                      description:
+                        'Ses lignes seront annulées et les propositions d’achat qui les ont produites ' +
+                        'reviendront au plan. Le bon restera visible, marqué annulé.',
+                      action: () => changerStatut.mutate('ANNULE'),
+                    })
+                  }
+                >
+                  <Ban />
+                  Annuler le bon
+                </Bouton>
+              </>
             )}
             {droits.peutValider && bc.statut === 'EN_ATTENTE_VALIDATION' && (
               <Bouton
@@ -982,12 +1181,214 @@ export function BonCommande() {
         </Carte>
       )}
 
-      {!modifiable && !['CLOTURE', 'ANNULE'].includes(bc.statut) && (
+      {motifAction && (
+        <Carte className="mb-3">
+          <CarteEntete>
+            <CarteTitre>
+              {motifAction.cible === 'BROUILLON' ? 'Renvoyer le bon en brouillon' : 'Sauter la demande de prix'}
+            </CarteTitre>
+          </CarteEntete>
+          <CarteCorps className="space-y-2">
+            <p className="m-0 text-[12.5px] text-attenue-texte">
+              {motifAction.cible === 'BROUILLON'
+                ? 'L’acheteur corrige le bon, puis le renvoie au contrôle. Dites-lui quoi corriger.'
+                : 'Le bon passe directement à la validation de la direction, sans demande de prix au fournisseur. Le motif reste sur le bon.'}
+            </p>
+            <div>
+              <Etiq obligatoire htmlFor="ch-boncommande-motif">Motif</Etiq>
+              <Champ
+                id="ch-boncommande-motif"
+                value={motifAction.motif}
+                onChange={(e) => setMotifAction({ ...motifAction, motif: e.target.value })}
+                placeholder={
+                  motifAction.cible === 'BROUILLON'
+                    ? 'Quantité à revoir, mauvais fournisseur…'
+                    : 'Prix sous contrat, achat local…'
+                }
+              />
+            </div>
+            <div className="flex gap-2">
+              <Bouton
+                chargement={changerStatut.isPending}
+                disabled={motifAction.motif.trim().length < 5}
+                title={motifAction.motif.trim().length < 5 ? 'Cinq caractères au moins' : undefined}
+                onClick={() => changerStatut.mutate({ statut: motifAction.cible, motif: motifAction.motif.trim() })}
+              >
+                {motifAction.cible === 'BROUILLON' ? <CornerUpLeft /> : <SkipForward />}
+                {motifAction.cible === 'BROUILLON' ? 'Renvoyer en brouillon' : 'Soumettre à validation sans demande de prix'}
+              </Bouton>
+              <Bouton variante="contour" onClick={() => setMotifAction(null)}>
+                Annuler
+              </Bouton>
+            </div>
+          </CarteCorps>
+        </Carte>
+      )}
+
+      {bc.statut === 'BROUILLON' && bc.motif_renvoi && (
+        <Alerte ton="alerte" titre="Renvoyé en brouillon" className="mb-3">
+          {bc.motif_renvoi}
+        </Alerte>
+      )}
+      {bc.statut === 'EN_CONTROLE' && (
         <Alerte ton="info" className="mb-3">
-          Bon {bc.statut.toLowerCase().replace(/_/g, ' ')} : les lignes sont figees. Seules les
+          Bon au contrôle : il est figé. Un autre compte que son créateur vérifie quantités et
+          fournisseur, puis l’envoie en demande de prix — ou le renvoie en brouillon avec un motif.
+        </Alerte>
+      )}
+      {bc.statut === 'DEMANDE_PRIX' && (
+        <Alerte ton="info" className="mb-3">
+          Demande de prix{bc.date_demande_prix ? ` du ${fmt.date(bc.date_demande_prix)}` : ''}
+          {bc.controleur ? `, contrôlé par ${bc.controleur}` : ''} : imprimez le document pour le
+          fournisseur, puis saisissez sa réponse ci-dessous. Seuls les prix et les remises se
+          modifient ; pour les quantités ou les références, renvoyez le bon en brouillon.
+        </Alerte>
+      )}
+      {bc.motif_saut_demande_prix && !['BROUILLON', 'ANNULE'].includes(bc.statut) && (
+        <Alerte ton="info" className="mb-3">
+          Demande de prix sautée{bc.controleur ? ` par ${bc.controleur}` : ''} : {bc.motif_saut_demande_prix}
+        </Alerte>
+      )}
+      {bc.statut === 'EN_ATTENTE_VALIDATION' && (
+        <Alerte ton="info" className="mb-3">
+          Bon en attente de validation : il est figé, en-tête et lignes. La direction le valide ;
+          pour corriger une quantité, une référence ou un prix, renvoyez-le en brouillon avec un
+          motif — il repassera par le contrôle.
+        </Alerte>
+      )}
+      {!modifiable &&
+        !['CLOTURE', 'ANNULE', 'EN_CONTROLE', 'DEMANDE_PRIX', 'EN_ATTENTE_VALIDATION'].includes(bc.statut) && (
+        <Alerte ton="info" className="mb-3">
+          Bon {libelleStatut('bon_commande', bc.statut).toLowerCase()} : les lignes sont figees. Seules les
           receptions le font encore evoluer.
         </Alerte>
       )}
+
+      {/* LA REPONSE DU FOURNISSEUR ET SON ECART (21/10/2026). En demande de prix,
+          le prix et la remise confirmes se saisissent ici, ligne par ligne ; a la
+          validation, la direction voit l'ecart avec le prix d'avant (signal C59,
+          jamais un refus). */}
+      {droits.visible('prix_unitaire_devise') &&
+        (bc.statut === 'DEMANDE_PRIX' ||
+          (bc.statut === 'EN_ATTENTE_VALIDATION' && lignes.some((l) => l.prix_unitaire_avant_demande != null))) && (
+          <Carte className="mb-3">
+            <CarteEntete>
+              <CarteTitre>
+                {bc.statut === 'DEMANDE_PRIX' ? 'Réponse du fournisseur' : 'Prix confirmés par le fournisseur'}
+              </CarteTitre>
+              {(() => {
+                const n = lignes.filter((l) => Math.abs(ecartPrix(l) ?? 0) > 0.0005).length
+                return n > 0 && bc.statut === 'EN_ATTENTE_VALIDATION' ? (
+                  <Badge ton="alerte">{n} écart(s) de prix</Badge>
+                ) : null
+              })()}
+            </CarteEntete>
+            <CarteCorps className="overflow-x-auto p-0">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="border-b border-bordure text-left text-[11px] text-attenue-texte">
+                    <th className="px-3 py-2 font-medium">Ligne</th>
+                    <th className="px-3 py-2 text-right font-medium">Quantité</th>
+                    <th className="px-3 py-2 text-right font-medium">Prix d’avant</th>
+                    <th className="px-3 py-2 text-right font-medium">Prix confirmé {bc.code_devise}</th>
+                    <th className="px-3 py-2 text-right font-medium">Remise %</th>
+                    <th className="px-3 py-2 text-right font-medium">Écart</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lignes.map((l) => {
+                    const ecart = ecartPrix(l, prixSaisi(l) ?? undefined, remiseSaisie(l) ?? undefined)
+                    const saisie = bc.statut === 'DEMANDE_PRIX' && droits.peutEcrire
+                    return (
+                      <tr key={l.id_ligne_bc} className="border-b border-bordure last:border-0">
+                        <td className="px-3 py-1.5">
+                          <div className="font-medium">{l.code_reference ?? l.libelle ?? '—'}</div>
+                          <div className="text-[11px] text-attenue-texte">
+                            {l.date_reponse_prix ? `réponse saisie le ${fmt.date(l.date_reponse_prix)}` : 'sans réponse'}
+                          </div>
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {fmt.nombre(l.quantite_commandee_unite, 2)} {l.unite_commande}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums text-attenue-texte">
+                          {l.prix_unitaire_avant_demande == null ? '—' : fmt.nombre(l.prix_unitaire_avant_demande, 4)}
+                          {Number(l.remise_pct_avant_demande ?? 0) > 0 && (
+                            <div className="text-[11px]">remise {fmt.nombre(Number(l.remise_pct_avant_demande), 2)} %</div>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5 text-right">
+                          {saisie ? (
+                            <Champ
+                              aria-label={`Prix confirmé ligne ${l.ligne_numero}`}
+                              inputMode="decimal"
+                              className="ml-auto w-28 text-right tabular-nums"
+                              value={reponses[l.id_ligne_bc]?.prix ?? enSaisie(l.prix_unitaire_devise)}
+                              aria-invalid={!(Number(prixSaisi(l)) > 0)}
+                              onChange={(e) =>
+                                setReponses((r) => ({ ...r, [l.id_ligne_bc]: { ...r[l.id_ligne_bc], prix: e.target.value } }))
+                              }
+                            />
+                          ) : (
+                            <span className="tabular-nums">{fmt.nombre(l.prix_unitaire_devise ?? 0, 4)}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5 text-right">
+                          {saisie ? (
+                            <Champ
+                              aria-label={`Remise ligne ${l.ligne_numero}`}
+                              inputMode="decimal"
+                              className="ml-auto w-20 text-right tabular-nums"
+                              value={reponses[l.id_ligne_bc]?.remise ?? enSaisie(Number(l.remise_pct ?? 0))}
+                              onChange={(e) =>
+                                setReponses((r) => ({ ...r, [l.id_ligne_bc]: { ...r[l.id_ligne_bc], remise: e.target.value } }))
+                              }
+                            />
+                          ) : (
+                            <span className="tabular-nums">{fmt.nombre(Number(l.remise_pct ?? 0), 2)}</span>
+                          )}
+                        </td>
+                        <td
+                          className={cn(
+                            'px-3 py-1.5 text-right tabular-nums',
+                            ecart != null && Math.abs(ecart) > 0.0005 && (ecart > 0 ? 'font-medium text-danger' : 'text-succes'),
+                          )}
+                        >
+                          {ecart == null ? '—' : `${ecart > 0 ? '+' : ''}${fmt.nombre(ecart, 2)} %`}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </CarteCorps>
+            {bc.statut === 'DEMANDE_PRIX' && droits.peutEcrire && (
+              <CarteCorps className="flex flex-wrap items-center justify-between gap-3 border-t border-bordure pt-3">
+                <span className="text-[12.5px] text-attenue-texte">
+                  {reponsesIllisibles.length > 0
+                    ? `${reponsesIllisibles.length} ligne(s) au prix ou à la remise illisible.`
+                    : reponsesModifiees.length > 0
+                      ? `${reponsesModifiees.length} ligne(s) modifiée(s) — rien n’est encore enregistré.`
+                      : 'Le prix confirmé remplace le prix de la ligne ; le prix d’avant reste pour mesurer l’écart.'}
+                </span>
+                <div className="flex gap-2">
+                  <Bouton variante="contour" disabled={reponsesModifiees.length === 0} onClick={() => setReponses({})}>
+                    <Undo2 />
+                    Annuler les modifications
+                  </Bouton>
+                  <Bouton
+                    variante={reponsesModifiees.length > 0 ? 'principal' : 'contour'}
+                    chargement={enregistrerReponse.isPending}
+                    disabled={reponsesModifiees.length === 0 || reponsesIllisibles.length > 0}
+                    onClick={() => enregistrerReponse.mutate()}
+                  >
+                    <Save />
+                    Enregistrer la réponse
+                  </Bouton>
+                </div>
+              </CarteCorps>
+            )}
+          </Carte>
+        )}
 
       {/* UNE LECTURE QUI ECHOUE DOIT SE VOIR. L'ecran se contentait d'afficher
           une grille vide, qu'on ne pouvait pas distinguer d'un bon sans ligne :
@@ -1014,7 +1415,7 @@ export function BonCommande() {
         <Carte repliable="boncommande.1">
           <CarteEntete>
             <CarteTitre>En-tete</CarteTitre>
-            <Badge ton={TON[bc.statut] ?? 'neutre'}>{bc.statut}</Badge>
+            <StatutBadge entite="bon_commande" code={bc.statut} />
           </CarteEntete>
           <CarteCorps className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
@@ -1188,12 +1589,13 @@ export function BonCommande() {
                 setMode={setMode}
                 proposees={proposees}
                 chercherCatalogue={chercherCatalogue}
-                surCorrection={(code, champ, valeur) =>
-                  corrigerReference.mutate({ code, champ, valeur })
+                surCorrection={(code, champ, valeur, version) =>
+                  corrigerReference.mutate({ code, champ, valeur, version })
                 }
                 valeurOrigine={(code, champ) => (parPlan.get(code)?.[champ] as string) ?? ''}
                 validationLocale
                 avecRemise
+                fusionParReference
                 surSupprimerLigne={retirerLigne}
               />
             ) : (

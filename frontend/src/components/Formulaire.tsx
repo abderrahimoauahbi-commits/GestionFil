@@ -33,8 +33,10 @@ import {
   Zone,
 } from '../composants/ui/base'
 import { Aide, Dialogue, DialogueContenu, Interrupteur } from '../composants/ui/surcouches'
+import { IndiceChamp } from '../composants/ui/Indice'
+import { ChoixRecherche, type TypeChoix } from '../composants/ChoixRecherche'
 
-export type TypeChamp = 'texte' | 'nombre' | 'entier' | 'date' | 'booleen' | 'liste' | 'zone'
+export type TypeChamp = 'texte' | 'nombre' | 'entier' | 'date' | 'booleen' | 'liste' | 'zone' | 'choix'
 
 export interface Option {
   valeur: string
@@ -46,6 +48,11 @@ export interface ChampDef {
   libelle: string
   type?: TypeChamp
   options?: Option[]
+  /**
+   * `type: 'choix'` : la liste qui grandit (fournisseurs…) se CHERCHE au
+   * serveur au lieu de se derouler (24/10/2026).
+   */
+  choix?: TypeChoix
   obligatoire?: boolean
   /** Modifiable uniquement a la creation (identifiants). */
   cleCreation?: boolean
@@ -226,6 +233,7 @@ export function Formulaire({
             >
               <Etiq
                 htmlFor={id}
+                indice={false}
                 obligatoire={c.obligatoire && actif}
                 className={avecSections ? 'h-4 whitespace-nowrap' : undefined}
               >
@@ -242,16 +250,13 @@ export function Formulaire({
                           : 'lecture seule'}
                   </span>
                 )}
-                {c.aide && (
-                  /* LA NOTE SE REPLIE DANS UNE INFO-BULLE.
-                     Ecrite en toutes lettres — sous le champ hier, dans
-                     l'etiquette ensuite — elle faisait passer l'etiquette a la
-                     ligne des qu'elle depassait quelques mots. Les champs d'une
-                     meme rangee ne commencaient alors plus a la meme hauteur, et
-                     le formulaire perdait sa lecture. Repliee, l'explication
-                     reste a portee de survol sans rien deplacer. */
-                  <Aide>{c.aide}</Aide>
-                )}
+                {/* LA NOTE SE REPLIE DANS UNE INFO-BULLE : écrite en toutes
+                    lettres, elle faisait passer l'étiquette à la ligne et les
+                    champs d'une même rangée ne commençaient plus à la même
+                    hauteur. L'INDICE DU CATALOGUE D'AIDE (27/10/2026) passe
+                    d'abord ; la note locale ne se montre que si le catalogue ne
+                    dit rien de ce champ — jamais deux aides côte à côte. */}
+                <IndiceChamp intitule={c.libelle} repli={c.aide ? <Aide>{c.aide}</Aide> : null} />
               </Etiq>
 
               {type === 'booleen' ? (
@@ -281,6 +286,16 @@ export function Formulaire({
                     </option>
                   ))}
                 </Selecteur>
+              ) : type === 'choix' && c.choix ? (
+                <ChoixRecherche
+                  type={c.choix}
+                  id={id}
+                  valeur={(valeur as string) ?? ''}
+                  onChange={(v) => maj(v)}
+                  vide={c.obligatoire ? undefined : '—'}
+                  desactive={!actif}
+                  invalide={manque}
+                />
               ) : type === 'zone' ? (
                 <Zone
                   id={id}

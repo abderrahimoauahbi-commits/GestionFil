@@ -7,6 +7,8 @@
 -- fournisseur
 -- -----------------------------------------------------------------------------
 CREATE TABLE fournisseur (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_fournisseur    text    NOT NULL PRIMARY KEY,
     nom                 text    NOT NULL,
     contact_principal   text,
@@ -71,6 +73,8 @@ CREATE UNIQUE INDEX ux_contact_principal
 -- C'est ce qui permet de chiffrer une couleur jamais achetee.
 -- -----------------------------------------------------------------------------
 CREATE TABLE couleur (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_couleur_interne text    NOT NULL PRIMARY KEY,
     libelle              text    NOT NULL,
     classe_teinture      text    CHECK (classe_teinture IS NULL
@@ -89,6 +93,8 @@ CREATE TABLE couleur (
 -- famille et de meme couleur sont le meme fil, chez deux vendeurs differents.
 -- -----------------------------------------------------------------------------
 CREATE TABLE famille (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_famille    text    NOT NULL PRIMARY KEY,
     libelle         text    NOT NULL,
     code_categorie  text    REFERENCES categorie_matiere(code_categorie),
@@ -101,7 +107,31 @@ CREATE TABLE famille (
 
 
 -- -----------------------------------------------------------------------------
+-- position_tarifaire — la nomenclature douaniere et son droit (19/10/2026)
+-- -----------------------------------------------------------------------------
+-- Migration 2026-10-19a_positions_tarifaires.sql (audit P3), qui pose aussi le
+-- declencheur d'audit (fn_trg_audit_modification, defini en 010).
+CREATE TABLE position_tarifaire (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
+    code_sh             text    NOT NULL PRIMARY KEY
+                                CONSTRAINT ck_pt_code CHECK (code_sh ~ '^[0-9]{6,10}$'),
+    libelle             text    NOT NULL CONSTRAINT ck_pt_libelle CHECK (btrim(libelle) <> ''),
+    taux_droit_pct      numeric(7,4) NOT NULL DEFAULT 0
+                                CONSTRAINT ck_pt_taux CHECK (taux_droit_pct <> 'NaN'
+                                                             AND taux_droit_pct >= 0
+                                                             AND taux_droit_pct <= 100),
+    notes               text,
+    actif               bigint  NOT NULL DEFAULT 1 CONSTRAINT ck_pt_actif CHECK (actif IN (0, 1)),
+    -- Un vrai type de date, pas du texte (cliquet A1 du 17/10/2026).
+    date_creation       timestamptz NOT NULL DEFAULT now()
+);
+
+
+-- -----------------------------------------------------------------------------
 CREATE TABLE reference (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_reference      text    NOT NULL PRIMARY KEY,
     code_categorie      text    NOT NULL REFERENCES categorie_matiere(code_categorie),
     code_fournisseur    text    NOT NULL REFERENCES fournisseur(code_fournisseur),
@@ -148,9 +178,11 @@ CREATE TABLE reference (
                             END) STORED,
 
     -- Politique de reapprovisionnement (parametres LOCAUX, cf. B3/R09)
+    -- Stock minimum : garde-fou, signal seulement, jamais une quantite de commande.
     stock_min_kg        numeric(18,4)    CHECK (stock_min_kg IS NULL OR stock_min_kg >= 0),
-    couverture_min_mois numeric(12,4)    CHECK (couverture_min_mois IS NULL OR couverture_min_mois >= 0),
-    marge_securite_pct  numeric(9,4)    CHECK (marge_securite_pct IS NULL OR marge_securite_pct >= 0),
+    -- Couverture cible (mois) du MRP, moteur v2 (2026-10-27l, ancienne
+    -- couverture_min_mois) ; la marge de securite de l'article est retiree.
+    couverture_cible_mois numeric(12,4)  CHECK (couverture_cible_mois IS NULL OR couverture_cible_mois >= 0),
     moq_kg              numeric(18,4)    CHECK (moq_kg IS NULL OR moq_kg > 0),
     multiple_achat_kg   numeric(18,4)    CHECK (multiple_achat_kg IS NULL OR multiple_achat_kg > 0),
 
@@ -164,9 +196,16 @@ CREATE TABLE reference (
     date_dernier_cmup   text,
 
     suivi_lot           bigint NOT NULL DEFAULT 0 CHECK (suivi_lot IN (0,1)),
+    -- MACHINE : sort par les fiches machine (le fil) ; DIRECTE : se consomme sans machine
+    -- (jute, latex, SBR, plastique, simili cuir), par CONSO_DIRECTE (21/10/2026).
+    mode_consommation   text   NOT NULL DEFAULT 'MACHINE'
+                        CONSTRAINT reference_mode_consommation_check
+                        CHECK (mode_consommation IN ('MACHINE', 'DIRECTE')),
     actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     id_utilisateur_creation text REFERENCES utilisateur(id_utilisateur),
+    -- La position tarifaire : le droit d'importation de cette matiere (19/10/2026).
+    code_sh             text CONSTRAINT fk_reference_position REFERENCES position_tarifaire(code_sh),
 
     -- R01 : facteur de conversion obligatoire selon l'unite. Aucun fallback.
     CHECK (unite_catalogue <> 'Bobine'  OR poids_bobine_kg IS NOT NULL),
@@ -175,6 +214,9 @@ CREATE TABLE reference (
     -- Un multiple d'achat doit etre coherent avec le MOQ
     CHECK (moq_kg IS NULL OR multiple_achat_kg IS NULL OR moq_kg >= multiple_achat_kg)
 );
+
+COMMENT ON COLUMN reference.couverture_cible_mois IS 'Couverture cible (mois) : couverture souhaitée au moment de la réception ; cible MRP, obligatoire pour un article soumis au MRP ; jamais une quantité';
+COMMENT ON COLUMN reference.stock_min_kg IS 'Stock minimum : garde-fou, signal seulement, jamais une quantité de commande';
 
 CREATE INDEX ix_ref_categorie   ON reference(code_categorie);
 CREATE INDEX ix_ref_fournisseur ON reference(code_fournisseur);
@@ -187,6 +229,8 @@ CREATE INDEX ix_ref_reference_fournisseur ON reference(reference_fournisseur)
 -- groupe_equiv  (substitution, CDC F8)
 -- -----------------------------------------------------------------------------
 CREATE TABLE groupe_equiv (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_groupe_equiv   text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     description         text,
@@ -197,6 +241,8 @@ CREATE TABLE groupe_equiv (
 -- reference_groupe_equiv
 -- -----------------------------------------------------------------------------
 CREATE TABLE reference_groupe_equiv (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     id_ref_grp          text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
     code_reference      text    NOT NULL REFERENCES reference(code_reference),

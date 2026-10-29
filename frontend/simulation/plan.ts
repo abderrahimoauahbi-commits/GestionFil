@@ -8,6 +8,11 @@
  * livraisons. Ce qui depend du stock du jour (quoi charger sur un etage, combien
  * sortir) se decide a l'execution, en lisant le serveur comme le ferait le
  * magasinier.
+ *
+ * LES ORDRES DE FABRICATION (22/10/2026) : un par machine et par mois, sur une
+ * qualite existante ; les fiches machine et les sorties de matieres DIRECTE les
+ * portent. Leur tirage a sa propre graine : il ne decale rien de ce qui est
+ * deja saisi.
  */
 
 export interface RefCatalogue {
@@ -18,6 +23,8 @@ export interface RefCatalogue {
   prix_catalogue: number | null
   code_devise_catalogue: string | null
   suivi_lot: number
+  /** MACHINE (le fil, par les fiches machine) ou DIRECTE (fiche hors machine, sur un OF). */
+  mode_consommation?: string | null
 }
 
 export interface LignePlan {
@@ -72,8 +79,41 @@ export type Evenement =
   | { id: string; date: string; type: 'IMPORT_CLOTURE'; dossier: string }
   /** Un retour au fournisseur : une partie d'un lot recu, non conforme, rendue quelques jours apres. */
   | { id: string; date: string; type: 'RETOUR'; reception: string; fournisseur: string; ligne: LignePlan; kg: number }
-  | { id: string; date: string; type: 'MACHINE'; machine: string; zone: string; capacite: number }
-  | { id: string; date: string; type: 'SORTIE' }
+  /**
+   * L'ORDRE DE FABRICATION (22/10/2026) : un par machine et par mois, sur une
+   * qualite existante. Cree PREVU puis LANCE le premier jour ouvre du mois par la
+   * planification (droit PLANS en ecriture). `usages` : les evenements qui le
+   * servent (fiches machine, sorties hors machine, retours) — un OF dont tous les
+   * usages sont deja saisis sans lui (historique d'avant les OF) est sans objet.
+   */
+  | {
+      id: string
+      date: string
+      type: 'OF'
+      numero: string
+      machine: string
+      qualite: string
+      metrage: number
+      fin: string
+      usages: string[]
+    }
+  /**
+   * La cloture d'un OF : quand chacun des etages qui l'ont servi a eu son constat
+   * suivant (la frontiere, qui range l'ecart sous l'OF sortant). Un OF dont un etage
+   * n'est pas encore revisite reste LANCE.
+   */
+  | { id: string; date: string; type: 'OF_CLOTURE'; numero: string }
+  /** `of` : le numero de l'OF du mois de la machine — le constat et le chargement le portent. */
+  | { id: string; date: string; type: 'MACHINE'; machine: string; zone: string; capacite: number; of?: string }
+  /**
+   * `ofs` : les OF du mois. Chacun sort SES matieres en mode DIRECTE (fiche hors
+   * machine) : celles de la recette de sa qualite, a hauteur du prevu (metrage x
+   * kg/m2 x (1 + perte), a 10 % pres). Les autres matieres hors machine gardent
+   * la sortie d'atelier.
+   */
+  | { id: string; date: string; type: 'SORTIE'; ofs?: string[] }
+  /** Un petit reste d'une sortie hors machine revient au magasin, sur le meme OF (RETOUR_CONSO). */
+  | { id: string; date: string; type: 'RETOUR_HM'; sortie: string; ofs: string[] }
   | { id: string; date: string; type: 'INVENTAIRE'; magasin: string }
 
 /**
@@ -138,14 +178,39 @@ export const MATIERES_HORS_MACHINE = ['JUT', 'LAI', 'SBR', 'CUI', 'PLA']
 
 export interface Machine {
   code: string
+  /** La largeur utile (m), si elle est declaree : elle donne la capacite d'une voie. */
+  largeur?: number | null
   zones: { code: string; capacite: number }[]
 }
 
-export function construirePlan(catalogue: RefCatalogue[], machines: Machine[], aujourdhui: string): Evenement[] {
+/** Une qualite qu'un OF peut viser (`/api/ordres-fabrication/qualites`). */
+export interface QualitePlan {
+  code_qualite: string
+  a_recette: boolean
+}
+
+/** Le numero d'un OF de la simulation : un par machine et par mois. */
+export const numeroOf = (mois: string, machine: string) => `OF-SIM-${mois.replace('-', '')}-${machine}`
+
+export function construirePlan(
+  catalogue: RefCatalogue[],
+  machines: Machine[],
+  aujourdhui: string,
+  qualites: QualitePlan[] = [],
+): Evenement[] {
   const h = hasard(20240101)
   // Les retours ont leur propre tirage : ajoutes apres coup (10/10/2026), ils ne
   // decalent aucun autre evenement du plan deja saisi.
   const hr = hasard(20240202)
+  // Les OF aussi (22/10/2026) : tirer dans `h` decalerait tout le plan deja saisi.
+  const ho = hasard(20261022)
+  // Les qualites avec une recette d'abord : leur OF a un prevu a comparer au reel.
+  const avecRecette = qualites.filter((q) => q.a_recette)
+  const visees = (avecRecette.length ? avecRecette : qualites).map((q) => q.code_qualite).sort()
+  /** Les OF du plan, par numero, pour y accrocher leurs usages et leur cloture. */
+  const ofs = new Map<string, Extract<Evenement, { type: 'OF' }>>()
+  /** Les passages de chaque etage : la date et l'OF qu'il sert ensuite. */
+  const passages = new Map<string, { date: string; of: string; id: string }[]>()
   const ev: Evenement[] = []
   const refs = [...catalogue].sort((a, b) => a.code_reference.localeCompare(b.code_reference))
   const fil = refs.filter((r) => FIL.includes(r.code_categorie) && (r.poids_bobine_kg ?? 0) > 0 && r.suivi_lot === 1)
@@ -274,18 +339,83 @@ export function construirePlan(catalogue: RefCatalogue[], machines: Machine[], a
     }
 
     // --- La production : deux etages par machine et par mois -------------
+    // Chaque machine sert l'OF du mois, lance le premier jour ouvre : le constat
+    // et le chargement de ses etages le portent. Au changement de mois, le
+    // constat porte l'OF nouveau ; le serveur range l'ecart sous l'OF sortant.
+    const ofsDuMois: string[] = []
+    const jourOf = ouvre(`${mois}-01`)
+    const finMois = iso(new Date(Date.UTC(Number(mois.slice(0, 4)), Number(mois.slice(5, 7)), 0)))
     for (const [im, m] of machines.entries()) {
       const etages = m.zones
+      if (!etages.length) continue
+      let of: string | undefined
+      if (visees.length && jourOf <= veille) {
+        of = numeroOf(mois, m.code)
+        const e: Extract<Evenement, { type: 'OF' }> = {
+          id: `OF-${of}`, date: jourOf, type: 'OF', numero: of, machine: m.code,
+          qualite: ho.parmi(visees), metrage: arrondi(ho.reel(1800, 3600), 50), fin: finMois, usages: [],
+        }
+        ofs.set(of, e)
+        ofsDuMois.push(of)
+        ev.push(e)
+      }
       for (let v = 0; v < 2; v++) {
         const z = etages[(n * 2 + v + im) % etages.length]
         const jour = ouvre(`${mois}-${String(9 + v * 11 + im).padStart(2, '0')}`)
         if (jour > veille) continue
-        ev.push({ id: `M-${jour}-${z.code}`, date: jour, type: 'MACHINE', machine: m.code, zone: z.code, capacite: z.capacite })
+        const id = `M-${jour}-${z.code}`
+        ev.push({ id, date: jour, type: 'MACHINE', machine: m.code, zone: z.code, capacite: z.capacite, ...(of ? { of } : {}) })
+        if (of) {
+          ofs.get(of)!.usages.push(id)
+          passages.set(z.code, [...(passages.get(z.code) ?? []), { date: jour, of, id }])
+        }
       }
     }
-    // --- Les matieres hors machine sortent pour l'atelier, en fin de mois --
+    // --- Les matieres hors machine sortent en fin de mois ------------------
+    // Celles en mode DIRECTE, OF par OF, selon la recette de sa qualite (fiche
+    // hors machine) ; les autres pour l'atelier, comme avant.
     const jourSortie = ouvre(`${mois}-27`)
-    if (jourSortie <= veille) ev.push({ id: `S-${jourSortie}`, date: jourSortie, type: 'SORTIE' })
+    if (jourSortie <= veille) {
+      const id = `S-${jourSortie}`
+      const lesOfs = ofsDuMois.length ? [...ofsDuMois] : undefined
+      for (const numero of lesOfs ?? []) ofs.get(numero)!.usages.push(id)
+      ev.push({ id, date: jourSortie, type: 'SORTIE', ...(lesOfs ? { ofs: lesOfs } : {}) })
+      // Deux fois sur cinq, un petit reste revient au magasin quelques jours apres.
+      if (lesOfs && ho.reel(0, 1) < 0.4) {
+        const jourRetour = ouvre(ajouter(jourSortie, ho.entier(2, 4)))
+        if (jourRetour <= veille) {
+          const idR = `${id}-RHM`
+          ev.push({ id: idR, date: jourRetour, type: 'RETOUR_HM', sortie: id, ofs: lesOfs })
+          for (const numero of lesOfs) ofs.get(numero)!.usages.push(idR)
+        }
+      }
+    }
+  }
+
+  // --- La cloture des OF -----------------------------------------------------
+  // Un OF se clot quand chacun des etages qui l'ont servi a eu son constat
+  // suivant (sous un autre OF) — la frontiere qui mesure sa derniere periode —
+  // et apres ses sorties et retours hors machine. Sinon, il reste LANCE.
+  const dateDe = new Map(ev.map((e) => [e.id, e.date]))
+  for (const [numero, o] of ofs) {
+    let fin = o.date
+    let servi = false
+    let ouvert = false
+    for (const ps of passages.values()) {
+      const siens = ps.filter((p) => p.of === numero)
+      if (!siens.length) continue
+      servi = true
+      const dernier = siens[siens.length - 1]
+      const suivant = ps.find((p) => p.date > dernier.date && p.of !== numero)
+      if (!suivant) {
+        ouvert = true
+        break
+      }
+      if (suivant.date > fin) fin = suivant.date
+    }
+    if (!servi || ouvert) continue
+    for (const u of o.usages) if ((dateDe.get(u) ?? '') > fin) fin = dateDe.get(u)!
+    if (fin <= veille) ev.push({ id: `${o.id}-CL`, date: fin, type: 'OF_CLOTURE', numero })
   }
 
   // --- L'inventaire d'aujourd'hui, magasin par magasin ----------------------
@@ -293,9 +423,11 @@ export function construirePlan(catalogue: RefCatalogue[], machines: Machine[], a
 
   // L'ordre du temps ; le meme jour, les cours d'abord, puis les documents dans
   // l'ordre ou ils se font au bureau : livraisons, commandes, production, sorties.
+  // L'OF se lance avant les fiches du jour ; il se clot apres elles.
   const poids: Record<Evenement['type'], number> = {
     TAUX: 0, IMPORT_DEDOUANEMENT: 1, IMPORT_RECEPTION: 2, RECEPTION: 3, RETOUR: 4, IMPORT_CLOTURE: 5,
-    BC_VALIDER: 6, IMPORT_DOSSIER: 7, BC: 8, MACHINE: 9, SORTIE: 10, INVENTAIRE: 11,
+    BC_VALIDER: 6, IMPORT_DOSSIER: 7, BC: 8, OF: 8.5, MACHINE: 9, SORTIE: 10, RETOUR_HM: 10.5, OF_CLOTURE: 10.8,
+    INVENTAIRE: 11,
   }
   return ev.sort((a, b) => a.date.localeCompare(b.date) || poids[a.type] - poids[b.type] || a.id.localeCompare(b.id))
 }

@@ -16,6 +16,11 @@ use serde_json::{json, Value};
 #[derive(Debug, Deserialize)]
 pub struct ParamsPlanAchat {
     pub id_plan: Option<String>,
+    /// UNE SEULE REFERENCE (27/10/2026) : le bouton « Commander » de l'onglet
+    /// À commander regenere sa proposition depuis le moteur, puis l'ouvre dans
+    /// les lignes a commander. Absent : tout le plan d'achat.
+    #[serde(default)]
+    pub reference: Option<String>,
 }
 
 pub async fn figer_recettes(
@@ -54,7 +59,15 @@ pub async fn generer_plan_achat(
     Query(p): Query<ParamsPlanAchat>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Ecrire).await?;
-    let r = plan_achat::generer(&state.db, &user, p.id_plan.as_deref()).await?;
+    let reference = p.reference.as_deref().map(str::trim).filter(|r| !r.is_empty());
+    let r = plan_achat::generer(&state.db, &user, p.id_plan.as_deref(), reference).await?;
+    // Les indicateurs se calculent ICI, une fois, et l'ecran les lit ensuite
+    // (21/10/2026 : 4 a 7 s a chaque ouverture quand il les recalculait). Une
+    // seule reference regeneree ne les refait pas : ils restent ceux du dernier
+    // calcul complet, dates.
+    if reference.is_none() {
+        crate::routes::consultation::figer_kpi_plan_achat(&state.db, &user).await?;
+    }
     // Le budget total se masque comme les montants estimes (audit du 13/10/2026).
     let mut v = serde_json::to_value(r)?;
     user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;
@@ -115,14 +128,34 @@ pub async fn valider_reception(
 /// L'ancien nom `valider` est conserve comme alias, mais il decrivait mal ce
 /// qui se passe — il ecrivait les DEUX mouvements d'un coup, et la marchandise
 /// arrivait a destination avant d'avoir voyage.
+///
+/// LA DATE PREVUE DE DISPONIBILITE (27/10/2026) : obligatoire a l'expedition,
+/// garantie en base (TRF-DATE). Elle vient du corps (`date_disponibilite_prevue`)
+/// ou, a defaut, de celle deja saisie sur le transfert en preparation.
 pub async fn expedier_transfert(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    corps: axum::body::Bytes,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::MOUVEMENTS, Action::Valider).await?;
-    let r = transfert::expedier(&state.db, &user, &id).await?;
+    // Le corps est FACULTATIF : vide (avec ou sans en-tete JSON), il ne porte rien.
+    let corps: Expedition = if corps.iter().all(u8::is_ascii_whitespace) {
+        Expedition::default()
+    } else {
+        serde_json::from_slice(&corps)
+            .map_err(|e| AppError::Invalide(format!("corps de l'expedition illisible : {e}")))?
+    };
+    let date = corps.date_disponibilite_prevue.filter(|d| !d.trim().is_empty());
+    let r = transfert::expedier(&state.db, &user, &id, date.as_deref()).await?;
     Ok(Json(serde_json::to_value(r)?))
+}
+
+/// Le corps (facultatif) de l'expedition d'un transfert.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct Expedition {
+    #[serde(default)]
+    pub date_disponibilite_prevue: Option<String>,
 }
 
 /// Reception : quelqu'un constate l'arrivee au magasin destinataire.
@@ -280,7 +313,7 @@ pub async fn contexte_facture_reception(
         crate::routes::importation::taux_reference(&mut c, &devise, &date).await?
     };
     let autres: Vec<(String, String, String, f64)> = sqlx::query_as(
-        "SELECT r.id_reception, r.numero_reception, r.date_reception,
+        "SELECT r.id_reception, r.numero_reception, r.date_reception::text,
                 COALESCE((SELECT sum(a.total_mad) FROM v_archive_reception_courante a
                             JOIN ligne_reception lr ON lr.id_ligne_reception = a.id_ligne_reception
                            WHERE lr.id_reception = r.id_reception), 0)::float8
@@ -407,11 +440,19 @@ pub async fn supprimer_reference_definitivement(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(code): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::CATALOGUE, Action::Ecrire).await?;
+    let version = super::entites::version_exigee(q.version.map(Value::String).as_ref())?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // Le verrou optimiste (19/10/2026) : on n'efface pas une fiche qu'un autre
+    // vient de modifier sans l'avoir vue.
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "reference", "code_reference", &code, Some(version), &format!("La référence {code}"),
+    )
+    .await?;
 
     let retenants: [(&str, &str); 7] = [
         ("ligne_mouvement", "mouvement(s) de stock"),

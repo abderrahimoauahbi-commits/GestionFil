@@ -53,10 +53,11 @@ pub type Db = PgPool;
 
 pub async fn connect(database_url: &str) -> anyhow::Result<Db> {
     let options = PgConnectOptions::from_str(database_url)?
-        // Le fuseau de la SESSION, pas celui du serveur. Toutes les dates du
-        // schema sont du texte ISO-8601 en UTC (ADR-001 D-11) : un serveur
-        // regle sur Europe/Paris ferait rendre a `current_date` une date
-        // decalee d'un jour pendant deux heures chaque nuit.
+        // Le fuseau de la SESSION, pas celui du serveur : CASABLANCA (decision
+        // du 20/10/2026). `current_date` est ainsi le jour de l'usine, entre
+        // minuit et 1 h comme le reste du temps (en UTC, c'etait la veille).
+        // Les instants (`timestamptz`) ne dependent d'aucun fuseau ; le serveur
+        // les sert en ISO UTC par fn_iso et routes/json.rs.
         //
         // L'ENCODAGE DU CLIENT EST FORCE EN UTF-8. Sans cela, libpq prend celui
         // du systeme : sous Windows c'est WIN1252, et un tiret cadratin ou un
@@ -65,7 +66,7 @@ pub async fn connect(database_url: &str) -> anyhow::Result<Db> {
         // probleme, l'outil d'import lance depuis un poste de developpement si.
         // Un encodage qui depend de la machine qui lance l'outil n'est pas un
         // reglage, c'est un piege.
-        .options([("timezone", "UTC"), ("client_encoding", "UTF8")])
+        .options([("timezone", "Africa/Casablanca"), ("client_encoding", "UTF8")])
         // DES DELAIS, POUR QU'UNE REQUETE NE FIGE PAS L'ERP (audit v4). Une
         // requete emballee ou une transaction oubliee tenaient une connexion et
         // ses verrous indefiniment : seize connexions, et l'application se
@@ -108,6 +109,349 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// une fois jouee (la derniere colonne qu'elle ajoute). A completer a chaque
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
+    (
+        // La couverture cible (moteur v2, 27/10/2026) : la fiche article porte
+        // couverture_cible_mois (ancienne couverture_min_mois), lue par le moteur
+        // et ecrite par le CRUD ; la marge de securite de l'article est retiree.
+        "2026-10-27l_couverture_cible.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'reference'
+                           AND column_name = 'couverture_cible_mois')",
+    ),
+    (
+        // Le taux d'un dossier d'import est facultatif (arbitrage du 27/10/2026) :
+        // le serveur l'ecrit NULL pour une devise sans taux, au lieu d'inventer 1.
+        // Sans elle, la creation d'un tel dossier echouerait sur NOT NULL.
+        "2026-10-27k_import_taux_dossier_facultatif.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'import_dossiers'
+                           AND column_name = 'taux_change' AND is_nullable = 'YES')",
+    ),
+    (
+        // Le grand livre de la consommation (27/10/2026, lots L0 et L1) : une seule
+        // source du reel (v_consommation_fait), 12 mois pleins, machine datee a la
+        // fiche ; le « plus grand des deux » (v_conso_retenue) et le minimum qui le
+        // lisait sont retires ; v_stock_reference porte reel_mois_kg ; C67.
+        "2026-10-27g_grand_livre_consommation.sql",
+        "SELECT to_regclass('public.v_consommation_fait') IS NOT NULL
+            AND to_regclass('public.v_conso_reelle_mois') IS NOT NULL
+            AND to_regclass('public.v_conso_retenue') IS NULL
+            AND to_regclass('public.v_ctl_c67') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'v_stock_reference' AND column_name = 'valeur_reel_12m_mad')",
+    ),
+    (
+        // La proposition se clot avec son bon annule (decision du 27/10/2026) :
+        // statut ANNULE_BC, liee au bon, etat final (PA-ANNULE-BC) ; l'annulation
+        // d'un bon l'ecrit, et sans ce statut elle echouerait sur le CHECK.
+        "2026-10-27f_proposition_bon_annule.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_constraint
+                         WHERE conname = 'plan_achat_statut_check'
+                           AND pg_get_constraintdef(oid) LIKE '%ANNULE_BC%')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_achat_annule_bc_final')",
+    ),
+    (
+        // UNE SEULE SOURCE DE VERITE (27/10/2026) : l'ancien calcul du besoin et de
+        // la projection est retire (v_stock_projete, v_plan_achat, v_encours_fiable,
+        // v_besoin_horizon, v_risque_*, v_cockpit_stock…), les vues qui le lisaient
+        // sont redefinies sur v_stock_reference, C05 et C25 passent au moteur, C27
+        // et C49 sont retires, C66 nait ; P_MrpInclureStockMachine est supprime.
+        "2026-10-27e_source_unique_moteur.sql",
+        "SELECT to_regclass('public.v_stock_reference') IS NOT NULL
+            AND to_regclass('public.v_stock_projete') IS NULL
+            AND to_regclass('public.v_plan_achat') IS NULL
+            AND to_regclass('public.v_ctl_c66') IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_MrpInclureStockMachine')
+            AND EXISTS (SELECT 1 FROM champ_configurable WHERE module = 'COCKPIT' AND champ = 'nb_plan_non_couvert')
+            AND EXISTS (SELECT 1 FROM champ_configurable WHERE module = 'STOCK' AND champ = 'plan_mois_kg')",
+    ),
+    (
+        // Le fil en route est un arrivage (27/10/2026) : la date prevue de
+        // disponibilite du transfert, obligatoire a l'expedition (TRF-DATE),
+        // revisable tant qu'il roule, journalisee.
+        "2026-10-27d_transit_date_disponibilite.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'transfert' AND column_name = 'date_disponibilite_prevue')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_transfert_date_disponibilite')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_audit_transfert_date')",
+    ),
+    (
+        // « Commander » branche sur le moteur de couverture (27/10/2026) : la date
+        // limite de commande sur la proposition d'achat, les kilos hors
+        // couverture des bons non valides et apres l'horizon declares.
+        "2026-10-27c_commande_couverture.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'plan_achat' AND column_name = 'date_limite_commande')
+            AND (SELECT count(*) FROM champ_configurable
+                  WHERE module = 'PLAN_ACHAT' AND champ IN ('non_valide_kg', 'apres_horizon_kg')) = 2",
+    ),
+    (
+        // L'OF sort du besoin MRP (decision du 26/10/2026) : le besoin est le plan
+        // seul ; le fil sur machine compte au dernier constat quel que soit son age.
+        "2026-10-27b_besoin_plan_seul.sql",
+        "SELECT NOT EXISTS (SELECT 1 FROM pg_views
+                             WHERE viewname IN ('v_besoin_horizon', 'v_besoin_12m', 'v_besoin_mois')
+                               AND definition LIKE '%v_besoin_of_mois%')
+            AND NOT EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_stock_physique'
+                                                     AND definition LIKE '%P_JoursInventMachine%')
+            AND NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_besoin_of_mois')",
+    ),
+    (
+        // Les colonnes de l'onglet « À commander » (moteur de couverture, 26/10/2026) :
+        // sans elles, l'onglet s'affiche colonnes masquees, sans message.
+        "2026-10-27a_couverture_champs.sql",
+        "SELECT (SELECT count(*) FROM champ_configurable
+                  WHERE module = 'PLAN_ACHAT'
+                    AND champ IN ('disponible_kg', 'couvert_jusqu_au', 'premiere_rupture', 'plan_non_couvert_kg',
+                                  'date_limite_commande', 'transit_kg')) = 6",
+    ),
+    (
+        // La ligne de facture d'import recue figee tout entiere (24/10/2026) :
+        // lot, couleur, bobines, palettes et libelle refuses aussi (IMPORT-FIGEE).
+        "2026-10-24c_import_ligne_recue_figee.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_import_ligne_figee')
+            AND COALESCE(position('libelle_couleur' IN
+                    pg_get_functiondef(to_regproc('public.fn_trg_import_ligne_figee'))) > 0, false)",
+    ),
+    (
+        // La liste d'un inventaire tournant ou cible (decision du 23/10/2026) :
+        // inventaire_reference, proposition ABC du tournant (v_inventaire_candidat,
+        // P_ComptageTournantA/B/C), lignes et gel limites aux references choisies.
+        "2026-10-24b_inventaire_references_choisies.sql",
+        "SELECT to_regclass('public.inventaire_reference') IS NOT NULL
+            AND to_regclass('public.v_inventaire_candidat') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'inventaire' AND column_name = 'date_selection')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_ligne_inventaire_selection')",
+    ),
+    (
+        // Le gel selon le type d'inventaire (decision du 23/10/2026) : GLOBAL gele
+        // le magasin, TOURNANT et CIBLE leurs seules references ; v_inventaire_gel
+        // (lue par /api/inventaires/ouverts) ; C65 a la meme etendue ; theorique
+        // d'une ligne d'inventaire au poids du lot.
+        "2026-10-24a_inventaire_gel_par_reference.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_inventaire_gel_par_reference')
+            AND EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_inventaire_ouvert_message' AND pronargs = 2)
+            AND to_regclass('public.v_inventaire_gel') IS NOT NULL",
+    ),
+    (
+        // Inventaire ouvert = magasin gele (decision du 23/10/2026) : aucun
+        // mouvement tant qu'un inventaire du magasin est ouvert ; la cloture
+        // rattache ses ajustements par `mouvement.id_inventaire`. C65.
+        "2026-10-23g_inventaire_gel.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'mouvement' AND column_name = 'id_inventaire')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_01_lmvt_inventaire_ouvert')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_01_mouvement_inventaire_ouvert')
+            AND to_regclass('public.v_ctl_c65') IS NOT NULL",
+    ),
+    (
+        // La qualite explicite (23/10/2026) : sur la consommation directe et son
+        // retour (avec ou sans OF), sur les lignes machine (nouvelle et de la
+        // periode), statistiques par qualite sans OF, C62 au sens nouveau.
+        "2026-10-23b_qualite_explicite.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'machine_decision_ligne' AND column_name = 'code_qualite_periode')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'machine_fiche_ligne' AND column_name = 'code_qualite')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mouvement_qualite')
+            AND EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_qualite_conso_directe_reste')",
+    ),
+    (
+        // Chaque lot a son conditionnement (23/10/2026) : poids d'une bobine et
+        // bobines par palette du lot, mesures a la reception, corriges sur la
+        // fiche du lot ; conversions au lot.
+        "2026-10-23a_lot_conditionnement.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'lot' AND column_name = 'date_conditionnement')
+            AND EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_lot_conditionnement_reception')
+            AND EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_lot_poids_bobine')
+            AND to_regclass('public.lot_conditionnement_journal') IS NOT NULL",
+    ),
+    (
+        // L'OF, lot C (22/10/2026) : OF et voie sur l'etat archive des decisions,
+        // nombre de bobines d'une voie, retour de consommation directe
+        // (RETOUR_CONSO, borne en base), C62 et C63.
+        "2026-10-22d_of_machines_hors_machine.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'machine_decision_etat' AND column_name = 'id_of')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_lmvt_retour_conso')
+            AND EXISTS (SELECT 1 FROM type_mouvement WHERE code_type_mvt = 'RETOUR_CONSO')
+            AND to_regclass('public.v_ctl_c63') IS NOT NULL",
+    ),
+    (
+        // L'OF, lot B (22/10/2026) : les vues du besoin par OF, les colonnes du
+        // besoin du plan / au-dela du plan, C64. L'ajustement des OF dans le besoin
+        // est retire par 2026-10-27b (le plan seul) : le temoin ne l'exige plus.
+        // Ses vues du besoin par OF (vides) et v_stock_projete sont retirees par
+        // 2026-10-27e : passee celle-ci, seul C64 reste a temoigner.
+        "2026-10-22c_besoin_of.sql",
+        "SELECT to_regclass('public.v_ctl_c64') IS NOT NULL
+            AND (to_regclass('public.v_stock_reference') IS NOT NULL
+                 OR (to_regclass('public.v_besoin_of_mois') IS NOT NULL
+                     AND to_regclass('public.v_besoin_horizon_of') IS NOT NULL
+                     AND EXISTS (SELECT 1 FROM information_schema.columns
+                                  WHERE table_name = 'v_stock_projete' AND column_name = 'besoin_au_dela_12m_kg')))",
+    ),
+    (
+        // L'OF, lot A (22/10/2026) : cycle garde en base, consommation reelle
+        // par OF et par qualite (v_of_consommation, v_qualite_consommation), C61.
+        "2026-10-22b_of_consommation.sql",
+        "SELECT to_regclass('public.v_of_consommation') IS NOT NULL
+            AND to_regclass('public.v_qualite_consommation') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_ordre_fabrication_cycle')",
+    ),
+    (
+        // L'OF Supply Chain, le socle (22/10/2026) : ordre_fabrication, largeur
+        // des machines, OF et voie sur les fiches, etats, decisions, mouvements.
+        "2026-10-22a_ordre_fabrication_socle.sql",
+        "SELECT to_regclass('public.ordre_fabrication') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'machine_decision_ligne' AND column_name = 'id_of_periode')",
+    ),
+    (
+        // Bon fige en attente de validation, une ligne par reference sur un bon,
+        // une ligne de reception par lot, tuiles du circuit, C60 (21/10/2026).
+        "2026-10-21d_bons_receptions_regles.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_ligne_bc_une_par_reference')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_ligne_reception_un_lot')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_bc_entete_figee')
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c60')",
+    ),
+    (
+        // La consommation directe (21/10/2026) : mode de consommation de la
+        // fiche article, type CONSO_DIRECTE, garantie en base.
+        "2026-10-21c_consommation_directe.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_lmvt_conso_directe')
+            AND EXISTS (SELECT 1 FROM type_mouvement WHERE code_type_mvt = 'CONSO_DIRECTE')",
+    ),
+    (
+        // Le bon de commande passe par un controle et une demande de prix
+        // (21/10/2026) : nouveaux etats, prix d'avant la demande, C59.
+        "2026-10-21b_bc_demande_prix.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'ligne_bc'
+                           AND column_name = 'prix_unitaire_avant_demande')
+            AND EXISTS (SELECT 1 FROM transition_statut
+                         WHERE entite = 'bon_commande' AND statut_source = 'EN_CONTROLE'
+                           AND statut_cible = 'DEMANDE_PRIX')",
+    ),
+    (
+        // Les indicateurs du plan d'achat, figes a la generation (21/10/2026).
+        "2026-10-21a_indicateurs_plan_achat.sql",
+        "SELECT to_regclass('public.plan_achat_indicateurs') IS NOT NULL",
+    ),
+    (
+        // Verrou optimiste, groupe 3 (20/10/2026) : le serveur ecrit sous
+        // condition de version les dossiers et factures d'import, factures et
+        // retours fournisseur, parametres, machines.
+        "2026-10-20c_verrou_groupe3.sql",
+        "SELECT count(*) = 6 FROM information_schema.columns
+          WHERE table_schema = 'public' AND column_name = 'version'
+            AND table_name IN ('import_dossiers', 'import_factures', 'facture_fournisseur',
+                               'retour_fournisseur', 'parametre', 'machine')",
+    ),
+    (
+        // Le jour de Casablanca (20/10/2026) : le serveur accepte un fait du
+        // jour marocain ; la regle C06 en base doit compter le meme jour.
+        "2026-10-20b_jour_casablanca.sql",
+        "SELECT pg_get_triggerdef(oid) ~ 'Africa/Casablanca' FROM pg_trigger
+          WHERE tgname = 'trg_mouvement_date_future'",
+    ),
+    (
+        // A1, horodatages (20/10/2026) : les 93 dernieres colonnes de date en
+        // texte sont des `timestamptz`. Le serveur les ecrit par fn_instant ou
+        // now() et les lit par fn_iso, le meme texte ISO qu'avant.
+        "2026-10-20a_horodatages_types.sql",
+        "SELECT to_regprocedure('fn_instant(text)') IS NOT NULL
+            AND (SELECT data_type FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'bon_commande'
+                    AND column_name = 'date_validation') = 'timestamp with time zone'",
+    ),
+    (
+        // A1, troisieme lot (19/10/2026) : seize colonnes de jour encore vides
+        // (fabrication et peremption, retour, facture fournisseur, frais,
+        // engagement, paiement, transfert, valorisation, constat machine) sont
+        // des `date` ; le serveur les ecrit par fn_jour_casablanca.
+        "2026-10-19i_dates_typees_lot3.sql",
+        "SELECT (SELECT data_type FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'ligne_reception'
+                    AND column_name = 'date_fabrication') = 'date'
+            AND (SELECT data_type FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'transfert'
+                    AND column_name = 'date_transfert') = 'date'",
+    ),
+    (
+        // A1, deuxieme lot (19/10/2026) : vingt colonnes de dates (reception,
+        // fiche machine, livraison prevue, cours BAM…) sont des `date` ; le serveur
+        // les compare a current_date et les ecrit par fn_jour_casablanca.
+        "2026-10-19h_dates_typees_lot2.sql",
+        "SELECT (SELECT data_type FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'reception'
+                    AND column_name = 'date_reception') = 'date'
+            AND (SELECT data_type FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'machine_fiche'
+                    AND column_name = 'date_fiche') = 'date'",
+    ),
+    (
+        // A1, premier lot (19/10/2026) : date_mouvement, date_bc, date_debut / date_fin
+        // des taux et date_derniere_sortie sont des `date` ; le serveur les ecrit par
+        // `fn_jour_casablanca`. Sans la migration, toute ecriture de mouvement tombe.
+        "2026-10-19g_dates_typees_lot1.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_jour_casablanca')
+            AND (SELECT data_type FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'mouvement'
+                    AND column_name = 'date_mouvement') = 'date'",
+    ),
+    (
+        // Decision du 19/10/2026 : le verrou optimiste sur les 17 referentiels.
+        // `crud::modifier` et `crud::supprimer` lisent `version` : sans la
+        // colonne, toute fiche refuserait de s'enregistrer.
+        "2026-10-19c_verrou_referentiels.sql",
+        "SELECT (SELECT count(*) FROM pg_trigger
+                  WHERE tgname = 'trg_aa_version' AND NOT tgisinternal) >= 23
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'reference'
+                           AND column_name = 'version')",
+    ),
+    (
+        // Audit P3 : les etiquettes de lot. Generer et scanner lisent
+        // `etiquette_lot` et `v_etiquette_lot`.
+        "2026-10-19b_etiquettes_lot.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.views
+                         WHERE table_schema = 'public' AND table_name = 'v_etiquette_lot')",
+    ),
+    (
+        // Audit P3 : les positions tarifaires. La repartition des frais d'un
+        // dossier d'import (`domain::importation`) lit `position_tarifaire` et
+        // `parametres_frais.entre_valeur_douane` ; sans elles, tout recalcul
+        // d'un dossier tombe en erreur interne.
+        "2026-10-19a_positions_tarifaires.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'parametres_frais'
+                           AND column_name = 'entre_valeur_douane')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'reference'
+                           AND column_name = 'code_sh')
+            AND EXISTS (SELECT 1 FROM information_schema.views
+                         WHERE table_schema = 'public' AND table_name = 'v_import_droits_dossier')",
+    ),
+    (
+        // Audit A2 : le verrou optimiste. `domain::concurrence::exiger_version`
+        // lit `version` sur les six documents a workflow ; sans la colonne,
+        // chaque enregistrement d'un bon ou d'une reception tombe en erreur
+        // interne. Le temoin exige aussi le declencheur : sans lui la colonne
+        // n'avance jamais, et le verrou ne refuserait rien.
+        "2026-10-17d_verrou_optimiste.sql",
+        "SELECT (SELECT count(*) FROM information_schema.columns
+                  WHERE table_schema = 'public' AND column_name = 'version'
+                    AND table_name IN ('bon_commande', 'reception', 'inventaire',
+                                       'transfert', 'plan_production', 'qualite')) = 6
+            AND (SELECT count(*) FROM pg_trigger
+                  WHERE tgname = 'trg_aa_version' AND NOT tgisinternal
+                    AND tgrelid::regclass::text IN ('bon_commande', 'reception', 'inventaire',
+                                                    'transfert', 'plan_production', 'qualite')) = 6",
+    ),
     (
         // ADR-003 phase B : la facture fournisseur est un document. Sans ses
         // tables, l'ecran et sa validation tombent.
@@ -215,9 +559,14 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns
                          WHERE table_schema = 'public' AND table_name = 'machine_decision_ligne'
                            AND column_name = 'niveau_ecart')
-            AND EXISTS (SELECT 1 FROM information_schema.columns
-                         WHERE table_schema = 'public' AND table_name = 'v_stock_physique'
-                           AND column_name = 'stock_mrp_net_kg')
+            -- Le stock MRP net et v_besoin_horizon sont retires par 2026-10-27e
+            -- (le moteur de couverture) : passee celle-ci, ils ne temoignent plus.
+            AND (to_regclass('public.v_stock_reference') IS NOT NULL
+                 OR (EXISTS (SELECT 1 FROM information_schema.columns
+                              WHERE table_schema = 'public' AND table_name = 'v_stock_physique'
+                                AND column_name = 'stock_mrp_net_kg')
+                     AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_besoin_horizon'
+                                                          AND definition LIKE '%reste_mois%')))
             AND EXISTS (SELECT 1 FROM information_schema.columns
                          WHERE table_schema = 'public' AND table_name = 'import_reception_lignes'
                            AND column_name = 'derogation_ecart')
@@ -225,9 +574,7 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                          WHERE table_schema = 'public' AND table_name = 'reception_ajustements_cmup'
                            AND column_name = 'origine')
             AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c44')
-            AND EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_DechetSeuilValiderKg')
-            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_besoin_horizon'
-                                                 AND definition LIKE '%reste_mois%')",
+            AND EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_DechetSeuilValiderKg')",
     ),
     (
         // La derogation de lot bloque : le service lit date_consommation.
@@ -276,9 +623,13 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     ),
     (
         // L'en-cours complet et l'horizon prolonge du plan d'achat.
+        // L'ancien calcul qui les lisait est retire par 2026-10-27e (le moteur de
+        // couverture) et les deux parametres, sans lecteur, sont supprimes par
+        // 2026-10-27j : passee 27e, ils ne temoignent plus.
         "2026-10-08h_planification_encours.sql",
-        "SELECT EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_HorizonProlonge')
-            AND EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_EncoursRetardInclus')",
+        "SELECT to_regclass('public.v_stock_reference') IS NOT NULL
+             OR (EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_HorizonProlonge')
+                 AND EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_EncoursRetardInclus'))",
     ),
     (
         // Dates vides, tolerance au droit VALIDER, modele de droits, mouvement
@@ -334,10 +685,10 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
         "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_dernier_prix_achat_mad')",
     ),
     (
-        // La saison, les alertes C49/C50, les stocks minimums a revoir.
+        // La saison, les alertes C49/C50. Sa vue des stocks minimums a revoir est
+        // retiree par 2026-10-27l : le temoin ne retient que la saison.
         "2026-10-09k_saisonnalite.sql",
-        "SELECT to_regclass('public.saison_mois') IS NOT NULL
-            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_stocks_minimums_a_revoir')",
+        "SELECT to_regclass('public.saison_mois') IS NOT NULL",
     ),
     (
         // Le taux engage d'un bon, justifie : le service ecrit ces colonnes.
@@ -465,8 +816,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     ),
     (
         // Plan d'achat : C28 au libelle du reglage, brouillons d'import hors en-cours.
+        // v_encours_fiable est retiree par 2026-10-27e (le moteur de couverture).
         "2026-10-09o_plan_detail.sql",
-        "SELECT position('BROUILLON' IN pg_get_viewdef('v_encours_fiable'::regclass)) > 0",
+        "SELECT to_regclass('public.v_stock_reference') IS NOT NULL
+             OR COALESCE((SELECT position('BROUILLON' IN pg_get_viewdef(c.oid)) > 0
+                            FROM pg_class c WHERE c.relname = 'v_encours_fiable' AND c.relkind = 'v'), false)",
     ),
     (
         // L'avoir d'import : origine du journal du dossier, retours soldes.
@@ -551,6 +905,27 @@ async fn verifier_schema(pool: &Db) -> anyhow::Result<()> {
         );
     }
 
+    // LE TEMPS EST TYPE (A1, 20/10/2026) : plus une colonne de date en texte. Une
+    // migration qui en recreerait une — copiee d'un ancien fichier — rouvrirait
+    // les dates mal formees et les comparaisons de chaines : refus de demarrer,
+    // en la nommant. Une colonne de date nait en `date` ou `timestamptz`.
+    let dates_texte: Option<String> = sqlx::query_scalar(
+        "SELECT string_agg(c.table_name || '.' || c.column_name, ', ' ORDER BY 1)
+           FROM information_schema.columns c
+           JOIN information_schema.tables t
+             ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+          WHERE c.table_schema = 'public' AND t.table_type = 'BASE TABLE'
+            AND c.data_type = 'text'
+            AND (c.column_name ~ '^date_' OR c.column_name ~ '_date$')",
+    )
+    .fetch_one(pool)
+    .await?;
+    if let Some(liste) = dates_texte {
+        anyhow::bail!(
+            "colonne(s) de date en texte : {liste}. Une date se declare en `date` (un jour) ou `timestamptz` (un instant) ; voir 2026-10-20a_horodatages_types.sql"
+        );
+    }
+
     Ok(())
 }
 
@@ -598,9 +973,36 @@ pub fn dans_secondes(secondes: i64) -> String {
         .to_string()
 }
 
-/// Date calendaire du jour, format base.
+/// LE JOUR EST CELUI DE CASABLANCA (decision du 20/10/2026) : l'usine, les
+/// postes et la base y vivent. Un fait saisi a 0 h 30 heure du Maroc est du
+/// jour, pas de la veille comme en UTC. Les INSTANTS, eux, restent en UTC
+/// (`maintenant`), le type `timestamptz` ne depend d'aucun fuseau.
+pub fn jour_casablanca() -> chrono::NaiveDate {
+    jour_casablanca_de(chrono::Utc::now())
+}
+
+fn jour_casablanca_de(instant: chrono::DateTime<chrono::Utc>) -> chrono::NaiveDate {
+    instant.with_timezone(&chrono_tz::Africa::Casablanca).date_naive()
+}
+
+#[cfg(test)]
+mod tests_jour {
+    use super::jour_casablanca_de;
+    use chrono::{NaiveDate, TimeZone, Utc};
+
+    #[test]
+    fn minuit_et_demi_au_maroc_est_deja_le_lendemain() {
+        // 23 h 30 UTC le 19/10 = 0 h 30 a Casablanca (UTC+1) le 20/10.
+        let i = Utc.with_ymd_and_hms(2026, 10, 19, 23, 30, 0).unwrap();
+        assert_eq!(jour_casablanca_de(i), NaiveDate::from_ymd_opt(2026, 10, 20).unwrap());
+        let midi = Utc.with_ymd_and_hms(2026, 10, 19, 12, 0, 0).unwrap();
+        assert_eq!(jour_casablanca_de(midi), NaiveDate::from_ymd_opt(2026, 10, 19).unwrap());
+    }
+}
+
+/// Date calendaire du jour (Casablanca), format base.
 pub fn aujourdhui() -> String {
-    chrono::Utc::now().format("%Y-%m-%d").to_string()
+    jour_casablanca().format("%Y-%m-%d").to_string()
 }
 
 /// Arrondi a 4 decimales : quantites en kg et CMUP (ADR-001 D-10).

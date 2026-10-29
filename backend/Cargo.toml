@@ -24,7 +24,7 @@ path = "src/bin/import.rs"
 axum = { version = "0.8", features = ["macros", "multipart"] }
 tokio = { version = "1", features = ["full"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace", "fs", "timeout", "set-header"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs", "timeout", "set-header", "request-id"] }
 
 # sqlx en mode requetes dynamiques (pas de macros query!) : la couche SQL est
 # verifiee par PREPARE sur une copie de la base, et cela evite d'exiger une base
@@ -58,6 +58,9 @@ rand = "0.8"
 
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+# Le jour de Casablanca (20/10/2026) : l'heure du Maroc change au Ramadan, un
+# decalage fixe serait faux une partie de l'annee.
+chrono-tz = "0.10"
 
 # Lecture du classeur GESTION Fil.xlsx (import de reprise)
 calamine = "0.26"

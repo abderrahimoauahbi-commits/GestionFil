@@ -57,6 +57,7 @@ import {
   Etiq,
 } from '../composants/ui/base'
 import { Aide, Infobulle } from '../composants/ui/surcouches'
+import { IndiceChamp } from '../composants/ui/Indice'
 import { cn, fmt } from '../lib/utils'
 import { Audit } from './Audit'
 import { ReglageApparence } from '../composants/ReglageApparence'
@@ -77,6 +78,8 @@ interface Parametre extends Record<string, unknown> {
   modifiable_par: string | null
   verrouille: number
   date_derniere_modif: string
+  /** La version lue (verrou optimiste, groupe 3, 20/10/2026). */
+  version: number
 }
 
 interface Devise extends Record<string, unknown> {
@@ -385,6 +388,15 @@ export function Configuration() {
     return m
   }, [parametres])
 
+  // LA VERSION EST CELLE DU DEBUT DE LA SAISIE (groupe 3, 20/10/2026) : figee a
+  // la premiere frappe, elle ne suit pas une relecture de la liste. Si quelqu'un
+  // regle le meme parametre entre-temps, l'enregistrement est refuse en le nommant.
+  const [versions, setVersions] = useState<Record<string, number>>({})
+  const saisir = (code: string, v: string) => {
+    setBrouillon((b) => ({ ...b, [code]: v }))
+    setVersions((x) => (code in x ? x : { ...x, [code]: parCode.get(code)?.version ?? 1 }))
+  }
+
   const modifies = Object.entries(brouillon).filter(
     ([code, v]) => parCode.get(code)?.valeur_courante !== v,
   )
@@ -395,6 +407,7 @@ export function Configuration() {
         await api.patch(`/api/parametres/${code}`, {
           valeur_courante: valeur,
           motif: 'Modification depuis l ecran de configuration',
+          version: versions[code] ?? parCode.get(code)?.version,
         })
       }
       return modifies.length
@@ -407,6 +420,7 @@ export function Configuration() {
         duration: 8000,
       })
       setBrouillon({})
+      setVersions({})
       void qc.invalidateQueries({ queryKey: ['parametres'] })
     },
     onError: (e) =>
@@ -485,7 +499,7 @@ export function Configuration() {
                     valeur={brouillon[p.code_parametre] ?? p.valeur_courante}
                     modifiable={droits.peutEcrire && p.verrouille === 0}
                     surChangement={(v) =>
-                      setBrouillon((b) => ({ ...b, [p.code_parametre]: v }))
+                      saisir(p.code_parametre, v)
                     }
                   />
                 ))}
@@ -502,7 +516,7 @@ export function Configuration() {
                mouvement. Ils restent entiers sur `/referentiels`, ou le
                rattachement d'une reference a ses equivalents se fait. */
             <Referentiels
-              cles={['magasins', 'types-mouvement', 'motifs-mouvement', 'motifs-ligne', 'types-frais']}
+              cles={['magasins', 'types-mouvement', 'motifs-mouvement', 'motifs-ligne', 'types-frais', 'positions-tarifaires']}
             />
           ) : section === 'comptes' ? (
             /* Les ecrans complets, montes tels quels. Ils gardent leur propre
@@ -546,7 +560,7 @@ export function Configuration() {
                           valeur={brouillon[p.code_parametre] ?? p.valeur_courante}
                           modifiable={droits.peutEcrire && p.verrouille === 0}
                           surChangement={(v) =>
-                            setBrouillon((br) => ({ ...br, [p.code_parametre]: v }))
+                            saisir(p.code_parametre, v)
                           }
                         />
                       ))}
@@ -572,7 +586,7 @@ export function Configuration() {
                         valeur={brouillon[p.code_parametre] ?? p.valeur_courante}
                         modifiable={droits.peutEcrire && p.verrouille === 0}
                         surChangement={(v) =>
-                          setBrouillon((br) => ({ ...br, [p.code_parametre]: v }))
+                          saisir(p.code_parametre, v)
                         }
                       />
                     ))}
@@ -592,7 +606,7 @@ export function Configuration() {
             <span className="text-alerte"> — rien n est encore enregistré.</span>
           </span>
           <div className="flex items-center gap-2">
-            <Bouton variante="contour" onClick={() => setBrouillon({})}>
+            <Bouton variante="contour" onClick={() => { setBrouillon({}); setVersions({}) }}>
               <RotateCcw />
               Annuler
             </Bouton>
@@ -638,7 +652,9 @@ function LigneReglage({
     >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[13px] font-medium">{p.libelle}</span>
+          <span className="text-[13px] font-medium" data-indice-gere="">{p.libelle}</span>
+          {/* L'indice du réglage, tiré du catalogue d'aide (27/10/2026). */}
+          <IndiceChamp intitule={p.libelle} />
           <Infobulle contenu={`Code technique : ${p.code_parametre}`}>
             <span className="font-mono text-[10px] text-attenue-texte">{p.code_parametre}</span>
           </Infobulle>
@@ -926,9 +942,10 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
         <CarteEntete className="flex-col items-start gap-1">
           <CarteTitre>Sauvegarder maintenant</CarteTitre>
           <p className="text-[11px] leading-relaxed text-attenue-texte">
-            Ecrit une copie complete et coherente de la base, sans interrompre le travail en
-            cours. A faire avant toute operation risquee : import, changement de parametre
-            structurant, reprise de données.
+            Écrit une copie complète et cohérente de la base PostgreSQL (<span className="font-mono">pg_dump</span>,
+            format personnalisé compressé), sans interrompre le travail en cours, et archive les pièces
+            jointes à côté. À faire avant toute opération risquée : import, changement de paramètre
+            structurant, reprise de données. Une sauvegarde manuelle n’efface jamais les précédentes.
           </p>
         </CarteEntete>
         <CarteCorps className="flex flex-wrap items-center gap-3">
@@ -951,18 +968,22 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
         </CarteEntete>
         <CarteCorps className="space-y-2 text-[12px] leading-relaxed text-attenue-texte">
           <p>
-            Une copie est ecrite <span className="text-texte">a chaque arret du serveur</span>.
-            C est le moment retenu plutot qu une heure fixe : le serveur de l usine n est pas
-            allume la nuit, une tache programmee a deux heures ne se declencherait jamais.
+            Une copie est écrite <span className="text-texte">à chaque arrêt du serveur</span>,
+            puis seules les <span className="text-texte">dix plus récentes</span> sont gardées : les
+            plus anciennes partent avec leur archive de pièces jointes. Un échec de sauvegarde
+            n’empêche jamais le serveur de s’arrêter — il est journalisé.
           </p>
           <p>
-            Les <span className="text-texte">dix dernieres</span> sont conservees ; les plus
-            anciennes sont effacees automatiquement. Un echec de sauvegarde n empeche jamais le
-            serveur de s’arreter — il est journalisé.
+            Sur le serveur de production, <span className="font-mono text-texte">gestionfil-sauvegarde.timer</span>
+            {' '}lance aussi <span className="font-mono text-texte">gestionfil-admin sauvegarder</span> chaque
+            jour à 02 h 30 (au démarrage suivant si la machine était éteinte). Chaque dimanche à
+            03 h 30, <span className="font-mono text-texte">gestionfil-verif-sauvegarde.timer</span> restaure
+            la plus récente dans une base temporaire, la contrôle, puis l’efface : la base vivante
+            n’est pas touchée.
           </p>
           <p className="text-danger">
-            Ces copies vivent sur le meme disque que la base. Elles protegent d une fausse
-            manoeuvre, pas d une panne de disque ni d un vol : recopiez regulierement le dossier
+            Ces copies vivent sur le même disque que la base. Elles protègent d’une fausse
+            manœuvre, pas d’une panne de disque ni d’un vol : recopiez régulièrement le dossier
             vers un support externe.
           </p>
         </CarteCorps>
@@ -979,7 +1000,7 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
             <div className="p-3"><Chargement texte="Lecture du dossier…" /></div>
           ) : !liste.length ? (
             <p className="p-3 text-[12px] text-attenue-texte">
-              Aucune sauvegarde. La premiere sera ecrite au prochain arret du serveur, ou
+              Aucune sauvegarde. La première sera écrite au prochain arrêt du serveur, ou
               maintenant avec le bouton ci-dessus.
             </p>
           ) : (
@@ -1011,39 +1032,48 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
               </tbody>
             </table>
           )}
-          <p className="border-t border-bordure px-3 py-2 font-mono text-[11px] text-attenue-texte">
-            db/sauvegardes/
+          <p className="border-t border-bordure px-3 py-2 text-[11px] leading-relaxed text-attenue-texte">
+            Fichiers <span className="font-mono">gestionfil-AAAAMMJJhhmmss.dump</span> (et{' '}
+            <span className="font-mono">&lt;dump&gt;.pieces.tar</span> pour les pièces jointes), dans le
+            dossier <span className="font-mono">GESTIONFIL_SAUVEGARDES</span>, à défaut{' '}
+            <span className="font-mono">sauvegardes/</span> dans le dossier de travail du serveur — en
+            production <span className="font-mono">/opt/gestionfil/sauvegardes</span> (droits 0700).
           </p>
         </CarteCorps>
       </Carte>
 
       {/* --- Restauration -------------------------------------------------
-          Elle ne se fait PAS depuis cet ecran, et ce n'est pas un oubli : le
-          serveur tient le fichier de base ouvert, il ne peut pas le remplacer
-          sous lui-meme. La commande s'execute sur la machine, serveur arrete,
-          par quelqu'un qui a deja acces aux fichiers — la meme exigence que
-          pour la reprise du mot de passe administrateur. */}
+          Elle ne se fait PAS depuis cet ecran, et ce n'est pas un oubli : la
+          base est renommee puis recreee (ALTER DATABASE ... RENAME), ce que
+          PostgreSQL refuse tant que le serveur y tient des connexions. La
+          commande s'execute sur la machine, serveur arrete, par quelqu'un qui
+          a deja acces aux fichiers (backend/src/bin/admin.rs, restaurer). */}
       <Carte>
         <CarteEntete className="flex-col items-start gap-1">
           <CarteTitre>Restaurer une sauvegarde</CarteTitre>
         </CarteEntete>
         <CarteCorps className="space-y-2 text-[12px] leading-relaxed text-attenue-texte">
           <p>
-            La restauration ne se declenche pas depuis l application : le serveur tient le fichier
-            ouvert et ne peut pas le remplacer sous lui-meme. Elle se fait sur la machine, serveur
-            arrete.
+            La restauration ne se déclenche pas depuis l’application : la base actuelle est
+            renommée puis recréée, ce que PostgreSQL refuse tant que le serveur y est connecté.
+            Elle se fait sur la machine, serveur arrêté. Pour prouver qu’une sauvegarde se
+            restaure sans rien toucher, <span className="font-mono text-texte">verifier-sauvegarde</span>
+            {' '}la restaure à côté, la contrôle et l’efface.
           </p>
           <pre className="overflow-x-auto rounded-[3px] bg-attenue p-2 font-mono text-[11px] text-texte">
-{`cd backend
-cargo run --bin gestionfil-admin -- lister-sauvegardes
-cargo run --bin gestionfil-admin -- restaurer gestionfil-AAAAMMJJhhmmss.db`}
+{`gestionfil-admin lister-sauvegardes
+gestionfil-admin verifier-sauvegarde [fichier]
+sudo systemctl stop gestionfil
+gestionfil-admin restaurer gestionfil-AAAAMMJJhhmmss.dump
+sudo systemctl start gestionfil`}
           </pre>
           <p>
-            La commande <span className="text-texte">verifie la sauvegarde avant de la poser</span>
-            {' '}et refuse si elle est corrompue. La base remplacee n est pas effacee : elle est
-            mise de cote sous le nom{' '}
-            <span className="font-mono text-texte">gestionfil-remplacee-*.db</span>, ce qui rend
-            l operation reversible.
+            La commande <span className="text-texte">vérifie que la sauvegarde est lisible</span>
+            {' '}(<span className="font-mono">pg_restore --list</span>) avant de la poser et refuse une
+            copie suspecte. La base remplacée n’est pas effacée : elle est renommée{' '}
+            <span className="font-mono text-texte">&lt;base&gt;_remplacee_&lt;horodatage&gt;</span>, ce qui
+            rend l’opération réversible. Si l’archive <span className="font-mono">.pieces.tar</span> est
+            à côté du dump, les pièces jointes suivent ; le dossier actuel est mis de côté.
           </p>
         </CarteCorps>
       </Carte>
@@ -1055,24 +1085,26 @@ cargo run --bin gestionfil-admin -- restaurer gestionfil-AAAAMMJJhhmmss.db`}
         </CarteEntete>
         <CarteCorps className="space-y-2 text-[12px] leading-relaxed text-attenue-texte">
           <p>
-            <span className="font-mono text-texte">diagnostic</span> verifie l integrite physique,
-            les cles etrangeres et les 29 controles metier — <span className="text-texte">sans
+            <span className="font-mono text-texte">diagnostic</span> vérifie qu’aucune contrainte
+            n’a été posée sans contrôle de l’existant, donne la taille et la structure de la base,
+            et passe tous les contrôles métier de cohérence — <span className="text-texte">sans
             rien modifier</span>.
           </p>
           <p>
-            <span className="font-mono text-texte">reparer</span> reindexe, recalcule les
-            statistiques et compacte le fichier. Il ne corrige{' '}
-            <span className="text-texte">aucune donnée métier</span> : une anomalie de coherence se
-            corrige dans l application, par quelqu un qui sait ce que la ligne devrait porter.
+            <span className="font-mono text-texte">reparer</span> réindexe la base, récupère l’espace
+            mort et recalcule les statistiques (<span className="font-mono">REINDEX</span>,{' '}
+            <span className="font-mono">VACUUM (ANALYZE)</span>). Il ne corrige{' '}
+            <span className="text-texte">aucune donnée métier</span> : une anomalie de cohérence se
+            corrige dans l’application, par quelqu’un qui sait ce que la ligne devrait porter.
           </p>
           <pre className="overflow-x-auto rounded-[3px] bg-attenue p-2 font-mono text-[11px] text-texte">
-{`cargo run --bin gestionfil-admin -- diagnostic
-cargo run --bin gestionfil-admin -- reparer`}
+{`gestionfil-admin diagnostic
+gestionfil-admin reparer`}
           </pre>
           <p>
-            Les anomalies de coherence se lisent aussi a l ecran, dans{' '}
-            <span className="text-texte">Général - Contrôles de cohérence</span>, avec le detail
-            des lignes concernees.
+            Les anomalies de cohérence se lisent aussi à l’écran, dans{' '}
+            <span className="text-texte">Analyses › Contrôles de cohérence</span>, avec le détail
+            des lignes concernées.
           </p>
         </CarteCorps>
       </Carte>

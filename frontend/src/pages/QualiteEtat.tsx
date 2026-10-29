@@ -18,7 +18,8 @@ import { useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { EtatImprimable, TableEtat } from '../composants/Etat'
 import { Alerte, Chargement } from '../composants/ui/base'
-import { fmt } from '../components/ui'
+import { fmt } from '../lib/utils'
+import { libelleStatut } from '../lib/statuts'
 
 interface Qualite {
   code_qualite: string
@@ -109,7 +110,7 @@ export function QualiteEtat() {
     <EtatImprimable
       titre="Fiche qualité"
       reference={q.code_qualite}
-      sousTitre={q.statut !== 'ACTIF' ? `Statut : ${q.statut}` : undefined}
+      sousTitre={q.statut !== 'ACTIF' ? `Statut : ${libelleStatut('qualite', q.statut)}` : undefined}
       enTete={
         <div className="grid grid-cols-2 gap-x-8 gap-y-1">
           <div className="space-y-1">

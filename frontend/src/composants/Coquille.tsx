@@ -31,6 +31,7 @@ import { BoutonRafraichir, useEcranCalcule } from './BoutonRafraichir'
 import { NavigationEntete } from './NavigationEntete'
 import { PanneauApparence } from './PanneauApparence'
 import { AideEcran } from './AideEcran'
+import { IndicesAutomatiques } from './ui/Indice'
 import { BandeauMiseAJour } from './BandeauMiseAJour'
 import { MiseAJourAuto } from './MiseAJourAuto'
 import { RobotConnexion } from './RobotConnexion'
@@ -157,7 +158,7 @@ export const MENU_PAR_ROLE: Record<string, string[]> = {
   // (ils arment la barre du bas), puis la consultation et le reste.
   MAGASIN: [
     '/receptions', '/mouvements', '/machines', '/inventaires',
-    '/etat-stock', '/transferts', '/retours-fournisseur',
+    '/etat-stock', '/transferts', '/fiche-hors-machine', '/retours-fournisseur',
     '/catalogue', '/chat',
   ],
 }
@@ -207,9 +208,9 @@ const ORDRE_MENU = [
   '/', '/tableau-de-bord', '/tableau-de-bord/situation', '/tableau-de-bord/analyse', '/tableau-de-bord/opportunites', '/tableau-de-bord/matiere',
   '/catalogue', '/categories', '/equivalences', '/fournisseurs', '/roles-bom',
   '/qualites', '/recettes', '/besoins',
-  '/plans', '/plan-achat', '/stock',
+  '/plans', '/ordres-fabrication', '/plan-achat', '/stock',
   '/bons-commande', '/receptions', '/factures-fournisseur', '/import', '/retours-fournisseur',
-  '/etat-stock', '/mouvements', '/transferts', '/machines', '/inventaires', '/lots', '/autorisations',
+  '/etat-stock', '/mouvements', '/transferts', '/machines', '/fiche-hors-machine', '/inventaires', '/lots', '/autorisations',
   '/statistiques', '/controles', '/historique-prix', '/matrice-prix',
   '/valorisation', '/landed-cost', '/classification', '/rapports',
   '/chat', '/assistant', '/guide-utilisateur',
@@ -255,7 +256,7 @@ export const NAVIGATION: EntreeNav[] = ([
     module: '',
     Icone: BookOpen,
     section: 'AIDE',
-    resume: 'Documentation complète pour utiliser l\'ERP',
+    resume: 'Le cycle complet, pas à pas, par rôle',
   },
 
 
@@ -273,6 +274,8 @@ export const NAVIGATION: EntreeNav[] = ([
   { vers: '/qualites', libelle: 'Qualités', module: 'QUALITES', Icone: Factory, section: 'PRODUCTION' },
   { vers: '/recettes', libelle: 'Recettes (BOM)', module: 'RECETTES', Icone: FileText, section: 'PRODUCTION' },
   { vers: '/plans', libelle: 'Plans de production', module: 'PLANS', Icone: LayoutGrid, section: 'PLANIFICATION' },
+  { vers: '/ordres-fabrication', libelle: 'Ordres de fabrication', module: 'PLANS', Icone: ClipboardCheck, section: 'PLANIFICATION',
+    resume: 'Qualité, métrage, cycle ; consommation réelle face au prévu' },
   { vers: '/besoins', libelle: 'Besoins (MRP)', module: 'MRP', Icone: Calculator, section: 'PRODUCTION', resume: 'Ce qu’il faut acheter, et quand', principale: true },
   { vers: '/plan-achat', libelle: "Plans d'achat", module: 'PLAN_ACHAT', Icone: ShoppingCart, section: 'PLANIFICATION' },
 
@@ -340,6 +343,9 @@ export const NAVIGATION: EntreeNav[] = ([
   // Le stock pose sur les metiers. Il vit dans les memes tables que le reste :
   // chaque etage est un magasin, et rien ici n'est un registre a part.
   { vers: '/machines', libelle: 'Machines', module: 'STOCK', Icone: Cog, section: 'STOCK', resume: 'Charger, décharger, constater les métiers', principale: true },
+  // La saisie simplifiee des matieres qui ne vont pas sur machine (colle, latex,
+  // jute, bande, plastique) : sorties et retours, sur un OF (22/10/2026).
+  { vers: '/fiche-hors-machine', libelle: 'Fiche hors machine', module: 'MOUVEMENTS', Icone: ClipboardCheck, section: 'STOCK', resume: 'Sortir ou rendre colle, latex, jute… sur un OF' },
   { vers: '/inventaires', libelle: 'Inventaires', module: 'INVENTAIRE', Icone: ClipboardCheck, section: 'STOCK' },
 
   /* --- 6. Finance & valorisation ----------------------------------------- */
@@ -431,6 +437,9 @@ export function Coquille() {
     enabled: peut('COCKPIT', 'LIRE'),
     refetchInterval: 5 * 60_000,
     staleTime: 60_000,
+    // Pas au retour sur la fenetre : la requete coute des secondes, et les
+    // cinq minutes suffisent a des alertes sur l'etat des donnees.
+    refetchOnWindowFocus: false,
   })
 
   const alertes = (qControles.data ?? []).filter((c) => c.anomalies > 0)
@@ -797,7 +806,11 @@ export function Coquille() {
       )}
 
       {/* --- Contenu ------------------------------------------------------ */}
-      <main className="min-h-0 flex-1 overflow-y-auto">
+      {/* LA MARGE DE DEFILEMENT (20/10/2026) : le bandeau de la page colle en haut,
+          la barre « Enregistrer » d'une fiche colle en bas. Sans elle, un champ
+          atteint au clavier (ou par le navigateur) s'arretait SOUS l'une ou
+          l'autre — present, mais cache et pas cliquable (constat e2e). */}
+      <main className="min-h-0 flex-1 overflow-y-auto scroll-pt-28 scroll-pb-20">
         <div
           // Pas de largeur maximale : une table de quinze colonnes se lit
           // mieux etalee que centree entre deux marges vides. La densite
@@ -826,6 +839,9 @@ export function Coquille() {
           </BarriereErreur>
           {/* La question de la garde de saisie, une pour toute l'application. */}
           <ConfirmationQuitter />
+          {/* LES INDICES DES LIBELLÉS DESSINÉS À LA MAIN (27/10/2026) : un seul
+              filet pour toute l'application, voir `ui/Indice.tsx`. */}
+          <IndicesAutomatiques />
         </div>
       </main>
 

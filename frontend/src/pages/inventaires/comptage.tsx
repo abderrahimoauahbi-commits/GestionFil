@@ -12,23 +12,9 @@ import { Aide } from '../../composants/ui/surcouches'
 import { cn, fmt } from '../../lib/utils'
 import { SANS_LOT, couleurEcart, libelleLot, useTolerancesLot } from '../../lib/lots'
 import { lireNombre } from '../../lib/nombres'
+import { type Conditionnement, conditionnementDuLot } from '../../lib/conditionnement'
 
 export const MODULE = 'INVENTAIRE'
-
-/** Brouillon (on compte), valide (comptage fige), cloture (ecarts au stock). */
-export const LIBELLE_STATUT: Record<string, string> = {
-  BROUILLON: 'Brouillon',
-  VALIDE: 'Validé',
-  CLOTURE: 'Clôturé',
-  ANNULE: 'Annulé',
-}
-
-export const TON: Record<string, 'neutre' | 'info' | 'succes' | 'danger'> = {
-  BROUILLON: 'neutre',
-  VALIDE: 'info',
-  CLOTURE: 'succes',
-  ANNULE: 'danger',
-}
 
 /** Une ligne telle que `GET /api/inventaires/:id/lignes` la renvoie. */
 export interface LigneInv extends Record<string, unknown> {
@@ -47,8 +33,12 @@ export interface LigneInv extends Record<string, unknown> {
   nb_bobines_comptees: number | null
   nb_palettes_comptees: number | null
   poids_unitaire_theorique_kg: number | null
+  /** Le conditionnement de la fiche article. */
   poids_bobine_kg: number | null
   bobines_par_palette: number | null
+  /** Le conditionnement du lot de la ligne (2026-10-24a) ; nul : la fiche article. */
+  poids_bobine_lot_kg?: number | null
+  bobines_par_palette_lot?: number | null
   categorie_libelle: string | null
 }
 
@@ -103,6 +93,21 @@ const positif = (v: unknown): number | null => {
   return n !== null && n > 0 ? n : null
 }
 
+/**
+ * LE CONDITIONNEMENT D'UNE LIGNE (2026-10-24a) : celui de son lot, sinon de la
+ * fiche article — jamais un facteur 1. Meme regle que le serveur au comptage
+ * (`fn_lot_poids_bobine`) ; le controle de colisage C43 et la derive d'un lot,
+ * eux, restent au poids de la fiche.
+ */
+function conditionnementLigne(l: LigneInv): Conditionnement {
+  return conditionnementDuLot(
+    { poids_bobine_kg: positif(l.poids_bobine_kg), bobines_par_palette: positif(l.bobines_par_palette) },
+    l.lot_fournisseur
+      ? { poids_bobine_kg: l.poids_bobine_lot_kg, bobines_par_palette: l.bobines_par_palette_lot }
+      : null,
+  )
+}
+
 const versChamp = (v: unknown) => {
   const n = nombre(v)
   return n === null ? '' : String(n)
@@ -137,17 +142,29 @@ interface Analyse {
   palettes: number | null
   ecartKg: number | null
   ecartPct: number | null
-  poidsCatalogue: number | null
+  /** Le poids d'une bobine qui convertit : du lot, sinon de la fiche article. */
+  poidsTheorique: number | null
+  /** D'ou vient ce poids. */
+  poidsSource: 'lot' | 'fiche' | null
   poidsReel: number | null
   poidsPct: number | null
   motifRequis: boolean
   erreurs: string[]
 }
 
-export function analyser(l: LigneInv, s: Saisie, tolMotif: number): Analyse {
+/**
+ * `enSaisie` : l'inventaire est en brouillon et l'on compte. Le poids d'une
+ * bobine est alors celui du lot AUJOURD'HUI, celui que le serveur figera sur la
+ * ligne a l'enregistrement ; hors saisie, celui que la ligne a fige.
+ */
+export function analyser(l: LigneInv, s: Saisie, tolMotif: number, enSaisie = false): Analyse {
   const erreurs: string[] = []
   const theoriqueKg = nombre(l.quantite_theorique_kg) ?? 0
-  const poidsCatalogue = positif(l.poids_unitaire_theorique_kg) ?? positif(l.poids_bobine_kg)
+  const vivant = positif(conditionnementLigne(l).poids_bobine_kg)
+  const poidsTheorique = (enSaisie ? vivant : null) ?? positif(l.poids_unitaire_theorique_kg) ?? vivant
+  const poidsLot = l.lot_fournisseur ? positif(l.poids_bobine_lot_kg) : null
+  const poidsSource: Analyse['poidsSource'] =
+    poidsTheorique === null ? null : poidsLot !== null && poidsLot === poidsTheorique ? 'lot' : 'fiche'
 
   const kgLu = lire(s.kg)
   const bobLu = lire(s.bobines)
@@ -171,10 +188,11 @@ export function analyser(l: LigneInv, s: Saisie, tolMotif: number): Analyse {
   }
 
   /* ON COMPTE DES BOBINES, PAS DES KILOS. Quand l'allee ne rapporte que des
-     bobines, le bureau convertit au poids catalogue — c'est ce que la feuille
+     bobines, le bureau convertit au poids d'une bobine DU LOT, sinon de la
+     fiche article (2026-10-24a) — c'est ce que la feuille
      de comptage prevoit. Le poids est alors une deduction, et l'ecran le dit. */
-  const kgDeduit = kgSaisi === null && bobines !== null && poidsCatalogue !== null
-  const kg = kgSaisi ?? (kgDeduit ? arrondi(bobines! * poidsCatalogue!, 2) : null)
+  const kgDeduit = kgSaisi === null && bobines !== null && poidsTheorique !== null
+  const kg = kgSaisi ?? (kgDeduit ? arrondi(bobines! * poidsTheorique!, 2) : null)
 
   const ecartKg = kg === null ? null : kg - theoriqueKg
   // Meme formule que la colonne generee `ligne_inventaire.ecart_pct`.
@@ -187,8 +205,8 @@ export function analyser(l: LigneInv, s: Saisie, tolMotif: number): Analyse {
 
   const poidsReel = kgSaisi !== null && bobines !== null && bobines > 0 ? kgSaisi / bobines : null
   const poidsPct =
-    poidsReel !== null && poidsCatalogue !== null
-      ? ((poidsReel - poidsCatalogue) / poidsCatalogue) * 100
+    poidsReel !== null && poidsTheorique !== null
+      ? ((poidsReel - poidsTheorique) / poidsTheorique) * 100
       : null
 
   if (kg === null && (bobines !== null || palettes !== null || s.motif.trim()))
@@ -203,7 +221,8 @@ export function analyser(l: LigneInv, s: Saisie, tolMotif: number): Analyse {
     palettes,
     ecartKg,
     ecartPct,
-    poidsCatalogue,
+    poidsTheorique,
+    poidsSource,
     poidsReel,
     poidsPct,
     motifRequis,
@@ -252,16 +271,16 @@ export function TableComptage({
   const [filtre, setFiltre] = useState<Filtre>('TOUTES')
 
   /**
-   * BOBINES ET PALETTES SE REPONDENT, par `bobines_par_palette` de la
-   * reference. Le champ qu'on vient de taper commande et ne revient jamais
+   * BOBINES ET PALETTES SE REPONDENT, par les bobines par palette du lot,
+   * sinon de la reference (2026-10-24a). Le champ qu'on vient de taper commande et ne revient jamais
    * corrige ; l'autre suit. Les kilos, eux, ne suivent pas : c'est la pesee,
-   * et c'est justement leur ecart au poids catalogue qu'on veut voir.
+   * et c'est justement leur ecart au poids d'une bobine qu'on veut voir.
    */
   const maj = (l: LigneInv, champ: ChampSaisie, valeur: string) =>
     setBrouillon((b) => {
       const courant = b[l.id_ligne_inv] ?? saisieServeur(l)
       const suivant: Saisie = { ...courant, [champ]: valeur }
-      const parPalette = positif(l.bobines_par_palette)
+      const parPalette = positif(conditionnementLigne(l).bobines_par_palette)
       const n = lire(valeur)
       if (parPalette !== null && (champ === 'bobines' || champ === 'palettes')) {
         const autre = champ === 'bobines' ? 'palettes' : 'bobines'
@@ -392,7 +411,7 @@ export function TableComptage({
                 const categorie = l.categorie_libelle ?? 'Sans catégorie'
                 const precedente = rang > 0 ? (visibles[rang - 1].ligne.categorie_libelle ?? 'Sans catégorie') : null
                 const bobTheo = nombre(l.nb_bobines_theorique)
-                const parPalette = positif(l.bobines_par_palette)
+                const parPalette = positif(conditionnementLigne(l).bobines_par_palette)
                 const couleurPoids = couleurEcart(a.poidsPct, tolLot)
                 const motifManquant = a.motifRequis && !s.motif.trim()
                 return [
@@ -463,7 +482,7 @@ export function TableComptage({
                         </div>
                       )}
                       {a.kgDeduit && a.kg !== null && (
-                        <div className="mt-0.5 text-right text-[11px] text-attenue-texte" title="Bobines × poids catalogue">
+                        <div className="mt-0.5 text-right text-[11px] text-attenue-texte" title={a.poidsSource === 'lot' ? 'Bobines × poids d’une bobine du lot' : 'Bobines × poids d’une bobine de la fiche article'}>
                           déduit des bobines
                         </div>
                       )}
@@ -519,19 +538,19 @@ export function TableComptage({
                         <span
                           className="text-attenue-texte"
                           title={
-                            a.poidsCatalogue !== null
-                              ? `Catalogue : ${fmt.nombre(a.poidsCatalogue, 3)} kg`
-                              : 'Pas de poids de bobine au catalogue'
+                            a.poidsTheorique !== null
+                              ? `${a.poidsSource === 'lot' ? 'Lot' : 'Fiche article'} : ${fmt.nombre(a.poidsTheorique, 3)} kg`
+                              : 'Pas de poids de bobine (ni lot, ni fiche article)'
                           }
                         >
-                          {a.poidsCatalogue !== null ? `cat. ${fmt.nombre(a.poidsCatalogue, 3)}` : '—'}
+                          {a.poidsTheorique !== null ? `${a.poidsSource === 'lot' ? 'lot' : 'fiche'} ${fmt.nombre(a.poidsTheorique, 3)}` : '—'}
                         </span>
                       ) : (
                         <div
                           title={
-                            a.poidsCatalogue !== null
-                              ? `Catalogue : ${fmt.nombre(a.poidsCatalogue, 3)} kg`
-                              : 'Pas de poids de bobine au catalogue'
+                            a.poidsTheorique !== null
+                              ? `${a.poidsSource === 'lot' ? 'Lot' : 'Fiche article'} : ${fmt.nombre(a.poidsTheorique, 3)} kg`
+                              : 'Pas de poids de bobine (ni lot, ni fiche article)'
                           }
                         >
                           <div className="font-medium">{fmt.nombre(a.poidsReel, 3)} kg</div>
@@ -547,7 +566,7 @@ export function TableComptage({
                               )}
                             >
                               {a.poidsPct > 0 ? '+' : ''}
-                              {fmt.nombre(a.poidsPct, 2)} % / cat. {fmt.nombre(a.poidsCatalogue, 3)}
+                              {fmt.nombre(a.poidsPct, 2)} % / {a.poidsSource === 'lot' ? 'lot' : 'fiche'} {fmt.nombre(a.poidsTheorique, 3)}
                             </div>
                           )}
                         </div>

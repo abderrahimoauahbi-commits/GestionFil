@@ -111,6 +111,22 @@ impl FacteursReference {
         }
     }
 
+    /// LE CONDITIONNEMENT DU LOT PRIME SUR LA FICHE ARTICLE (23/10/2026) : le
+    /// poids d'une bobine et les bobines par palette varient d'un lot a l'autre.
+    /// Un facteur que le lot ne porte pas reste celui de la fiche ; aucun des
+    /// deux : la conversion est refusee, jamais un repli sur 1. Meme regle en
+    /// base (`fn_lot_poids_bobine`, `fn_lot_bobines_palette`) et a l'ecran
+    /// (`conditionnementDuLot`).
+    pub fn avec_lot(mut self, poids_lot: Option<f64>, bobines_palette_lot: Option<i64>) -> Self {
+        if let Some(p) = poids_lot.filter(|p| *p > 0.0) {
+            self.poids_bobine_kg = Some(p);
+        }
+        if let Some(n) = bobines_palette_lot.filter(|n| *n > 0) {
+            self.bobines_par_palette = Some(n);
+        }
+        self
+    }
+
     /// Convertit une quantite saisie vers le kg.
     pub fn vers_kg(&self, quantite: f64, unite: Unite) -> AppResult<f64> {
         if quantite <= 0.0 {
@@ -141,6 +157,27 @@ pub async fn charger(db: &Db, code_reference: &str) -> AppResult<FacteursReferen
     .fetch_optional(db)
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("reference {code_reference}")))
+}
+
+/// Les facteurs d'une reference POUR UN LOT : ceux du lot, sinon ceux de la
+/// fiche article (23/10/2026). Sans lot, la fiche article seule.
+pub async fn charger_pour_lot(db: &Db, code_reference: &str, lot: Option<&str>) -> AppResult<FacteursReference> {
+    let facteurs = charger(db, code_reference).await?;
+    let Some(lot) = lot.map(str::trim).filter(|l| !l.is_empty()) else {
+        return Ok(facteurs);
+    };
+    let du_lot: Option<(Option<f64>, Option<i64>)> = sqlx::query_as(
+        "SELECT poids_bobine_kg::float8, bobines_par_palette FROM lot
+          WHERE code_reference = $1 AND lot_fournisseur = $2",
+    )
+    .bind(code_reference)
+    .bind(lot)
+    .fetch_optional(db)
+    .await?;
+    Ok(match du_lot {
+        Some((p, n)) => facteurs.avec_lot(p, n),
+        None => facteurs,
+    })
 }
 
 #[cfg(test)]
@@ -202,6 +239,26 @@ mod tests {
         let err = sans.facteur(Unite::Lot).unwrap_err();
         assert!(err.to_string().contains("bobines_par_lot"));
         assert_eq!(sans.facteur(Unite::Palette).unwrap(), 768.0);
+    }
+
+    #[test]
+    fn le_lot_prime_sur_la_fiche_article() {
+        // Le lot pese 3,0729 kg la bobine (fiche : 3,2) et tient 200 bobines par
+        // palette (fiche : 240) : 2 palettes = 2 x 200 x 3,0729 = 1 229,16 kg.
+        let r = ref_pp().avec_lot(Some(3.0729), Some(200));
+        assert_eq!(r.facteur(Unite::Bobine).unwrap(), 3.0729);
+        assert_eq!(r.vers_kg(2.0, Unite::Palette).unwrap(), 1229.16);
+        // Un facteur que le lot ne porte pas reste celui de la fiche.
+        let r = ref_pp().avec_lot(None, Some(200));
+        assert_eq!(r.facteur(Unite::Bobine).unwrap(), 3.2);
+        assert_eq!(r.facteur(Unite::Palette).unwrap(), 640.0);
+        // Ni le lot ni la fiche : refus, jamais un facteur 1.
+        let mut sans = ref_pp();
+        sans.poids_bobine_kg = None;
+        let sans = sans.avec_lot(None, None);
+        assert!(sans.facteur(Unite::Bobine).is_err());
+        // Un zero du lot n'est pas un facteur.
+        assert_eq!(ref_pp().avec_lot(Some(0.0), Some(0)).facteur(Unite::Palette).unwrap(), 768.0);
     }
 
     #[test]

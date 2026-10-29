@@ -205,8 +205,8 @@ pub const COMPETENCES: &[Competence] = &[
     Competence {
         nom: "references_en_tension",
         description:
-            "Les references en rupture, critiques ou sous surveillance, de la plus urgente a \
-             la moins urgente. Repond a « qu'est-ce qui manque », « ou est-ce que ca coince ».",
+            "Les references en rupture inevitable, sous la securite ou sous la couverture cible, \
+             de la plus urgente a la moins urgente. Repond a « qu'est-ce qui manque », « ou est-ce que ca coince ».",
         module: module::STOCK,
         parametres: || {
             json!({
@@ -468,14 +468,16 @@ pub async fn executer(
                 Resolution::Une(c) => c,
                 Resolution::Ambigue(v) => return Ok(v),
             };
+            // Le stock se lit en SQL ; l'etat de couverture (statut, jours
+            // couverts, 1re rupture, plan non couvert) vient du moteur (27/10/2026).
             let rows = sqlx::query(
-                "SELECT code_reference, designation, statut,
+                "SELECT code_reference, designation,
                         ROUND(stock_physique_net_kg, 2)::float8 AS stock_kg,
-                        ROUND(stock_projete_kg, 2)::float8       AS stock_projete_kg,
-                        ROUND(jours_couverture)::float8          AS jours_couverture,
-                        ROUND(conso_mensuelle_kg, 2)::float8     AS conso_mensuelle_kg,
+                        -- Le REEL des 12 mois pleins (grand livre, 27/10/2026) ; le plan
+                        -- / mois vient du moteur (enrichir).
+                        ROUND(reel_mois_kg, 2)::float8           AS reel_mois_kg,
                         delai_livraison_jours, fournisseur_nom
-                   FROM v_stock_projete
+                   FROM v_stock_reference
                   WHERE code_reference = $1",
             )
             .bind(&code)
@@ -484,26 +486,35 @@ pub async fn executer(
             if rows.is_empty() {
                 json!({ "trouve": false, "code_reference": code })
             } else {
-                json!({ "trouve": true, "stock": lignes_en_json(&rows) })
+                let mut stock = lignes_en_json(&rows);
+                crate::routes::couverture::etats(&state.db).await?.enrichir(&mut stock, "statut");
+                json!({ "trouve": true, "stock": stock })
             }
         }
 
         "references_en_tension" => {
-            let rows = sqlx::query(
-                "SELECT code_reference, designation, statut,
-                        ROUND(stock_physique_net_kg, 2)::float8 AS stock_kg,
-                        ROUND(jours_couverture)::float8         AS jours_couverture,
-                        delai_livraison_jours, fournisseur_nom
-                   FROM v_stock_projete
-                  WHERE statut <> 'OK'
-                  ORDER BY CASE statut WHEN 'RUPTURE' THEN 0 WHEN 'CRITIQUE' THEN 1 ELSE 2 END,
-                           jours_couverture NULLS FIRST
-                  LIMIT $1",
-            )
-            .bind(borne(args, "limite", 15, 60))
-            .fetch_all(&state.db)
-            .await?;
-            json!({ "en_tension": lignes_en_json(&rows) })
+            // LA TENSION DU MOTEUR DE COUVERTURE (v2, 27/10/2026) : rupture
+            // inevitable, sous la securite, sous la cible, la rupture la plus
+            // proche d'abord ; les signaux a part.
+            let etats = crate::routes::couverture::etats(&state.db).await?;
+            let limite = borne(args, "limite", 15, 60).max(0) as usize;
+            let lignes: Vec<Value> = etats
+                .en_tension()
+                .iter()
+                .take(limite)
+                .map(|e| {
+                    json!({
+                        "code_reference": e.code_reference, "designation": e.designation,
+                        "statut": e.statut, "stock_kg": e.disponible_kg,
+                        "jours_couverture": e.jours_couverture, "premiere_rupture": e.premiere_rupture,
+                        "couverture_cible_j": e.couverture_cible_j, "ecart_cible_j": e.ecart_cible_j,
+                        "signaux": e.signaux,
+                        "plan_non_couvert_kg": e.plan_non_couvert_kg, "delai_livraison_jours": e.delai_j,
+                        "fournisseur_nom": e.fournisseur_nom,
+                    })
+                })
+                .collect();
+            json!({ "en_tension": lignes })
         }
 
         "equivalents" => {
@@ -555,18 +566,18 @@ pub async fn executer(
         "commandes_en_cours" => {
             let retard = args.get("en_retard").and_then(Value::as_bool).unwrap_or(false);
             let rows = sqlx::query(
-                "SELECT bc.numero_bc, bc.date_bc, bc.statut, f.nom AS fournisseur_nom,
+                "SELECT bc.numero_bc, bc.date_bc::text AS date_bc, bc.statut, f.nom AS fournisseur_nom,
                         bc.montant_total_mad::float8 AS montant_total_mad,
                         bc.date_livraison_prevue,
                         CASE WHEN bc.date_livraison_prevue IS NOT NULL
-                                  AND bc.date_livraison_prevue < to_char(current_date,'YYYY-MM-DD')
+                                  AND bc.date_livraison_prevue < current_date
                              THEN CAST(current_date - (bc.date_livraison_prevue)::date AS bigint)
                         END AS retard_jours
                    FROM bon_commande bc
                    LEFT JOIN fournisseur f ON f.code_fournisseur = bc.code_fournisseur
                   WHERE bc.statut NOT IN ('SOLDE', 'ANNULE')
                     AND ($1 = false OR (bc.date_livraison_prevue IS NOT NULL
-                         AND bc.date_livraison_prevue < to_char(current_date,'YYYY-MM-DD')))
+                         AND bc.date_livraison_prevue < current_date))
                   ORDER BY bc.date_livraison_prevue NULLS LAST
                   LIMIT 25",
             )
@@ -586,7 +597,7 @@ pub async fn executer(
                    FROM plan_achat p
                    LEFT JOIN reference   r ON r.code_reference   = p.code_reference
                    LEFT JOIN fournisseur f ON f.code_fournisseur = p.code_fournisseur
-                  WHERE p.statut NOT IN ('COMMANDE', 'ABANDONNE')
+                  WHERE p.statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE')
                   ORDER BY p.quantite_suggeree_kg DESC
                   LIMIT $1",
             )
@@ -599,7 +610,7 @@ pub async fn executer(
         "mouvements_recents" => {
             let code = args.get("code_reference").and_then(Value::as_str).map(str::trim);
             let rows = sqlx::query(
-                "SELECT m.numero_mouvement, m.date_mouvement, m.code_type_mvt,
+                "SELECT m.numero_mouvement, m.date_mouvement::text AS date_mouvement, m.code_type_mvt,
                         tm.libelle AS type_libelle, tm.signe, mg.nom AS magasin_nom,
                         m.responsable, u.login AS saisi_par,
                         ROUND(COALESCE(SUM(l.quantite_kg), 0), 2)::float8 AS quantite_totale_kg,
@@ -883,7 +894,7 @@ pub async fn executer(
                    JOIN plan_achat  p ON p.code_fournisseur = f.code_fournisseur
                    LEFT JOIN reference r ON r.code_reference = p.code_reference
                   WHERE (f.nom ILIKE $1 OR f.code_fournisseur ILIKE $1)
-                    AND p.statut NOT IN ('COMMANDE', 'ABANDONNE')
+                    AND p.statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE')
                   ORDER BY p.quantite_suggeree_kg DESC
                   LIMIT 40",
             )

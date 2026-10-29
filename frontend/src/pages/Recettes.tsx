@@ -20,8 +20,9 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { EnTetePage } from '../composants/Coquille'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
-import { Badge, Bouton, Carte, CarteCorps } from '../composants/ui/base'
+import { Bouton, Carte, CarteCorps } from '../composants/ui/base'
 import { fmt } from '../lib/utils'
+import { StatutBadge } from '../composants/StatutBadge'
 
 const MODULE = 'RECETTES'
 
@@ -42,12 +43,6 @@ interface Ligne extends Record<string, unknown> {
   kg_m2: number | null
   code_fournisseur: string
   fournisseur: string
-}
-
-const TON_STATUT: Record<string, 'neutre' | 'succes' | 'contour'> = {
-  BROUILLON: 'neutre',
-  ACTIF: 'succes',
-  CLOTURE: 'contour',
 }
 
 export function Recettes() {
@@ -93,7 +88,7 @@ export function Recettes() {
       largeur: '105px',
       filtre: 'liste',
       rendu: (l) => (
-        <Badge ton={TON_STATUT[l.statut_qualite] ?? 'neutre'}>{l.statut_qualite}</Badge>
+        <StatutBadge entite="qualite" code={l.statut_qualite} />
       ),
     },
     {

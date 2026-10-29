@@ -27,6 +27,53 @@ use std::collections::HashMap;
 // est consideree comme recue, et un excedent au-dela demande une derogation.
 
 // ============================================================================
+// 0. Le verrou optimiste (groupe 3, decision du 20/10/2026)
+// ============================================================================
+//
+// Le dossier et ses factures portent une `version`. Ce qui modifie une facture
+// ou ses lignes prend la version de la FACTURE ; tout le reste (en-tete, frais,
+// engagements, paiements, pieces, cloture, avoir) celle du DOSSIER — comme les
+// lignes d'un bon passent par son en-tete. La prise est la PREMIERE ecriture de
+// la transaction (domain/concurrence.rs) : elle tient l'en-tete jusqu'au bout,
+// et fait avancer sa version (fn_trg_version_document, 2026-10-20c).
+//
+// LE DOSSIER CLOS. `fn_trg_import_dossier_garde` refuse toute ecriture d'un
+// dossier clos, la prise sous verrou comprise. Ce qui reste permis apres la
+// cloture (frais post-cloture, avoir, paiements, pieces) prend alors la ligne
+// par `SELECT … AND version = $2 FOR UPDATE` : meme test, meme verrou jusqu'a la
+// fin de la transaction, mais la version n'avance pas — l'en-tete d'un dossier
+// clos est fige, il n'y a rien a perimer.
+
+/// Prend le dossier a la version lue. `None` : appel interne, rien a verifier.
+pub async fn prendre_dossier(tx: &mut PgConnection, id_dossier: &str, version_lue: Option<i64>) -> AppResult<()> {
+    // Clos ou non, la meme ecriture conditionnelle : la garde du dossier clos
+    // laisse passer une ecriture qui ne change que la version (2026-10-20c).
+    crate::domain::concurrence::exiger_version(
+        tx, "import_dossiers", "id_dossier", id_dossier, version_lue, "Ce dossier",
+    )
+    .await
+}
+
+/// Prend la facture d'import a la version lue. Une facture d'un dossier clos ne
+/// se modifie plus : la base le refuse a la prise meme (`fn_trg_import_verrou`).
+pub async fn prendre_facture(tx: &mut PgConnection, id_facture: &str, version_lue: Option<i64>) -> AppResult<()> {
+    crate::domain::concurrence::exiger_version(
+        tx, "import_factures", "id_facture", id_facture, version_lue, "Cette facture",
+    )
+    .await
+}
+
+/// La version a jour du dossier, que l'ecran presentera a l'enregistrement suivant.
+pub async fn version_dossier(tx: &mut PgConnection, id_dossier: &str) -> AppResult<i64> {
+    crate::domain::concurrence::version_actuelle(tx, "import_dossiers", "id_dossier", id_dossier).await
+}
+
+/// La version a jour d'une facture d'import.
+pub async fn version_facture(tx: &mut PgConnection, id_facture: &str) -> AppResult<i64> {
+    crate::domain::concurrence::version_actuelle(tx, "import_factures", "id_facture", id_facture).await
+}
+
+// ============================================================================
 // 1. La repartition
 // ============================================================================
 
@@ -117,6 +164,24 @@ pub async fn recalculer_repartition_mode(tx: &mut PgConnection, id_dossier: &str
     .fetch_all(&mut *tx)
     .await?;
 
+    // LE TAUX DE DROIT DE CHAQUE LIGNE (19/10/2026), en dix-milliemes de point :
+    // 2,5 % vaut 25 000. Absent : la reference n'a pas de position tarifaire
+    // active, et la ligne ne peut pas recevoir sa part d'un frais reparti aux
+    // droits.
+    let taux_droit: std::collections::HashMap<String, i64> = sqlx::query_as::<_, (String, i64)>(
+        "SELECT l.id_ligne, (round(pt.taux_droit_pct, 4) * 10000)::bigint
+           FROM import_facture_lignes l
+           JOIN import_factures f      ON f.id_facture = l.id_facture
+           JOIN reference ref          ON ref.code_reference = l.code_reference
+           JOIN position_tarifaire pt  ON pt.code_sh = ref.code_sh AND pt.actif = 1
+          WHERE f.id_dossier = $1",
+    )
+    .bind(id_dossier)
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .collect();
+
     /// La base d'une ligne pour une methode donnee.
     ///
     /// PARTS_EGALES vaut 1 par ligne : chaque ligne pese autant, et les restes
@@ -157,7 +222,39 @@ pub async fn recalculer_repartition_mode(tx: &mut PgConnection, id_dossier: &str
     .fetch_all(&mut *tx)
     .await?;
 
-    for (id_frais, montant, methode) in &frais {
+    // LES FRAIS REPARTIS AUX DROITS PASSENT EN DERNIER : leur base est la valeur
+    // en douane, qui comprend la part du fret (et de tout frais « valeur en
+    // douane ») que les autres viennent de poser.
+    let (aux_droits, ordinaires): (Vec<_>, Vec<_>) =
+        frais.iter().partition(|(_, _, methode)| methode == "DROITS");
+    let mut valeur_douane: Option<std::collections::HashMap<String, i64>> = None;
+
+    for (id_frais, montant, methode) in ordinaires.into_iter().chain(aux_droits) {
+        if methode == "DROITS" && valeur_douane.is_none() {
+            // Meme definition que la vue v_import_droits : la part des frais
+            // « valeur en douane », hors ceux qui sont eux-memes repartis aux
+            // droits.
+            let frais_vd: std::collections::HashMap<String, i64> = sqlx::query_as::<_, (String, i64)>(
+                "SELECT r.id_article_dossier, (sum(r.montant_alloue_dhs) * 100)::bigint
+                   FROM lignes_frais_repartition r
+                   JOIN dossier_lignes_frais d ON d.id_ligne_frais = r.id_ligne_frais
+                   JOIN parametres_frais p     ON p.id_frais = d.id_frais
+                  WHERE d.id_dossier = $1 AND p.entre_valeur_douane = 1
+                    AND COALESCE(d.methode_repartition, p.methode_repartition) <> 'DROITS'
+                  GROUP BY r.id_article_dossier",
+            )
+            .bind(id_dossier)
+            .fetch_all(&mut *tx)
+            .await?
+            .into_iter()
+            .collect();
+            valeur_douane = Some(
+                lignes
+                    .iter()
+                    .map(|(id, valeur, ..)| (id.clone(), valeur + frais_vd.get(id).copied().unwrap_or(0)))
+                    .collect(),
+            );
+        }
         let cibles: Vec<String> = sqlx::query_scalar(
             "SELECT id_ligne FROM dossier_lignes_frais_cibles WHERE id_ligne_frais = $1",
         )
@@ -170,7 +267,26 @@ pub async fn recalculer_repartition_mode(tx: &mut PgConnection, id_dossier: &str
             .iter()
             .filter(|(id, ..)| cibles.is_empty() || cibles.contains(id))
             .collect();
-        let bases: Vec<i64> = perimetre.iter().map(|l| base(l, methode)).collect();
+        let bases: Vec<i64> = if methode == "DROITS" {
+            // Les droits attendus de chaque ligne : valeur en douane x taux. Une
+            // ligne sans position n'a pas de droit connu ; lui donner zero la
+            // dirait exoneree. Le frais reste alors non reparti, et la cloture
+            // nomme la cause.
+            let Some(vd) = valeur_douane.as_ref() else { continue };
+            let mut b = Vec::with_capacity(perimetre.len());
+            for (id, ..) in &perimetre {
+                match taux_droit.get(id) {
+                    Some(t) => b.push(vd.get(id).copied().unwrap_or(0) * t),
+                    None => break,
+                }
+            }
+            if b.len() < perimetre.len() {
+                continue;
+            }
+            b
+        } else {
+            perimetre.iter().map(|l| base(l, methode)).collect()
+        };
         let total: i64 = bases.iter().sum();
         if total <= 0 {
             // Rien pour le porter encore (aucune ligne saisie) : la cloture le
@@ -250,7 +366,20 @@ pub async fn synchroniser_recu_arrivages(tx: &mut PgConnection, id_dossier: &str
                                     JOIN reception r ON r.id_reception = lr.id_reception
                                    WHERE lr.id_ligne_bc = fl2.id_ligne_bc
                                      AND r.id_dossier_import = $1
-                                     AND r.statut IN ('VALIDE', 'CLOTURE')), 0) AS kg
+                                     AND r.statut IN ('VALIDE', 'CLOTURE')
+                                     -- UNE ENTREE CONTRE-PASSEE NE COMPTE PLUS
+                                     -- (17/10/2026), ici comme dans
+                                     -- `fn_recaler_lignes_bc`. Sans cela, defaire
+                                     -- l'entree d'un arrivage laissait la facture
+                                     -- d'import afficher des kilos recus pour une
+                                     -- marchandise sortie du stock : la reception
+                                     -- reste VALIDE — c'est normal, elle se
+                                     -- devalide, elle ne s'annule pas — mais sa
+                                     -- ligne ne doit plus etre comptee.
+                                     AND NOT EXISTS (
+                                           SELECT 1 FROM mouvement inv
+                                            WHERE inv.id_mouvement_contrepasse
+                                                  = lr.id_mouvement_genere)), 0) AS kg
                    FROM import_facture_lignes fl2
                    JOIN import_factures f ON f.id_facture = fl2.id_facture
                   WHERE f.id_dossier = $1 AND fl2.id_ligne_bc IS NOT NULL) n
@@ -307,17 +436,27 @@ pub async fn statuer_factures(tx: &mut PgConnection, id_dossier: &str) -> AppRes
 ///     sur un metier) n'est plus au stock valorise, on ne la revalorise pas.
 ///
 /// `simuler` fait tout le calcul et annule : c'est l'apercu avant de signer.
-pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bool) -> AppResult<Value> {
+///
+/// `version_lue` : celle que l'ecran a lue avec le dossier (verrou optimiste) ;
+/// `None` pour l'apercu, qui n'ecrit rien.
+pub async fn cloturer(
+    db: &Db,
+    user: &Utilisateur,
+    id_dossier: &str,
+    simuler: bool,
+    version_lue: Option<i64>,
+) -> AppResult<Value> {
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    let resultat = cloturer_dans(&mut tx, user, id_dossier, false, simuler).await?;
+    prendre_dossier(&mut tx, id_dossier, version_lue).await?;
+    let mut resultat = cloturer_dans(&mut tx, user, id_dossier, false, simuler).await?;
     if simuler {
         tx.rollback().await?;
         return Ok(resultat);
     }
     sqlx::query(
         "UPDATE import_dossiers
-            SET statut = 'CLOTURE', id_utilisateur_cloture = $2, date_cloture = $3
+            SET statut = 'CLOTURE', id_utilisateur_cloture = $2, date_cloture = fn_instant($3)
           WHERE id_dossier = $1",
     )
     .bind(id_dossier)
@@ -325,6 +464,7 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
     .bind(maintenant())
     .execute(&mut *tx)
     .await?;
+    resultat["version"] = json!(version_dossier(&mut tx, id_dossier).await?);
     tx.commit().await?;
     Ok(resultat)
 }
@@ -433,7 +573,7 @@ async fn porter(
             // Le CUMP est celui du MAGASIN : divise par tout ce qu'il porte.
             let apres = arrondi_kg((avant + (*part_c as f64 / 100.0) / q).max(0.0));
             sqlx::query(
-                "UPDATE stock_magasin SET cmup_mad = $3, date_maj = $4
+                "UPDATE stock_magasin SET cmup_mad = $3, date_maj = fn_instant($4)
                   WHERE code_reference = $1 AND code_magasin = $2",
             )
             .bind(code_reference)
@@ -497,7 +637,7 @@ async fn porter(
                                       FROM stock_magasin sm
                                      WHERE sm.code_reference = $1 AND sm.quantite_kg > 0
                                        AND sm.cmup_mad IS NOT NULL),
-                        date_dernier_cmup = $2
+                        date_dernier_cmup = fn_instant($2)
                   WHERE code_reference = $1",
             )
             .bind(code_reference)
@@ -629,8 +769,10 @@ pub async fn cloturer_dans(
     recalculer_repartition_mode(tx, id_dossier, post_cloture).await?;
 
     let non_repartis: Vec<(String, f64)> = sqlx::query_as(
-        "SELECT p.libelle || CASE WHEN COALESCE(d.methode_repartition, p.methode_repartition) = 'MANUEL'
-                                  THEN ', répartition manuelle' ELSE '' END,
+        "SELECT p.libelle || CASE COALESCE(d.methode_repartition, p.methode_repartition)
+                                  WHEN 'MANUEL' THEN ', répartition manuelle'
+                                  WHEN 'DROITS' THEN ', réparti aux droits : une ligne visée est sans position tarifaire, ou exonérée partout'
+                                  ELSE '' END,
                 d.montant_dhs::float8
            FROM dossier_lignes_frais d
            JOIN parametres_frais p ON p.id_frais = d.id_frais
@@ -741,6 +883,7 @@ pub async fn avoir(
     motif: &str,
     code_reference: Option<&str>,
     simuler: bool,
+    version_lue: Option<i64>,
 ) -> AppResult<Value> {
     if !matches!(nature, "AVOIR_PRIX" | "AVOIR_RETOUR") {
         return Err(AppError::Invalide(format!("nature inconnue : {nature} (AVOIR_PRIX ou AVOIR_RETOUR)")));
@@ -754,6 +897,9 @@ pub async fn avoir(
     }
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // La version lue d'abord (verrou optimiste) : un avoir saisi sur un dossier
+    // que quelqu'un vient de changer se refuse en le nommant.
+    prendre_dossier(&mut tx, id_dossier, version_lue).await?;
     let (numero, statut): (String, String) =
         sqlx::query_as("SELECT numero, statut FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE")
             .bind(id_dossier)
@@ -860,12 +1006,14 @@ pub async fn avoir(
                 "retours": retours.iter().map(|(_, n, r, kg)| json!({"numero_mouvement": n, "code_reference": r, "kg": kg}))
                     .collect::<Vec<_>>() })
     };
+    let version = version_dossier(&mut tx, id_dossier).await?;
     if simuler {
         tx.rollback().await?;
     } else {
         tx.commit().await?;
     }
     let mut r = resultat;
+    r["version"] = json!(version);
     r["id_dossier"] = json!(id_dossier);
     r["numero"] = json!(numero);
     r["nature"] = json!(nature);

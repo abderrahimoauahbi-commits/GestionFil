@@ -16,6 +16,8 @@ des besoins, pour son magasin de destination.
 | `RETOUR_FOURN` | − | Sortie au prix du retour : la différence avec le CMUP va au stock restant du magasin (jamais sous zéro), le reste au journal des écarts | CMUP du magasin au moment de la sortie, corrigé au prix du retour | motif de ligne | Aucune : le retour validé est définitif, son mouvement ne se contre-passe pas (RFO-DEFINITIF) |
 | `STOCK_INIT` | + | Moyenne pondérée au prix saisi ; sans prix, prix catalogue converti si le magasin n'a pas encore de CMUP | Prix saisi (ou catalogue converti) | — | Contre-passation |
 | `SORTIE_PROD` | − | Inchangé | CMUP du magasin au moment de la sortie | OF | Contre-passation |
+| `CONSO_DIRECTE` | − | Inchangé | CMUP du magasin au moment de la sortie | — | Contre-passation |
+| `RETOUR_CONSO` | + | Inchangé (la matière revient au CMUP courant) | Sans prix saisi : valorisé au CMUP du magasin | — | Contre-passation (et la sortie ne se contre-passe pas tant qu'un retour de son OF en dépend) |
 | `RETOUR_PROD` | + | Inchangé (le fil revient au CMUP courant) | Sans prix : valorisé au CMUP du magasin | motif de ligne | Contre-passation |
 | `SORTIE_HORS_MACHINE` | − | Inchangé | CMUP du magasin au moment de la sortie | motif de ligne | Contre-passation |
 | `RETOUR_PRET` | + | Inchangé (au CMUP en cours) | Sans prix : valorisé au CMUP du magasin | — | Contre-passation |
@@ -67,23 +69,43 @@ des besoins, pour son magasin de destination.
 
 ### `SORTIE_PROD`
 
-- **Origine** : Consommation de production (ordre de fabrication en texte libre)
+- **Origine** : Déchet de production : rebut, chute non réutilisable (motif R4 imposé ; ordre de fabrication en texte libre)
 - **Sens** : sortie (−) dans le magasin du mouvement ; le stock du lot suit
 - **CMUP** : Inchangé
 - **Coût de la ligne** : CMUP du magasin au moment de la sortie
-- **Validation** : Droit ECRIRE du stock
+- **Validation** : Droit ECRIRE du stock ; au-delà de 50 kg cumulés par jour et par référence (sorties hors machine comprises), droit VALIDER de l'inventaire
 - **Réversibilité** : Contre-passation
-- **Prouvé par le banc** : `stock_jamais_negatif`, `contre_passation`
+- **Prouvé par le banc** : `stock_jamais_negatif`, `contre_passation`, `saisie_libre`
+
+### `CONSO_DIRECTE`
+
+- **Origine** : Consommation directe d'une matière qui ne va pas sur machine (jute, latex, SBR, plastique, simili cuir : fiche article en mode DIRECTE) ; OF facultatif : avec lui, la qualité de l'OF ; sans lui, la qualité est obligatoire (23/10/2026)
+- **Sens** : sortie (−) dans le magasin du mouvement ; le stock du lot suit
+- **CMUP** : Inchangé
+- **Coût de la ligne** : CMUP du magasin au moment de la sortie
+- **Validation** : Droit ECRIRE du stock, sans seuil ; refusée par la base pour un article en mode MACHINE (le fil sort par les fiches machine)
+- **Réversibilité** : Contre-passation
+- **Prouvé par le banc** : `consommation_directe`, `fiche_hors_machine`
+
+### `RETOUR_CONSO`
+
+- **Origine** : Retour au magasin d'une matière hors machine (fiche article en mode DIRECTE) non consommée par l'OF — ou, sans OF, la qualité (23/10/2026) — qui l'avait sortie (fiche hors machine, 22/10/2026) ; consommation = sorti − rendu
+- **Sens** : entrée (+) dans le magasin du mouvement ; le stock du lot suit
+- **CMUP** : Inchangé (la matière revient au CMUP courant)
+- **Coût de la ligne** : Sans prix saisi : valorisé au CMUP du magasin
+- **Validation** : Droit ECRIRE du stock ; l'OF (lien) est obligatoire ; refusé par la base pour un article en mode MACHINE et au-delà de ce que l'OF a sorti de cette référence, non encore rendu
+- **Réversibilité** : Contre-passation (et la sortie ne se contre-passe pas tant qu'un retour de son OF en dépend)
+- **Prouvé par le banc** : `fiche_hors_machine`
 
 ### `RETOUR_PROD`
 
-- **Origine** : Retour depuis l'atelier
+- **Origine** : Retour depuis l'atelier ; au grand livre de la consommation, déduit du réel au jour du retour (nature RETOUR_PROD, arbitrage du 27/10/2026)
 - **Sens** : entrée (+) dans le magasin du mouvement ; le stock du lot suit
 - **CMUP** : Inchangé (le fil revient au CMUP courant)
 - **Coût de la ligne** : Sans prix : valorisé au CMUP du magasin
 - **Validation** : Droit ECRIRE du stock
 - **Réversibilité** : Contre-passation
-- **Prouvé par le banc** : `saisie_libre`
+- **Prouvé par le banc** : `saisie_libre`, `retour_prod_grand_livre`
 
 ### `SORTIE_HORS_MACHINE`
 

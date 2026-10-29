@@ -16,22 +16,13 @@ import { api } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
-import { Badge, Bouton } from '../composants/ui/base'
+import { Bouton } from '../composants/ui/base'
 import { useOuvrirVue } from '../lib/navigation'
 import { fmt } from '../lib/utils'
+import { StatutBadge } from '../composants/StatutBadge'
+import { libelleStatut } from '../lib/statuts'
 
 const MODULE = 'RECEPTIONS'
-
-const TON: Record<string, 'neutre' | 'succes' | 'danger'> = {
-  BROUILLON: 'neutre',
-  VALIDEE: 'succes',
-  ANNULEE: 'danger',
-}
-const LIBELLE: Record<string, string> = {
-  BROUILLON: 'Brouillon',
-  VALIDEE: 'Validée',
-  ANNULEE: 'Annulée',
-}
 
 interface Facture extends Record<string, unknown> {
   id_facture: string
@@ -105,7 +96,7 @@ export function FacturesFournisseur() {
     {
       champ: 'statut',
       entete: 'Statut',
-      rendu: (f) => <Badge ton={TON[f.statut] ?? 'neutre'}>{LIBELLE[f.statut] ?? f.statut}</Badge>,
+      rendu: (f) => <StatutBadge entite="facture_fournisseur" code={f.statut} />,
     },
     {
       champ: 'numero_reception',
@@ -174,7 +165,7 @@ export function FacturesFournisseur() {
             variante={filtre === s ? 'principal' : 'contour'}
             onClick={() => setFiltre(s)}
           >
-            {s ? LIBELLE[s] : 'Toutes'}
+            {s ? libelleStatut('facture_fournisseur', s) : 'Toutes'}
           </Bouton>
         ))}
       </div>

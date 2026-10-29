@@ -75,7 +75,9 @@ npm run lint         # eslint + tsc --noEmit
 npm run bureau:dev   # fenêtre Tauri
 
 # Tout d'un coup
-.\demarrer.ps1       # compile et lance le backend, puis Vite
+.\demarrer.ps1       # UN serveur sur :8080 (API + interface, dist recompile si le code a change) ; -Dev ajoute Vite
+.\verifier.ps1 -Rapide              # clippy, tests Rust, lint, types, build, tests interface (sans base)
+git config core.hooksPath .githooks  # UNE FOIS par clone : verifier.ps1 -Rapide a chaque push
 .\deploiement\fabriquer-paquet.ps1   # paquet pour 03-publier.sh sur le serveur
 ```
 
@@ -194,8 +196,65 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
   deux factures, et l'arrivage ne se clôture que quand tout est facturé. Écrans `/factures-fournisseur`.
 - `docs/ecarts-cahier-des-charges.md` — traçabilité cahier des charges → implémentation, points
   en attente de décision métier.
-- `db/README.md` — invariants, vues, contrôles C01–C54 (C38–C42 machines au 05/10 ; C43 colisage incohérent au 08/10 ; C45–C52 au 09/10, C53–C54 au 10/10, tous des signaux).
-- `docs/matrice-mouvements.md` — matrice des 17 types de mouvement (sens, CMUP, coût, validation, réversibilité), générée par `python db/pg/matrice.py` depuis `backend/tests/banc/matrice_mouvements.json`, que le banc vérifie contre la base : modifier un type = modifier ce fichier.
+- `db/README.md` — invariants, vues, contrôles C01–C69 (C38–C42 machines au 05/10 ; C43 colisage incohérent au 08/10 ; C45–C52 au 09/10, C53–C54 au 10/10, C55 période close au 17/10, C56 ligne d'import sans position tarifaire au 19/10, C57–C58 proposition et réception en double au 19/10, C59 écart au prix confirmé de la demande de prix au 21/10, C60 ligne de bon en double au 21/10, C61–C64 OF au 22/10, C65 mouvement daté pendant un inventaire au 23/10, C66 transfert en route sans date prévue au 27/10, C67 rapprochement machine / grand livre, C68 stock minimum franchi et C69 article au plan sans cible au 27/10 (servis par le moteur, comme C05 et C25), tous des signaux).
+- Audit P3 du 19/10/2026 : création idempotente (`id_document` tiré par l'écran, `domain/idempotence.rs`) ; positions tarifaires, valeur en douane et répartition « au taux des droits » (`2026-10-19a`) ; étiquettes de lot Code 128 et scan (`2026-10-19b`, `routes/etiquettes.rs`, `lib/code128.ts`, `composants/ChampScan.tsx`). Une colonne de date nouvelle naît en `timestamptz`/`date` (cliquet A1) — `routes/json.rs` les sérialise.
+- `docs/matrice-mouvements.md` — matrice des 19 types de mouvement (CONSO_DIRECTE le 21/10, RETOUR_CONSO le 22/10) (sens, CMUP, coût, validation, réversibilité), générée par `python db/pg/matrice.py` depuis `backend/tests/banc/matrice_mouvements.json`, que le banc vérifie contre la base : modifier un type = modifier ce fichier.
 - Règles de gestion validées le 08/10/2026 : migrations `db/pg/migrations/2026-10-08_regles_p1.sql` (sections 1 à 14) puis `2026-10-08b_audit_v4.sql` (corrections de l'audit v4), les deux exigées au démarrage ; `seed_006_regles_2026_10.sql` en porte les référentiels pour une base neuve. Le colisage incohérent se SIGNALE, il ne bloque jamais.
 - Arbitrages du 09/10/2026 (audit v5) : `docs/ADR-002` section « Arbitrages du 09/10/2026 » (A1–A11) ; migrations `2026-10-09a` à `2026-10-09za`, puis `2026-10-10a` (A1 et A11 tranchés le 10/10 : prêt toujours rendu, jamais d'acompte avant dédouanement → C53), toutes exigées au démarrage. Une migration déjà appliquée corrigée après coup se déclare dans `EMPREINTES_REMPLACEES` (`db/pg/migrer.py`), sinon `--verifier` arrête la publication.
 - `deploiement/README.md` — serveur, migrations en production, sauvegardes, assistant.
+- Interface, vague 2 (24–26/10/2026) : **statuts** en une seule table (`lib/statuts.ts`, codes tirés des CHECK de la
+  base, libellés et tons ; `composants/StatutBadge.tsx`) — l'ancienne couche `components/ui.tsx` est supprimée ;
+  **fiche machine** : ni OF ni qualité en en-tête (OF par ligne, qualité lue de l'OF sinon choisie sur la ligne) ; hors
+  chargement, la voie et (au constat) le nombre de bobines ne changent pas — garanti par `decision_machine.rs`
+  (`hors_chargement`) — sauf **un constat à 0 % qui ferme la ligne** (`ferme_au_constat`) ; le rebut = déchargement vers
+  DÉCHET ; **import** : une ligne de facture reçue est figée en base tout entière (`2026-10-24c`, exigée au démarrage),
+  le prix du bon revient sur chaque ligne ; **réception** saisie sur la ligne (`receptions/GrilleReception.tsx`,
+  `BarreReception.tsx`), dates de fabrication / péremption dans un détail au clic ; **facture fournisseur** : un seul
+  tableau, la case cochée active la saisie. La migration `2026-10-24d` (mémo du besoin des OF) est **abandonnée** :
+  l'OF sort du besoin MRP (décision du 26/10, `docs/A-DECIDER-of-supply-chain.md`).
+- `docs/A-DECIDER-of-supply-chain.md` — **l'OF Supply Chain, livré le 22/10** (`2026-10-22a` à `22d`, exigées au
+  démarrage) : l'ordre de fabrication (date, qualité, métrage, PRÉVU → LANCÉ → CLÔTURÉ / ANNULÉ) **prévoit, oriente et
+  analyse, il ne déplace jamais le stock**. Les fiches machine portent l'OF (fiche, ligne, état de l'étage) et une voie
+  (bobines = capacité de l'étage / largeur de la machine × voie, entier, au-delà un signal C63) ; **l'écart d'un constat
+  appartient à l'OF sortant** (`machine_decision_ligne.id_of_periode`). Hors machine : `/fiche-hors-machine`,
+  CONSO_DIRECTE sur l'OF puis RETOUR_CONSO du reste. Consommation par OF et par qualité : `v_of_consommation`,
+  `v_of_bilan`, `v_qualite_consommation`. Le besoin « OF retenus + plan non couvert » de `22c` est **remplacé par
+  le plan seul** (`2026-10-27b`, exigée au démarrage) : l'OF ne sert que l'axe production / statistiques (C64 signale
+  toujours un OF au-delà du plan) ; le fil sur machine compte au dernier constat, quel que soit son âge.
+- **Moteur de couverture v2 : la couverture cible** (spécification `docs/A-DECIDER-of-supply-chain.md` § 15, livré le
+  27/10/2026 au soir) : `domain/couverture.rs` (calcul pur ; les cas 1, 2, 3, 4a, 4b du § 15.6 sont des tests aux
+  chiffres exacts, avec bilan, équivalence classique et propriété sur plans aléatoires), `routes/couverture.rs`
+  (`GET /api/couverture[/{ref}]`, `POST …/simulation` avec C, N, L, S en hypothèses). Le solde B(t) n'est PAS plafonné à
+  zéro ; R = 1re rupture ; C = 30 × `reference.couverture_cible_mois` ; D* = R − C, D = max(D*, aujourd'hui + L), date
+  limite D* − L ; **Q0 = le plus grand manque de [R, R + N[ (FIGÉ, ne pas « améliorer »)** ; X = creux le plus bas sous
+  NS (plan des S jours suivants) dans [0, L], 1re proposition seulement ; Q = arrondi(Q0 + X) ; propositions en retard
+  consolidées. Aucune moyenne dans le moteur. **États** (`couverture::etats()`, une seule source) : RUPTURE_INEVITABLE /
+  SOUS_SECURITE / SOUS_CIBLE / COUVERT (le plus grave l'emporte, raison chiffrée `raison_etat`) ; **signaux** à part
+  (CIBLE_NON_DEFINIE, SOUS_MINIMUM, RETARD_CIBLE, HORIZON_COURT, DEFAUT_DONNEES), jamais bloquants ; contrôles servis par
+  le moteur : C05 (rupture inévitable), C25, C68 (stock minimum = garde-fou, jamais une quantité), C69 (sans cible =
+  aucune proposition, aucun repli). La frise mensuelle garde ses codes (`statut_mois` : PLAN_NON_COUVERT par mois).
+  Migrations `2026-10-27l` (colonne renommée, `reference.marge_securite_pct` supprimée, champs déclarés ; exigée) et
+  `2026-10-27m` (colonnes du stock projeté). **Écrans** : /stock = Stock projeté (21 colonnes, ligne ↳ fixée par
+  `ColonneDT.complement`, fenêtre `FenetreStockProjete`), Simulation, Surveillance (l'ancien onglet « À commander » du
+  plan d'achat, déplacé) ; **aucun bouton « Commander »** pour l'instant (`POST /api/plan-achat/generer?reference=`
+  reste au serveur) ; au plan d'achat, un clic sur une ligne ouvre la fenêtre de surveillance (`ModaleReference`). La
+  génération du plan d'achat (`domain/plan_achat.rs`) prend la 1re proposition du moteur (quantité, D, date limite) ;
+  prix / devise / fournisseur inchangés. Avant le v2 : `2026-10-27a` à `27e` (exigées) ; l'ancien calcul (`v_stock_projete`,
+  `v_plan_achat`, `v_encours_fiable`, `v_besoin_horizon`, `v_risque_*`, `P_MrpInclureStockMachine`) est retiré, les vues
+  d'affichage lisent `v_stock_reference`. **Le fil en route est un arrivage** (`2026-10-27d`, exigée) :
+  `transfert.date_disponibilite_prevue` obligatoire à l'expédition (TRF-DATE), révisable en route
+  (`POST /api/transferts/{id}/date-disponibilite`), comptée par le moteur ; sans date : C66.
+- Décisions du 23/10/2026 : **le conditionnement est par lot** (`2026-10-23a` : `lot.poids_bobine_kg`,
+  `lot.bobines_par_palette`, mesurés à la réception, corrigés par `POST /api/lots/conditionnement` ; toute conversion sur
+  un lot passe par `fn_lot_poids_bobine` / `fn_lot_bobines_palette`, `unites::charger_pour_lot`,
+  `conditionnementDuLot`) ; saisie liée palettes ↔ bobines ↔ kg sur les mouvements et la fiche hors machine ;
+  **qualité explicite** sur la consommation directe, son retour et le chargement machine (`2026-10-23b` : celle de l'OF,
+  sinon obligatoire ; `code_qualite_periode` sur la décision, même frontière que l'OF) ; **inventaire ouvert = magasin
+  gelé** (`2026-10-23g` : `INVENTAIRE-OUVERT` sur toute ligne de mouvement du magasin, sauf les ajustements rattachés
+  à l'inventaire par `mouvement.id_inventaire` ; `GET /api/inventaires/ouverts`, bandeau sur les écrans) — étendue par
+  type depuis `2026-10-24a` : GLOBAL = tout le magasin, TOURNANT/CIBLE = ses seules références (celles de ses lignes ;
+  sans ligne, tout le magasin), `v_inventaire_gel` ; théorique d'une ligne d'inventaire au poids du lot (bobines comptées
+  → kg par `fn_lot_poids_bobine`), C43 et la dérive du lot restant à la fiche article ; depuis `2026-10-24b`, un TOURNANT
+  ou un CIBLÉ compte et gèle SA LISTE validée avant ses lignes (`inventaire_reference` ; ciblé choisi par recherche /
+  famille / catégorie, tournant proposé par `v_inventaire_candidat` selon la classe ABC et P_ComptageTournantA/B/C),
+  sans liste ni préparation ni validation (INV-SELECTION).

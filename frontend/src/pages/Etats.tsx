@@ -69,7 +69,7 @@ const ETATS: EtatDisponible[] = [
     cle: 'stock',
     titre: 'État des stocks',
     description:
-      'Quantités par magasin, stock projete, couverture et statut. La photo du jour, celle qu on affiche au mur du magasin.',
+      'Quantités par magasin, couverture du plan et état au moteur de couverture. La photo du jour, celle qu’on affiche au mur du magasin.',
     chemin: '/etats/stock',
     module: 'STOCK',
     Icone: Boxes,
@@ -284,7 +284,8 @@ export function Etats() {
   const comptes: Comptes = {
     inventairesOuverts: 0,
     propositions: k.nb_propositions_a_traiter ?? 0,
-    refsEnAlerte: (k.nb_ruptures ?? 0) + (k.nb_critiques ?? 0) + (k.nb_attention ?? 0),
+    // L'état au moteur de couverture v2 (27/10/2026) : tout sauf « couvert ».
+    refsEnAlerte: (k.nb_rupture_inevitable ?? 0) + (k.nb_sous_securite ?? 0) + (k.nb_sous_cible ?? 0),
     receptionsEnCours: (k.nb_receptions_en_saisie ?? 0) + (k.nb_receptions_a_controler ?? 0),
     lotsDormants: kl.lots_dormants ?? 0,
     lotsABasculer: kl.lots_a_basculer ?? 0,

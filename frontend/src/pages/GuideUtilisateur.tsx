@@ -1,214 +1,228 @@
 /**
- * Guide utilisateur — documentation en ligne.
+ * LE GUIDE PAS À PAS — le tutoriel du cycle complet, par rôle (27/10/2026).
  *
- * Affiche le guide utilisateur au format markdown avec une navigation
- * interne et un style cohérent avec l'application.
+ * IL NE LIT PLUS UN FICHIER MARKDOWN. Le guide d'avant (`guide-utilisateur.md`)
+ * était un second texte, écrit à part du catalogue d'aide, et il avait dérivé :
+ * des écrans retirés, des boutons renommés, des règles changées. Ce guide rend
+ * `TUTORIEL` (`aide/tutoriel.ts`), et pour chaque champ qu'il nomme, il lit la
+ * description dans la FICHE DE L'ÉCRAN — la même que montrent le ⓘ du champ,
+ * le « ? » de l'écran et le manuel imprimable. Un seul texte, corrigé une fois.
+ *
+ * ON PEUT NE SUIVRE QUE SON RÔLE : le magasinier n'a que faire de la
+ * validation des bons. Le filtre garde l'ordre du cycle.
  */
-import { useEffect, useState } from 'react'
-import { ArrowLeft, BookOpen } from 'lucide-react'
-import { EnTetePage } from '../composants/Coquille'
-import { Bouton } from '../composants/ui/base'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ArrowLeft, ArrowRight, BookOpen, CheckCircle2, Printer, TriangleAlert } from 'lucide-react'
+import { EnTetePage } from '../composants/Coquille'
+import { Badge, Bouton } from '../composants/ui/base'
+import { SUJETS } from '../aide/contenu'
+import { champDans, sujetDans } from '../aide/indice'
+import { TUTORIEL } from '../aide/tutoriel'
+import type { EtapeTutoriel, RoleTutoriel } from '../aide/types'
+import { cn } from '../lib/utils'
 
-interface MarkdownSection {
-  id: string
-  title: string
-  content: string
-  level: number
-}
+const ROLES: RoleTutoriel[] = ['Acheteur', 'Magasinier', 'Responsable', 'Direction']
 
-/**
- * Decoupe le guide en sections, aux titres markdown.
- *
- * HORS DU COMPOSANT, ET SANS TOUCHER A L'ETAT. Cette fonction vivait a
- * l'interieur, declaree APRES l'effet qui l'appelle, et posait elle-meme les
- * deux etats. Trois defauts en un :
- *
- *   - `const` n'est pas remonte : l'appel ne tenait que parce qu'il se produit
- *     dans une promesse, donc apres le rendu. Deplacer cet appel d'une ligne au
- *     mauvais endroit aurait laisse la page blanche, comme le 25/09 ;
- *   - melanger le decoupage et la pose d'etat rend l'un intestable sans
- *     l'autre ;
- *   - recreee a chaque rendu, elle ne peut pas etre une dependance honnete.
- *
- * Elle prend un texte, elle rend des sections. C'est tout.
- */
-function decouperSections(markdown: string): MarkdownSection[] {
-  const sections: MarkdownSection[] = []
-  let courante: MarkdownSection | null = null
-  let contenu: string[] = []
-
-  for (const ligne of markdown.split('\n')) {
-    const titre = ligne.match(/^(#{1,6})\s+(.+)$/)
-    if (titre) {
-      if (courante) {
-        courante.content = contenu.join('\n')
-        sections.push(courante)
-      }
-      // Deux titres « Achats » donnaient deux fois id="achats" : le second prend un suffixe.
-      const base = titre[2].toLowerCase().replace(/[^a-z0-9]+/g, '-')
-      let id = base
-      for (let n = 2; sections.some((x) => x.id === id); n++) id = `${base}-${n}`
-      courante = {
-        id,
-        title: titre[2],
-        content: '',
-        level: titre[1].length,
-      }
-      contenu = []
-    } else if (courante) {
-      contenu.push(ligne)
-    }
-  }
-  if (courante) {
-    courante.content = contenu.join('\n')
-    sections.push(courante)
-  }
-  return sections
-}
+/** L'ancre d'une partie, pour le sommaire. */
+const ancre = (i: number) => `partie-${i + 1}`
 
 export function GuideUtilisateur() {
   const naviguer = useNavigate()
-  const [, setContent] = useState<string>('')
-  const [sections, setSections] = useState<MarkdownSection[]>([])
-  const [activeSection, setActiveSection] = useState<string>('')
-  const [loading, setLoading] = useState(true)
+  const [role, setRole] = useState<RoleTutoriel | ''>('')
 
-  useEffect(() => {
-    // Charger le contenu du guide utilisateur
-    fetch('/guide-utilisateur.md')
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error('Impossible de charger le guide')
-        }
-        return res.text()
-      })
-      .then((text) => {
-        setContent(text)
-        const trouvees = decouperSections(text)
-        setSections(trouvees)
-        if (trouvees.length > 0) setActiveSection(trouvees[0].id)
-        setLoading(false)
-      })
-      .catch((err) => {
-        console.error('Erreur de chargement du guide:', err)
-        setContent('# Erreur de chargement\n\nImpossible de charger le guide utilisateur. Veuillez contacter l\'administrateur.')
-        setLoading(false)
-      })
-  }, [])
-
-  const renderMarkdown = (text: string): string => {
-    // Conversion markdown basique vers HTML
-    let html = text
-
-    // Titres
-    html = html.replace(/^### (.+)$/gm, '<h3 class="text-lg font-semibold mt-6 mb-2">$1</h3>')
-    html = html.replace(/^## (.+)$/gm, '<h2 class="text-xl font-bold mt-8 mb-4">$1</h2>')
-    html = html.replace(/^# (.+)$/gm, '<h1 class="text-2xl font-bold mt-6 mb-4">$1</h1>')
-
-    // Gras
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-
-    // Italique
-    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
-
-    // Listes : des <li> DANS une liste (10/10/2026) — 262 elements de liste
-    // orphelins, du HTML invalide que les lecteurs d'ecran ne savent pas annoncer.
-    html = html.replace(/^\s*- (.+)$/gm, '<li data-l="ul">$1</li>')
-    html = html.replace(/^\s*(\d+)\. (.+)$/gm, '<li data-l="ol">$2</li>')
-    html = html.replace(/(?:<li data-l="ul">.*<\/li>\n?)+/g, (m) => `<ul class="my-2 list-disc pl-6">${m.replace(/ data-l="ul"/g, '')}</ul>`)
-    html = html.replace(/(?:<li data-l="ol">.*<\/li>\n?)+/g, (m) => `<ol class="my-2 list-decimal pl-6">${m.replace(/ data-l="ol"/g, '')}</ol>`)
-
-    // Paragraphes
-    html = html.replace(/\n\n+/g, '</p><p class="my-3">')
-    html = `<p class="my-3">${html}</p>`
-
-    // Liens
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-primaire underline">$1</a>')
-
-    // Code inline
-    html = html.replace(/`([^`]+)`/g, '<code class="bg-attenue px-1 py-0.5 rounded text-sm">$1</code>')
-
-    return html
-  }
-
-  const scrollToSection = (id: string) => {
-    setActiveSection(id)
-    const element = document.getElementById(id)
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' })
-    }
-  }
+  // La numérotation reste celle du cycle complet, même filtrée : « étape 12 »
+  // désigne la même étape pour tout le monde.
+  const parties = useMemo(() => {
+    let n = 0
+    return TUTORIEL.parties.map((p) => ({
+      ...p,
+      etapes: p.etapes
+        .map((e) => ({ etape: e, numero: ++n }))
+        .filter((x) => !role || x.etape.role === role),
+    }))
+  }, [role])
 
   return (
     <div>
       <EnTetePage
         titre="Guide utilisateur"
-        description="Documentation complète pour utiliser l'ERP Gestion Fil"
+        description="Le cycle complet du fil, pas à pas, par rôle"
         actions={
-          <Bouton variante="contour" onClick={() => naviguer('/')}>
-            <ArrowLeft />
-            Retour
-          </Bouton>
+          <>
+            <Bouton variante="contour" onClick={() => naviguer('/etats/manuel')}>
+              <Printer />
+              Manuel imprimable
+            </Bouton>
+            <Bouton variante="contour" onClick={() => naviguer('/')}>
+              <ArrowLeft />
+              Retour
+            </Bouton>
+          </>
         }
       />
 
-      <div className="grid gap-6 lg:grid-cols-4">
-        {/* Navigation latérale */}
-        <aside className="lg:col-span-1">
-          <div className="sticky top-4 rounded-[var(--radius)] border border-bordure bg-surface p-4">
-            <h3 className="mb-3 flex items-center gap-2 font-semibold">
-              <BookOpen className="size-4" />
+      <div className="grid gap-5 lg:grid-cols-[14rem_minmax(0,1fr)]">
+        {/* LE SOMMAIRE : sur téléphone, il passe au-dessus et se replie. */}
+        <aside className="min-w-0">
+          <nav
+            aria-label="Sommaire du guide"
+            className="rounded-[var(--radius)] border border-bordure bg-surface p-3 lg:sticky lg:top-4"
+          >
+            <div className="mb-2 flex items-center gap-2 text-[12.5px] font-semibold">
+              <BookOpen className="size-4 text-primaire" />
               Sommaire
-            </h3>
-            <nav className="space-y-1">
-              {sections.map((section) => (
-                <button
-                  key={section.id}
-                  onClick={() => scrollToSection(section.id)}
-                  className={`block w-full text-left text-sm transition-colors ${
-                    activeSection === section.id
-                      ? 'font-medium text-primaire'
-                      : 'text-attenue-texte hover:text-texte'
-                  }`}
-                  style={{ paddingLeft: `${(section.level - 1) * 0.5 + 0.5}rem` }}
-                >
-                  {section.title}
-                </button>
+            </div>
+            <ol className="m-0 list-none space-y-1 p-0 text-[12.5px]">
+              {TUTORIEL.parties.map((p, i) => (
+                <li key={p.titre}>
+                  <a href={`#${ancre(i)}`} className="text-attenue-texte hover:text-primaire">
+                    {p.titre}
+                  </a>
+                </li>
               ))}
-            </nav>
-          </div>
+            </ol>
+          </nav>
         </aside>
 
-        {/* Contenu principal */}
-        <main className="lg:col-span-3">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="text-attenue-texte">Chargement du guide...</div>
-            </div>
-          ) : (
-            <div className="prose prose-slate max-w-none rounded-[var(--radius)] border border-bordure bg-surface p-6">
-              {sections.map((section) => (
-                <div key={section.id} id={section.id} className="scroll-mt-4">
-                  {section.level === 1 && (
-                    <h1 className="mb-4 text-2xl font-bold">{section.title}</h1>
-                  )}
-                  {section.level === 2 && (
-                    <h2 className="mb-3 mt-8 text-xl font-bold">{section.title}</h2>
-                  )}
-                  {section.level === 3 && (
-                    <h3 className="mb-2 mt-6 text-lg font-semibold">{section.title}</h3>
-                  )}
-                  <div
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(section.content) }}
-                    className="text-sm leading-relaxed"
-                  />
+        <div className="min-w-0 space-y-5">
+          <section className="rounded-[var(--radius)] border border-bordure bg-surface p-4">
+            <h2 className="m-0 text-[15px] font-semibold">{TUTORIEL.titre}</h2>
+            <p className="mb-0 mt-1.5 text-[13px] leading-relaxed">{TUTORIEL.introduction}</p>
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {TUTORIEL.roles.map((r) => (
+                <div key={r.role} className="rounded border border-bordure bg-attenue/25 px-2.5 py-2 text-[12.5px]">
+                  <div className="font-semibold">{r.role}</div>
+                  <div>{r.mission}</div>
+                  <div className="mt-0.5 text-[11.5px] text-attenue-texte">{r.droits}</div>
                 </div>
               ))}
             </div>
-          )}
-        </main>
+
+            {/* LE FILTRE PAR RÔLE : des puces, pas une liste déroulante — quatre
+                choix se lisent d'un coup d'œil, et se touchent au doigt. */}
+            <div className="mt-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="Rôle suivi">
+              <span className="text-[12px] text-attenue-texte">Suivre :</span>
+              {(['', ...ROLES] as const).map((r) => (
+                <button
+                  key={r || 'tous'}
+                  type="button"
+                  aria-pressed={role === r}
+                  onClick={() => setRole(r)}
+                  className={cn(
+                    'min-h-[30px] rounded-full border px-3 text-[12.5px] transition-colors',
+                    role === r
+                      ? 'border-primaire bg-primaire text-primaire-texte'
+                      : 'border-bordure bg-surface hover:border-primaire/50',
+                  )}
+                >
+                  {r || 'Tout le cycle'}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {parties.map((p, i) => (
+            <section key={p.titre} id={ancre(i)} className="scroll-mt-4 space-y-3">
+              <h2 className="m-0 border-b border-bordure pb-1 text-[15px] font-semibold">{p.titre}</h2>
+              {p.introduction && <p className="m-0 text-[13px] leading-relaxed text-attenue-texte">{p.introduction}</p>}
+              {p.etapes.length === 0 && (
+                <p className="m-0 text-[12.5px] italic text-attenue-texte">Aucune étape pour ce rôle dans cette partie.</p>
+              )}
+              {p.etapes.map(({ etape, numero }) => (
+                <CarteEtape
+                  key={numero}
+                  etape={etape}
+                  numero={numero}
+                  ouvrir={etape.route.includes(':') ? undefined : () => naviguer(etape.route)}
+                />
+              ))}
+            </section>
+          ))}
+        </div>
       </div>
     </div>
+  )
+}
+
+function CarteEtape({
+  etape,
+  numero,
+  ouvrir,
+}: {
+  etape: EtapeTutoriel
+  numero: number
+  ouvrir?: () => void
+}) {
+  // Les champs nommés par l'étape, décrits par la fiche de leur écran.
+  const sujet = sujetDans(SUJETS, etape.route)
+  const champs = (etape.champs ?? []).map((nom) => ({ nom, champ: champDans(sujet, nom) }))
+
+  return (
+    <article className="rounded-[var(--radius)] border border-bordure bg-surface p-3.5 text-[13px] leading-relaxed">
+      <header className="flex flex-wrap items-start gap-x-3 gap-y-1">
+        <span className="grid size-6 shrink-0 place-items-center rounded bg-primaire/10 text-[12px] font-semibold tabular-nums text-primaire">
+          {numero}
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="m-0 text-[14px] font-semibold">{etape.titre}</h3>
+          <div className="text-[12px] text-attenue-texte">{etape.acces}</div>
+        </div>
+        <Badge ton="neutre">{etape.role}</Badge>
+        {ouvrir && (
+          <Bouton variante="contour" taille="sm" onClick={ouvrir}>
+            Ouvrir l’écran
+            <ArrowRight />
+          </Bouton>
+        )}
+      </header>
+
+      <ol className="m-0 mt-2 list-decimal space-y-1 pl-5">
+        {etape.gestes.map((g, i) => (
+          <li key={i}>{g}</li>
+        ))}
+      </ol>
+
+      {champs.length > 0 && (
+        <details className="mt-2 rounded border border-bordure bg-attenue/20 px-2.5 py-1.5">
+          <summary className="cursor-pointer text-[12.5px] font-medium">
+            Les champs à remplir ({champs.length}) — décrits dans l’aide de l’écran
+          </summary>
+          <dl className="m-0 mt-1.5 space-y-1.5">
+            {champs.map(({ nom, champ }) => (
+              <div key={nom}>
+                <dt className="font-semibold">
+                  {nom}
+                  {champ?.obligatoire && (
+                    <span className="ml-1.5 rounded bg-danger/10 px-1 text-[10px] font-semibold uppercase tracking-wide text-danger">
+                      obligatoire
+                    </span>
+                  )}
+                </dt>
+                <dd className="m-0 text-[12.5px] text-attenue-texte">{champ?.description ?? '—'}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
+
+      <p className="mb-0 mt-2 flex gap-1.5 border-l-2 border-succes pl-2 text-[12.5px]">
+        <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-succes" aria-hidden />
+        <span>
+          <span className="font-semibold">Résultat : </span>
+          {etape.resultat}
+        </span>
+      </p>
+      {etape.erreur && (
+        <p className="mb-0 mt-1.5 flex gap-1.5 border-l-2 border-alerte pl-2 text-[12.5px]">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-alerte" aria-hidden />
+          <span>
+            <span className="font-semibold">Erreur fréquente : </span>
+            {etape.erreur}
+          </span>
+        </p>
+      )}
+    </article>
   )
 }

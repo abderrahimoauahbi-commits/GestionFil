@@ -3,8 +3,9 @@
  *
  * Deux choses distinctes cohabitent ici, et il faut les garder separees.
  *
- *   Le CALCUL — `v_plan_achat` — se refait a chaque lecture et ne garde aucune
- *   trace. Il repond a « que faudrait-il commander aujourd'hui ? ».
+ *   Le CALCUL — le moteur de couverture (/stock › Surveillance) — se refait a
+ *   chaque lecture et ne garde aucune trace. Il repond a « que faudrait-il
+ *   commander aujourd'hui ? ».
  *
  *   Les PROPOSITIONS — la table — portent un cycle de vie : proposee, ecartee,
  *   convertie en commande. Elles repondent a « qu'a-t-on decide ? ».
@@ -13,14 +14,26 @@
  * Regenerer efface celles qui n'engagent rien et refait la photo ; celles qui
  * ont produit un bon de commande, et celles qu'on a ecartees, survivent.
  *
- * La quantite proposee suit le plan de production, et lui seul (10/10/2026 : pas
- * de stock minimum) : sorties de la fenetre de commande + securite - stock
- * projete, puis le MOQ, la palette et l'en-cours fournisseur — ce dernier terme
- * evite de recommander ce qui est deja en route.
+ * LA PROPOSITION VIENT DU MOTEUR DE COUVERTURE (basculement du 27/10/2026) :
+ * la premiere proposition de chaque reference (plan seul, projection jour par
+ * jour, securite, minimum de commande, arrondi au multiple), D comme date de
+ * besoin, la date limite de commande, l'urgence qui s'en deduit. Prix, devise,
+ * unite et fournisseur : inchanges. Le calcul se lit dans /stock › Surveillance
+ * (decision du 27/10/2026 : l'onglet « À commander » y est deplace, sans bouton
+ * « Commander » pour l'instant ; la route POST /api/plan-achat/generer?reference=
+ * reste en place). Un clic sur une ligne ouvre la fenetre de surveillance de la
+ * reference (la meme modale), au lieu d'un detail deplie sous la ligne.
+ *
+ * UNE SEULE SOURCE DE VERITE (27/10/2026) : l'ancien calcul (`v_plan_achat`,
+ * `v_stock_projete`) est retire. L'onglet Situation compte les references avec
+ * les NOTIONS DU MOTEUR v2 (rupture inevitable, sous securite, sous cible,
+ * couvert, a commander aujourd'hui, classe A en rupture inevitable) ; Par
+ * fournisseur compte ses references en
+ * rupture inevitable. Les deux sont figes a la generation du plan.
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, Ban, ChevronDown, ChevronRight, FileCheck2, Gauge, ListChecks, RefreshCw, Repeat, ShoppingCart, Truck, X } from 'lucide-react'
+import { ArrowRight, Ban, FileCheck2, Gauge, Link2, ListChecks, RefreshCw, Repeat, ShoppingCart, Truck, Unlink2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -37,19 +50,22 @@ import {
   Champ,
   Chargement,
   Etiq,
-  Selecteur,
 } from '../composants/ui/base'
 import { Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
-import { DetailCalcul } from './PlanAchatDetail'
+import { depuisBobines, depuisKg, depuisPalettes, pourChamp, type Conditionnement } from '../lib/conditionnement'
+import { ModaleReference } from '../composants/couverture/ModaleCouverture'
+import { libelleStatut } from '../lib/statuts'
 import { useParametreNombre } from '../lib/parametres'
+import { ChoixRecherche } from '../composants/ChoixRecherche'
+import { StatutBadge } from '../composants/StatutBadge'
 
 const MODULE = 'PLAN_ACHAT'
 
 /** Entetes de la repartition par fournisseur, dans l'ordre de la feuille. */
 const ENTETES_FRS = [
-  'Fournisseur', 'Pays', 'Devise', 'Delai', 'Refs',
-  'Quantite', 'Montant MAD', '% budget', 'TIER 1', 'Contact',
+  'Fournisseur', 'Pays', 'Devise', 'Délai', 'Refs',
+  'Quantité', 'Montant MAD', '% budget', 'TIER 1', 'Rupture inévitable', 'Contact',
 ]
 
 interface Proposition extends Record<string, unknown> {
@@ -75,10 +91,15 @@ interface Proposition extends Record<string, unknown> {
   prix_devise?: number | null
   montant_devise?: number | null
   taux_devise?: number | null
+  /** Le conditionnement de la fiche : la boite « Commander » lie kg, palettes et bobines. */
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
   palettes_a_commander?: number | null
   /** Ce que l'arrondi a la palette pleine ajoute au besoin (kg). */
   complement_palette_kg?: number | null
   date_besoin_prevue: string
+  /** La date limite de commande du moteur de couverture (27/10/2026) ; vide avant. */
+  date_limite_commande?: string | null
   urgence: string
   risque_identifie: string | null
   classe_abc: string | null
@@ -122,15 +143,24 @@ interface Equivalent extends Record<string, unknown> {
   interchangeable: number
 }
 
-/** Le plan d'achat est une LECTURE DU STOCK : ces colonnes disent pourquoi. */
+/**
+ * Les indicateurs du plan d'achat : la situation au sens du MOTEUR DE COUVERTURE
+ * (27/10/2026) et ce que les propositions ouvertes engagent.
+ */
 interface Kpi {
+  /** Le moment du calcul : a la generation du plan (21/10/2026), pas a l'ouverture. */
+  calcule_le?: string
   globaux: {
-    refs_en_alerte: number
-    ruptures: number
-    critiques: number
-    attention: number
-    ok: number
-    classe_a_en_alerte: number
+    /** Les references suivies par le moteur (actives, avec plan, stock ou arrivage). */
+    references: number
+    rupture_inevitable: number
+    sous_securite: number
+    sous_cible: number
+    couvert: number
+    cible_non_definie: number
+    sous_minimum: number
+    a_commander_aujourdhui: number
+    classe_a_en_rupture: number
     budget_mad: number
     quantite_kg: number
     refs_a_commander: number
@@ -149,31 +179,9 @@ interface Kpi {
     quantite_kg: number
     montant_mad: number
     nb_tier1: number
-    nb_ruptures: number
+    /** Ses references en rupture inevitable, au sens du moteur v2. */
+    nb_rupture_inevitable: number
   }[]
-}
-
-const TON_URGENCE: Record<string, 'danger' | 'alerte' | 'info' | 'neutre'> = {
-  'TIER 1': 'danger',
-  'TIER 2': 'alerte',
-  'TIER 3': 'info',
-  'TIER 4': 'neutre',
-}
-
-const TON_STATUT: Record<string, 'neutre' | 'info' | 'succes' | 'contour'> = {
-  PROPOSE: 'info',
-  EN_REVISION: 'info',
-  VALIDE: 'info',
-  COMMANDE: 'succes',
-  IGNORE: 'contour',
-}
-
-const LIBELLE_STATUT: Record<string, string> = {
-  PROPOSE: 'Proposee',
-  EN_REVISION: 'En revision',
-  VALIDE: 'Validee',
-  COMMANDE: 'Commandee',
-  IGNORE: 'Ecartee',
 }
 
 /** Une proposition n'est convertible que tant qu'elle n'engage rien. */
@@ -212,6 +220,7 @@ export function PlanAchat() {
         tier1: number
         propositions_figees: number
         propositions_arbitrees: number
+        references_non_proposees?: string[]
       }>('/api/plan-achat/generer'),
     onSuccess: async (r) => {
       // Annoncer les lignes preservees evite de laisser croire que le calcul a
@@ -225,9 +234,16 @@ export function PlanAchat() {
               .filter(Boolean)
               .join(' et ') + ' conservees telles quelles.'
           : undefined
+      // Ce que le moteur propose sans pouvoir l'acheter (fiche sans fournisseur ou
+      // sans prix) : dit, jamais ecarte en silence (27/10/2026).
+      const sans = r.references_non_proposees ?? []
+      const nonProposees = sans.length
+        ? `${sans.length} référence(s) non proposée(s) : ${sans.slice(0, 3).join(' ; ')}${sans.length > 3 ? '…' : ''}`
+        : undefined
+      const description = [preservees, nonProposees].filter(Boolean).join(' ') || undefined
       toast.success(
         `${r.propositions_generees} proposition(s) · ${fmt.mad(r.budget_total_mad)} · ${r.tier1} en TIER 1.`,
-        { description: preservees, duration: preservees ? 9000 : 5000 },
+        { description, duration: description ? 9000 : 5000 },
       )
       setCoches({})
       await rafraichir()
@@ -239,17 +255,21 @@ export function PlanAchat() {
     mutationFn: (v: {
       propositions: string[]
       cibles: Record<string, string>
-      ajustements: Record<string, { quantite_kg?: number; prix_mad?: number; nb_palettes?: number; nb_bobines?: number }>
+      ajustements: Record<string, { quantite_kg?: number; prix_mad?: number; prix_devise?: number; nb_palettes?: number; nb_bobines?: number }>
     }) =>
       api.post<{
         propositions_converties: number
         bons: { numero_bc: string; code_fournisseur: string; lignes: number; montant_total_mad: number }[]
+        /** Une ligne par reference (21/10/2026) : les quantites ajoutees a une ligne deja la. */
+        fusions?: string[]
       }>('/api/plan-achat/commander', v),
     onSuccess: async (r) => {
       toast.success(`Lignes envoyées : ${r.bons.map((b) => b.numero_bc).join(', ')}`, {
-        description: `${r.propositions_converties} proposition(s) converties · ${fmt.mad(
-          r.bons.reduce((s, b) => s + b.montant_total_mad, 0),
-        )}`,
+        description:
+          `${r.propositions_converties} proposition(s) converties · ${fmt.mad(
+            r.bons.reduce((s, b) => s + b.montant_total_mad, 0),
+          )}` + (r.fusions?.length ? ` · ${r.fusions.join(' ')}` : ''),
+        duration: r.fusions?.length ? 12000 : undefined,
       })
       setCoches({})
       await rafraichir()
@@ -287,8 +307,10 @@ export function PlanAchat() {
 
   // La proposition dont on examine les equivalents. Null : aucun panneau.
   const [arbitrage, setArbitrage] = useState<Proposition | null>(null)
-  // Les propositions dont le calcul est deplie sous la ligne.
-  const [deplies, setDeplies] = useState<Record<string, boolean>>({})
+  // LA FENETRE DE SURVEILLANCE (27/10/2026) : un clic sur une ligne ouvre le
+  // detail de la reference au moteur de couverture (la meme fenetre que /stock ›
+  // Surveillance) ; plus rien ne se deplie sous la ligne.
+  const [ouverte, setOuverte] = useState<{ code: string; designation?: string | null } | null>(null)
   const dureeEcart = useParametreNombre('P_DureeEcartJours', 90)
 
   const substituer = useMutation({
@@ -313,27 +335,6 @@ export function PlanAchat() {
   })
 
   const colonnes: ColonneDT<Proposition>[] = [
-    {
-      champ: 'calcul',
-      entete: '',
-      largeur: '30px',
-      triable: false,
-      rendu: (p) => (
-        <Bouton
-          variante="discret"
-          taille="icone-xs"
-          className="text-attenue-texte hover:bg-attenue"
-          onClick={(e) => {
-            e.stopPropagation()
-            setDeplies((d) => ({ ...d, [p.id_proposition]: !d[p.id_proposition] }))
-          }}
-          aria-label="Voir le calcul"
-          title="D’où viennent ces kilos : stock, machine, en-cours, demande, sécurité"
-        >
-          {deplies[p.id_proposition] ? <ChevronDown /> : <ChevronRight />}
-        </Bouton>
-      ),
-    },
     {
       champ: 'selection',
       entete: '',
@@ -380,26 +381,6 @@ export function PlanAchat() {
         ),
     },
     {
-      champ: 'risque_source',
-      entete: 'Source',
-      largeur: '128px',
-      // C'est la colonne qui manquait : elle dit si un ennui chez ce
-      // fournisseur arrete la ligne, ou si une alternative existe.
-      rendu: (p) =>
-        !p.risque_source ? (
-          <span className="text-attenue-texte">—</span>
-        ) : p.risque_source === 'MONO_SOURCE' ? (
-          <span className="inline-flex items-center gap-1 rounded-[3px] bg-danger/12 px-1.5 py-px text-[11px] font-medium text-danger">
-            <AlertTriangle className="size-3" />
-            mono-source
-          </span>
-        ) : (
-          <span className="text-[11px] text-succes">
-            {p.nb_sources} sources
-          </span>
-        ),
-    },
-    {
       champ: 'action_recommandee',
       entete: 'Action',
       secondaire: true,
@@ -412,7 +393,7 @@ export function PlanAchat() {
       entete: 'Urgence',
       largeur: '90px',
       filtre: 'liste',
-      rendu: (p) => <Badge ton={TON_URGENCE[p.urgence] ?? 'neutre'}>{p.urgence}</Badge>,
+      rendu: (p) => <StatutBadge entite="urgence_achat" code={p.urgence} />,
     },
     {
       champ: 'code_reference',
@@ -455,9 +436,7 @@ export function PlanAchat() {
       filtre: 'liste',
       rendu: (p) => (
         <div className="flex flex-wrap items-center gap-1">
-          <Badge ton={TON_STATUT[p.statut] ?? 'neutre'}>
-            {LIBELLE_STATUT[p.statut] ?? p.statut}
-          </Badge>
+          <StatutBadge entite="plan_achat" code={p.statut} />
           {p.numero_bc && (
             <span className="text-[11px] text-attenue-texte">{p.numero_bc}</span>
           )}
@@ -567,12 +546,22 @@ export function PlanAchat() {
       entete: 'Palettes',
       numerique: true,
       largeur: '90px',
-      rendu: (p) =>
-        p.palettes_a_commander == null ? (
-          <span className="text-attenue-texte">—</span>
+      // Les palettes ne sont qu'un EQUIVALENT (21/10/2026 : jamais de palette
+      // pleine par defaut) : la proposition du moteur n'en porte pas, l'ecran
+      // les deduit du conditionnement de la fiche ; l'acheteur choisit kg ou
+      // palettes dans les lignes a commander.
+      rendu: (p) => {
+        if (p.palettes_a_commander != null)
+          return <span className="tabular-nums">{fmt.entier(p.palettes_a_commander)}</span>
+        const kgPalette = (p.poids_bobine_kg ?? 0) * (p.bobines_par_palette ?? 0)
+        return kgPalette > 0 ? (
+          <span className="tabular-nums text-attenue-texte" title="Équivalent en palettes ordinaires de la fiche, pour information">
+            ≈ {fmt.nombre(p.quantite_suggeree_kg / kgPalette, 1)}
+          </span>
         ) : (
-          <span className="tabular-nums">{fmt.entier(p.palettes_a_commander)}</span>
-        ),
+          <span className="text-attenue-texte">—</span>
+        )
+      },
     },
     {
       // LE COMPLEMENT DE PALETTE : ce qui est commande pour fermer la palette,
@@ -591,11 +580,19 @@ export function PlanAchat() {
         ),
     },
     {
+      // D, LA DATE DE DISPONIBILITE du moteur : elle devient la date de livraison
+      // prevue de la ligne de bon.
       champ: 'date_besoin_prevue',
       entete: 'Besoin le',
       largeur: '110px',
       secondaire: true,
       rendu: (p) => fmt.date(p.date_besoin_prevue),
+    },
+    {
+      champ: 'date_limite_commande',
+      entete: 'Commander avant le',
+      largeur: '120px',
+      rendu: (p) => (p.date_limite_commande ? fmt.date(p.date_limite_commande) : <span className="text-attenue-texte">—</span>),
     },
   ]
 
@@ -603,7 +600,7 @@ export function PlanAchat() {
     <div>
       <EnTetePage
         titre="Plan d'achat"
-        description="Propositions issues du MRP. Convertir ouvre un bon de commande en brouillon : rien n'est engagé avant sa validation."
+        description="Propositions du moteur de couverture (plan de production seul). Convertir ouvre un bon de commande en brouillon : rien n'est engagé avant sa validation."
       />
 
       {/* LES ONGLETS (demandes des 30/09 et 01/10/2026). Le travail se fait en
@@ -612,7 +609,9 @@ export function PlanAchat() {
           au bon de commande — neuf ou deja ouvert. Repartition et situation
           restent a cote, pour lire. */}
       <Onglets value={onglet} onValueChange={setOnglet}>
-        <OngletsListe className="mb-3">
+        {/* Cinq onglets ne tiennent pas sur un téléphone : ils passent à la ligne
+            (comme sur l'écran Lots) plutôt que d'élargir la page. */}
+        <OngletsListe className="mb-3 h-auto max-w-full flex-wrap gap-y-0">
           <Onglet value="besoins">
             <ShoppingCart className="size-3.5" />
             Besoins
@@ -634,30 +633,39 @@ export function PlanAchat() {
             <Gauge className="size-3.5" />
             Situation
           </Onglet>
+          {/* L'onglet « À commander » est parti dans /stock › Surveillance (decision
+              du 27/10/2026) ; aucun bouton « Commander » pour l'instant. */}
         </OngletsListe>
         <OngletContenu value="situation">
       {/* ---- KPI : les trois blocs de la feuille Plan_Achat -------------------
-           Tout se lit dans le STOCK. Une reference apparait ici parce que son
-           projete est passe sous son minimum, pas parce qu'on l'a saisie. ---- */}
+           La situation est celle du MOTEUR DE COUVERTURE (27/10/2026) : les
+           memes notions que /stock › Surveillance. ---- */}
       {kpi && (
         <div className="mb-4 grid gap-3 lg:grid-cols-3">
           <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3">
             <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
               Situation du stock
+              {qKpi.data?.calcule_le && (
+                <span className="ml-1 font-normal normal-case tracking-normal">
+                  · calculée le {fmt.dateHeure(qKpi.data.calcule_le)}
+                </span>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
-              <span className="text-attenue-texte">Références en alerte</span>
-              <span className="text-right font-semibold tabular-nums">{kpi.refs_en_alerte}</span>
-              <span className="text-danger">Ruptures</span>
-              <span className="text-right font-semibold tabular-nums text-danger">{kpi.ruptures}</span>
-              <span className="text-danger">Critiques</span>
-              <span className="text-right tabular-nums">{kpi.critiques}</span>
-              <span className="text-alerte">Attention</span>
-              <span className="text-right tabular-nums">{kpi.attention}</span>
-              <span className="text-succes">OK</span>
-              <span className="text-right tabular-nums">{kpi.ok}</span>
-              <span className="text-attenue-texte">Classe A en alerte</span>
-              <span className="text-right font-semibold tabular-nums">{kpi.classe_a_en_alerte}</span>
+              <span className="text-attenue-texte">Références suivies</span>
+              <span className="text-right font-semibold tabular-nums">{kpi.references ?? '—'}</span>
+              <span className="text-danger" title="La 1re rupture tombe avant aujourd’hui + délai">{libelleStatut('statut_stock', 'RUPTURE_INEVITABLE')}</span>
+              <span className="text-right font-semibold tabular-nums text-danger">{kpi.rupture_inevitable ?? '—'}</span>
+              <span className="text-alerte" title="Un creux sous le seuil de sécurité dans le délai">{libelleStatut('statut_stock', 'SOUS_SECURITE')}</span>
+              <span className="text-right tabular-nums">{kpi.sous_securite ?? '—'}</span>
+              <span className="text-info" title="La couverture actuelle est sous la couverture cible">{libelleStatut('statut_stock', 'SOUS_CIBLE')}</span>
+              <span className="text-right tabular-nums">{kpi.sous_cible ?? '—'}</span>
+              <span className="text-succes" title="La couverture atteint la cible">{libelleStatut('statut_stock', 'COUVERT')}</span>
+              <span className="text-right tabular-nums">{kpi.couvert ?? '—'}</span>
+              <span className="text-danger" title="Date limite de commande atteinte ou dépassée">À commander aujourd’hui</span>
+              <span className="text-right font-semibold tabular-nums">{kpi.a_commander_aujourdhui ?? '—'}</span>
+              <span className="text-attenue-texte">Classe A en rupture inévitable</span>
+              <span className="text-right font-semibold tabular-nums">{kpi.classe_a_en_rupture ?? '—'}</span>
             </div>
           </div>
 
@@ -680,7 +688,7 @@ export function PlanAchat() {
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[13px]">
                 {(qKpi.data?.tiering ?? []).map((t) => (
                   <Fragment key={t.tier}>
-                    <span><Badge ton={TON_URGENCE[t.tier] ?? 'neutre'}>{t.tier}</Badge></span>
+                    <span><StatutBadge entite="urgence_achat" code={t.tier} /></span>
                     <span className="text-right tabular-nums">{t.nb} · {fmt.mad(t.montant_mad)}</span>
                   </Fragment>
                 ))}
@@ -733,7 +741,7 @@ export function PlanAchat() {
                         key={t}
                         className={cn(
                           'px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte',
-                          i >= 3 && i <= 8 ? 'text-right' : 'text-left',
+                          i >= 3 && i <= 9 ? 'text-right' : 'text-left',
                         )}
                       >
                         {t}
@@ -760,6 +768,13 @@ export function PlanAchat() {
                         <td className="px-2.5 py-1.5 text-right">
                           {f.nb_tier1 > 0 ? <Badge ton="danger">{f.nb_tier1}</Badge> : <span className="text-attenue-texte">—</span>}
                         </td>
+                        <td className="px-2.5 py-1.5 text-right">
+                          {(f.nb_rupture_inevitable ?? 0) > 0 ? (
+                            <Badge ton="danger">{f.nb_rupture_inevitable}</Badge>
+                          ) : (
+                            <span className="text-attenue-texte">—</span>
+                          )}
+                        </td>
                         <td className="px-2.5 py-1.5 text-[11px] text-attenue-texte">{f.contact_principal ?? '—'}</td>
                       </tr>
                     )
@@ -776,7 +791,7 @@ export function PlanAchat() {
                       {fmt.mad((qKpi.data?.fournisseurs ?? []).reduce((s, f) => s + f.montant_mad, 0))}
                     </td>
                     <td className="px-2.5 py-1.5 text-right tabular-nums">100 %</td>
-                    <td colSpan={2} />
+                    <td colSpan={3} />
                   </tr>
                 </tbody>
               </table>
@@ -794,6 +809,7 @@ export function PlanAchat() {
             ecrire={droits.peutEcrire}
             envoyer={(cibles, ajustements) => commander.mutate({ propositions: selection, cibles, ajustements })}
             revenir={() => setOnglet('besoins')}
+            ouvrir={(p) => setOuverte({ code: p.code_reference, designation: p.designation })}
           />
         </OngletContenu>
         <OngletContenu value="besoins">
@@ -875,7 +891,7 @@ export function PlanAchat() {
         chargement={q.isLoading}
         erreur={q.error}
         cle={(p) => p.id_proposition}
-        detail={(p) => (deplies[p.id_proposition] ? <DetailCalcul reference={p.code_reference} /> : null)}
+        surClic={(p) => setOuverte({ code: p.code_reference, designation: p.designation })}
         titreCarte={(p) => p.code_reference}
         placeholderRecherche="Référence, fournisseur, urgence..."
         tailleParDefaut={50}
@@ -933,6 +949,9 @@ export function PlanAchat() {
       />
         </OngletContenu>
       </Onglets>
+
+      {/* La fenêtre de surveillance d'une référence (27/10/2026), au clic sur une ligne. */}
+      <ModaleReference reference={ouverte?.code ?? null} designation={ouverte?.designation} surFermer={() => setOuverte(null)} />
 
       {arbitrage && (
         <PanneauEquivalent
@@ -1119,15 +1138,6 @@ function PanneauEquivalent({
   )
 }
 
-interface BcResume {
-  id_bc: string
-  numero_bc: string
-  code_fournisseur: string
-  statut: string
-  date_bc: string
-  nb_lignes: number
-}
-
 /**
  * LES LIGNES A COMMANDER — ce qu'on a coche dans les besoins, par fournisseur.
  *
@@ -1136,8 +1146,18 @@ interface BcResume {
  * bon du meme fournisseur encore en brouillon — on complete au lieu d'en
  * ouvrir un second. Rien n'est engage : le bon reste a valider.
  */
+/** Une ligne de la boite « Commander », telle que l'acheteur la confirme. */
+interface Saisie {
+  qte: string
+  prix: string
+  pal: string
+  bob: string
+  /** Kg, palettes et bobines se recalculent ensemble. */
+  lie: boolean
+}
+
 function LignesACommander({
-  lignes, retirer, enCours, ecrire, envoyer, revenir,
+  lignes, retirer, enCours, ecrire, envoyer, revenir, ouvrir,
 }: {
   lignes: Proposition[]
   retirer: (id: string) => void
@@ -1145,42 +1165,71 @@ function LignesACommander({
   ecrire: boolean
   envoyer: (
     cibles: Record<string, string>,
-    ajustements: Record<string, { quantite_kg?: number; prix_mad?: number; nb_palettes?: number; nb_bobines?: number }>,
+    ajustements: Record<string, { quantite_kg?: number; prix_mad?: number; prix_devise?: number; nb_palettes?: number; nb_bobines?: number }>,
   ) => void
   revenir: () => void
+  /** Le clic sur une ligne (hors champs et boutons) ouvre la fenêtre de surveillance. */
+  ouvrir: (p: Proposition) => void
 }) {
   const [cibles, setCibles] = useState<Record<string, string>>({})
   // L'ACHETEUR AJUSTE SUR LA COMMANDE (14/10/2026), pas dans le plan : quantite,
   // prix, et le colisage (palettes / bobines) qu'il confirme. Pre-rempli par le
   // calcul ; ce qu'il envoie fait foi sur le bon.
-  const [aj, setAj] = useState<Record<string, { qte: string; prix: string; pal: string; bob: string }>>({})
-  const defauts = (p: Proposition) => ({
-    qte: p.quantite_suggeree_kg != null ? String(p.quantite_suggeree_kg) : '',
-    prix: p.prix_estime_mad != null ? String(p.prix_estime_mad) : '',
-    pal: p.palettes_a_commander != null ? String(p.palettes_a_commander) : '',
-    bob: '',
+  //
+  // KG, PALETTES, BOBINES LIES (21/10/2026), comme dans la grille du bon : on
+  // saisit l'un, les deux autres suivent ; le lien se detache ligne par ligne
+  // (une palette entamee ne se deduit d'aucun poids). LE PRIX DANS LA DEVISE de
+  // la proposition, celle qu'on negocie ; en MAD si elle est en MAD. Le
+  // complement de palette n'est jamais impose : la quantite est celle du plan.
+  const [aj, setAj] = useState<Record<string, Saisie>>({})
+  const condDeP = (p: Proposition): Conditionnement => ({
+    poids_bobine_kg: p.poids_bobine_kg, bobines_par_palette: p.bobines_par_palette,
   })
+  const enDevise = (p: Proposition) =>
+    !!p.code_devise && p.code_devise !== 'MAD' && p.prix_devise != null && p.prix_devise > 0
+  const defauts = (p: Proposition): Saisie => {
+    const colis = depuisKg(p.quantite_suggeree_kg ?? '', condDeP(p))
+    return {
+      qte: p.quantite_suggeree_kg != null ? String(p.quantite_suggeree_kg) : '',
+      prix: enDevise(p)
+        ? String(p.prix_devise)
+        : p.prix_estime_mad != null ? String(p.prix_estime_mad) : '',
+      pal: p.palettes_a_commander != null ? String(p.palettes_a_commander) : pourChamp(colis.palettes),
+      bob: pourChamp(colis.bobines),
+      lie: true,
+    }
+  }
   const courant = (p: Proposition) => aj[p.id_proposition] ?? defauts(p)
   const poser = (p: Proposition, champ: 'qte' | 'prix' | 'pal' | 'bob', v: string) =>
-    setAj((a) => ({ ...a, [p.id_proposition]: { ...courant(p), [champ]: v } }))
+    setAj((a) => {
+      const c = courant(p)
+      if (champ === 'prix' || !c.lie) return { ...a, [p.id_proposition]: { ...c, [champ]: v } }
+      const cond = condDeP(p)
+      const r = champ === 'pal' ? depuisPalettes(v, cond) : champ === 'bob' ? depuisBobines(v, cond) : depuisKg(v, cond)
+      return {
+        ...a,
+        [p.id_proposition]: {
+          ...c,
+          qte: champ === 'qte' ? v : pourChamp(r.kg, 2),
+          pal: champ === 'pal' ? v : pourChamp(r.palettes),
+          bob: champ === 'bob' ? v : pourChamp(r.bobines),
+        },
+      }
+    })
+  const basculerLien = (p: Proposition) =>
+    setAj((a) => ({ ...a, [p.id_proposition]: { ...courant(p), lie: !courant(p).lie } }))
   const nn = (s: string) => {
-    const x = Number(s)
+    const x = Number(String(s).replace(/\s/g, '').replace(',', '.'))
     return Number.isFinite(x) ? x : 0
   }
-  const montantLigne = (p: Proposition) => nn(courant(p).qte) * nn(courant(p).prix)
-  const qBc = useQuery({
-    queryKey: ['bons-commande'],
-    queryFn: ({ signal }) => api.get<BcResume[]>('/api/bons-commande', { signal }),
-  })
+  /** Le montant en MAD : un prix en devise passe au taux de la proposition. */
+  const montantLigne = (p: Proposition) =>
+    nn(courant(p).qte) * nn(courant(p).prix) * (enDevise(p) ? (p.taux_devise || 1) : 1)
   const groupes = useMemo(() => {
     const m = new Map<string, Proposition[]>()
     for (const p of lignes) m.set(p.code_fournisseur, [...(m.get(p.code_fournisseur) ?? []), p])
     return [...m.entries()]
   }, [lignes])
-  const ouverts = (frs: string) =>
-    (qBc.data ?? []).filter(
-      (b) => b.code_fournisseur === frs && (b.statut === 'BROUILLON' || b.statut === 'EN_ATTENTE_VALIDATION'),
-    )
 
   if (lignes.length === 0) {
     return (
@@ -1203,20 +1252,18 @@ function LignesACommander({
               <CarteTitre>{ls[0].fournisseur_nom || frs}</CarteTitre>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11.5px] text-attenue-texte">Envoyer vers</span>
-                <Selecteur
-                  className="h-8 w-80 max-w-full"
-                  value={cibles[frs] ?? ''}
-                  disabled={!ecrire}
-                  onChange={(e) => setCibles((c) => ({ ...c, [frs]: e.target.value }))}
-                  aria-label={`Bon de commande pour ${ls[0].fournisseur_nom || frs}`}
-                >
-                  <option value="">Un nouveau bon</option>
-                  {ouverts(frs).map((b) => (
-                    <option key={b.id_bc} value={b.id_bc}>
-                      {b.numero_bc} · {b.statut === 'BROUILLON' ? 'brouillon' : 'en attente'} · {b.nb_lignes} ligne(s)
-                    </option>
-                  ))}
-                </Selecteur>
+                {/* LE BROUILLON SEUL se complete (21/10/2026) : un bon soumis est fige.
+                    Cherche parmi les brouillons de CE fournisseur (24/10/2026). */}
+                <ChoixRecherche
+                  type="bc"
+                  filtres={{ code_fournisseur: frs, statut: 'BROUILLON' }}
+                  className="w-80 max-w-full"
+                  valeur={cibles[frs] ?? ''}
+                  desactive={!ecrire}
+                  vide="Un nouveau bon"
+                  onChange={(v) => setCibles((c) => ({ ...c, [frs]: v }))}
+                  ariaLabel={`Bon de commande pour ${ls[0].fournisseur_nom || frs}`}
+                />
               </div>
             </CarteEntete>
             <CarteCorps className="p-0">
@@ -1230,7 +1277,7 @@ function LignesACommander({
                     <tr className="border-b border-bordure">
                       <th className={cn(th, 'text-left')}>Référence</th>
                       <th className={cn(th, 'w-32 text-right')}>Qté (kg)</th>
-                      <th className={cn(th, 'w-28 text-right')}>Prix MAD/kg</th>
+                      <th className={cn(th, 'w-28 text-right')}>Prix / kg</th>
                       <th className={cn(th, 'w-28 text-right')}>Palettes</th>
                       <th className={cn(th, 'w-24 text-right')}>Bobines</th>
                       <th className={cn(th, 'w-32 text-right')}>Montant MAD</th>
@@ -1241,21 +1288,48 @@ function LignesACommander({
                     {ls.map((p) => {
                       const c = courant(p)
                       return (
-                      <tr key={p.id_proposition} className="border-b border-bordure/60 align-top">
+                      <tr
+                        key={p.id_proposition}
+                        className="cursor-pointer border-b border-bordure/60 align-top hover:bg-primaire/5"
+                        onClick={(e) => {
+                          // Les champs, cases et boutons de la ligne gardent leur geste.
+                          if ((e.target as HTMLElement).closest('input, select, textarea, button, a, label')) return
+                          ouvrir(p)
+                        }}
+                      >
                         <td className="px-2 py-1.5">
                           <div className="font-medium">{p.code_reference}</div>
                           {p.designation && <div className="text-[11px] text-attenue-texte">{p.designation}</div>}
-                          <Badge ton={TON_URGENCE[p.urgence] ?? 'neutre'}>{p.urgence}</Badge>
+                          <StatutBadge entite="urgence_achat" code={p.urgence} />
+                          {/* Les dates du moteur : D devient la livraison prévue de la ligne. */}
+                          <div className="mt-0.5 text-[11px] text-attenue-texte">
+                            livraison prévue {fmt.date(p.date_besoin_prevue)}
+                            {p.date_limite_commande && <> · commander avant le {fmt.date(p.date_limite_commande)}</>}
+                          </div>
                         </td>
                         <td className="px-2 py-1.5">
-                          <Champ type="number" step="any" min="0" value={c.qte} disabled={!ecrire}
-                            onChange={(e) => poser(p, 'qte', e.target.value)}
-                            className="h-8 text-right tabular-nums" aria-label={`Quantité (kg) pour ${p.code_reference}`} />
+                          <div className="flex items-center gap-1">
+                            <Bouton taille="icone-xs" variante="discret" disabled={!ecrire}
+                              onClick={() => basculerLien(p)}
+                              aria-label={c.lie ? 'Détacher kg, palettes et bobines' : 'Relier kg, palettes et bobines'}
+                              title={c.lie
+                                ? 'Liés : la saisie de l’un recalcule les deux autres. Cliquer pour détacher.'
+                                : 'Détachés : chaque champ se saisit seul. Cliquer pour relier.'}>
+                              {c.lie ? <Link2 /> : <Unlink2 />}
+                            </Bouton>
+                            <Champ type="number" step="any" min="0" value={c.qte} disabled={!ecrire}
+                              onChange={(e) => poser(p, 'qte', e.target.value)}
+                              className="h-8 text-right tabular-nums" aria-label={`Quantité (kg) pour ${p.code_reference}`} />
+                          </div>
                         </td>
                         <td className="px-2 py-1.5">
                           <Champ type="number" step="any" min="0" value={c.prix} disabled={!ecrire}
                             onChange={(e) => poser(p, 'prix', e.target.value)}
-                            className="h-8 text-right tabular-nums" aria-label={`Prix MAD par kg pour ${p.code_reference}`} />
+                            className="h-8 text-right tabular-nums"
+                            aria-label={`Prix ${enDevise(p) ? p.code_devise : 'MAD'} par kg pour ${p.code_reference}`} />
+                          <div className="mt-0.5 text-right text-[10.5px] text-attenue-texte">
+                            {enDevise(p) ? `${p.code_devise}/kg` : 'MAD/kg'}
+                          </div>
                         </td>
                         <td className="px-2 py-1.5">
                           <Champ type="number" step="1" min="0" value={c.pal} disabled={!ecrire}
@@ -1314,15 +1388,17 @@ function LignesACommander({
               // bobines (meme non modifies : la valeur du plan vaut confirmation).
               const ajustements: Record<
                 string,
-                { quantite_kg?: number; prix_mad?: number; nb_palettes?: number; nb_bobines?: number }
+                { quantite_kg?: number; prix_mad?: number; prix_devise?: number; nb_palettes?: number; nb_bobines?: number }
               > = {}
               for (const p of lignes) {
                 const c = courant(p)
                 ajustements[p.id_proposition] = {
-                  quantite_kg: c.qte.trim() ? Number(c.qte) : undefined,
-                  prix_mad: c.prix.trim() ? Number(c.prix) : undefined,
-                  nb_palettes: c.pal.trim() ? Math.round(Number(c.pal)) : undefined,
-                  nb_bobines: c.bob.trim() ? Math.round(Number(c.bob)) : undefined,
+                  quantite_kg: c.qte.trim() ? nn(c.qte) : undefined,
+                  // Le prix part dans la devise ou il a ete saisi.
+                  prix_mad: c.prix.trim() && !enDevise(p) ? nn(c.prix) : undefined,
+                  prix_devise: c.prix.trim() && enDevise(p) ? nn(c.prix) : undefined,
+                  nb_palettes: c.pal.trim() ? Math.round(nn(c.pal)) : undefined,
+                  nb_bobines: c.bob.trim() ? Math.round(nn(c.bob)) : undefined,
                 }
               }
               envoyer(Object.fromEntries(Object.entries(cibles).filter(([, v]) => v)), ajustements)

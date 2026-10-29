@@ -16,6 +16,14 @@ Usage (depuis frontend/) :
     python simulation/lancer.py --cible <CARGO_TARGET_DIR>            # tout, ou la suite
     python simulation/lancer.py --limite 20                           # 20 evenements, pour voir
     python simulation/lancer.py --base gestionfil_saisie --construire
+Un ESSAI COURT sur une base jetable (22/10/2026), sans toucher le journal de la
+base de saisie :
+    python simulation/lancer.py --base gestionfil_banc_1234 --port 8098 --rapport <dossier>
+        --depuis 2026-09-01 --jusqua 2026-10-21 --types OF,OF_CLOTURE,MACHINE,SORTIE,RETOUR_HM
+  --depuis / --jusqua : la fenetre de dates (incluse) ; --types : les types d'evenement
+  joues ; --rapport : le dossier du journal (rapport-simulation par defaut) ; --port :
+  le port du serveur d'essai (8099 par defaut, jamais 8080). Le mot de passe des comptes
+  est SIM_MDP (Simulation-2026! par defaut).
 Le mot de passe postgres est pris dans PGPASSWORD, ou dans backend/.env.
 """
 import os
@@ -32,7 +40,6 @@ from pathlib import Path
 ICI = Path(__file__).resolve().parent
 FRONTEND = ICI.parent
 RACINE = FRONTEND.parent
-PORT = 8099
 
 
 def option(nom, defaut=None):
@@ -44,6 +51,9 @@ def main():
     base = option("--base", "gestionfil_saisie")
     if base == "gestionfil":
         sys.exit("Pas la base vivante : la simulation ecrit des annees de documents.")
+    port = int(option("--port", "8099"))
+    if port == 8080:
+        sys.exit("Pas le port 8080 : c'est le serveur de l'utilisateur.")
     cible = Path(option("--cible", str(Path(tempfile.gettempdir()) / "gestionfil-paquet-cible")))
     binaire = cible / "debug" / ("gestionfil.exe" if os.name == "nt" else "gestionfil")
     if not binaire.exists():
@@ -60,28 +70,32 @@ def main():
 
     with socket.socket() as sonde:
         sonde.settimeout(1)
-        if sonde.connect_ex(("127.0.0.1", PORT)) == 0:
-            sys.exit(f"le port {PORT} est deja occupe.")
+        if sonde.connect_ex(("127.0.0.1", port)) == 0:
+            sys.exit(f"le port {port} est deja occupe.")
 
     vide = tempfile.mkdtemp(prefix="simulation_")
     journal = open(Path(vide) / "serveur.log", "w", encoding="utf-8")
-    env = dict(os.environ, DATABASE_URL=url, JWT_SECRET=secrets.token_hex(32), BIND_ADDR=f"127.0.0.1:{PORT}",
+    env = dict(os.environ, DATABASE_URL=url, JWT_SECRET=secrets.token_hex(32), BIND_ADDR=f"127.0.0.1:{port}",
                FRONTEND_DIR=str(dist), RUST_LOG="warn")
     serveur = subprocess.Popen([str(binaire)], cwd=vide, env=env, stdout=journal, stderr=subprocess.STDOUT)
     try:
         for _ in range(60):
             try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/sante", timeout=2):
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/sante", timeout=2):
                     break
             except Exception:
                 if serveur.poll() is not None:
                     journal.flush()
                     sys.exit("le serveur s'est arrete : " + (Path(vide) / "serveur.log").read_text(encoding="utf-8")[-1500:])
                 time.sleep(0.5)
-        print(f"simulation : base {base}, serveur 127.0.0.1:{PORT} (journal du serveur : {vide}\\serveur.log)", flush=True)
-        env_pw = dict(os.environ, SIM_URL=f"http://127.0.0.1:{PORT}")
-        if option("--limite"):
-            env_pw["SIM_LIMITE"] = option("--limite")
+        print(f"simulation : base {base}, serveur 127.0.0.1:{port} (journal du serveur : {vide}\\serveur.log)", flush=True)
+        env_pw = dict(os.environ, SIM_URL=f"http://127.0.0.1:{port}")
+        for opt, var in (("--limite", "SIM_LIMITE"), ("--depuis", "SIM_DEPUIS"), ("--jusqua", "SIM_JUSQUA"),
+                         ("--types", "SIM_TYPES")):
+            if option(opt):
+                env_pw[var] = option(opt)
+        if option("--rapport"):
+            env_pw["SIM_DOSSIER"] = str(Path(option("--rapport")).resolve())
         code = subprocess.run("npx playwright test --config simulation/playwright.config.ts", cwd=FRONTEND,
                               shell=True, env=env_pw).returncode
     finally:
@@ -90,7 +104,7 @@ def main():
             serveur.wait(10)
         except subprocess.TimeoutExpired:
             serveur.kill()
-    print("journal : frontend/rapport-simulation/journal.log")
+    print(f"journal : {option('--rapport') or 'frontend/rapport-simulation'}/journal.log")
     return code
 
 

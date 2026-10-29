@@ -12,6 +12,8 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { ChevronDown, Loader2 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { lireNombre, versCanonique, versSaisie } from '../../lib/nombres'
+import { texteDe } from '../../aide/indice'
+import { IndiceChamp } from './Indice'
 
 // ============================================================================
 // Bouton
@@ -229,14 +231,30 @@ export const Selecteur = React.forwardRef<
 ))
 Selecteur.displayName = 'Selecteur'
 
+/**
+ * L'INDICE SE POSE TOUT SEUL (27/10/2026). Une étiquette dont l'intitulé est
+ * décrit au catalogue d'aide de l'écran (`aide/`) reçoit son ⓘ ; les autres
+ * n'affichent rien. `indice` force l'intitulé cherché (quand le texte affiché
+ * varie), `indice={false}` le retire.
+ */
+type ProprietesIndice = { indice?: string | false }
+
+function intituleCherche(indice: string | false | undefined, enfants: React.ReactNode): string {
+  if (indice === false) return ''
+  return indice ?? texteDe(enfants)
+}
+
 export function Etiq({
   className,
   obligatoire,
   children,
+  indice,
   ...props
-}: React.LabelHTMLAttributes<HTMLLabelElement> & { obligatoire?: boolean }) {
+}: React.LabelHTMLAttributes<HTMLLabelElement> & { obligatoire?: boolean } & ProprietesIndice) {
+  const intitule = intituleCherche(indice, children)
   return (
     <label
+      data-indice-gere=""
       className={cn(
         'mb-1 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-attenue-texte',
         className,
@@ -245,6 +263,26 @@ export function Etiq({
     >
       {children}
       {obligatoire && <span className="text-danger">*</span>}
+      {intitule && <IndiceChamp intitule={intitule} />}
+    </label>
+  )
+}
+
+/**
+ * Une étiquette SANS apparence imposée, qui porte l'indice de son champ :
+ * pour les écrans qui dessinent leurs libellés eux-mêmes. L'icône suit le
+ * texte, sur la même ligne.
+ */
+export function Libelle({
+  children,
+  indice,
+  ...props
+}: React.LabelHTMLAttributes<HTMLLabelElement> & ProprietesIndice) {
+  const intitule = intituleCherche(indice, children)
+  return (
+    <label data-indice-gere="" {...props}>
+      {children}
+      {intitule && <IndiceChamp intitule={intitule} className="ml-1" />}
     </label>
   )
 }
@@ -523,7 +561,7 @@ export function EtatVide({
    donne le meme signal en un coup d'oeil, et le texte reste du texte. C'est la
    convention des consoles d'administration serieuses. */
 const varianteAlerte = cva(
-  'flex gap-3 rounded-[var(--radius)] border border-l-[3px] px-3.5 py-3 text-[13px] leading-relaxed',
+  'flex rounded-[var(--radius)] border',
   {
     variants: {
       ton: {
@@ -532,20 +570,43 @@ const varianteAlerte = cva(
         alerte: 'border-alerte/30 border-l-alerte bg-alerte/[0.09] text-texte',
         danger: 'border-danger/25 border-l-danger bg-danger/[0.07] text-texte',
       },
+      /* LA VARIANTE COMPACTE (24/10/2026) : le meme avis, a la taille d'une
+         ligne complementaire ↳ sous une ligne de saisie, ou un encadre de
+         douze pixels de marge pousserait la grille. Meme filet, memes tons. */
+      taille: {
+        normale: 'gap-3 border-l-[3px] px-3.5 py-3 text-[13px] leading-relaxed',
+        compacte: 'gap-1.5 border-l-2 px-2 py-1 text-[11px] leading-snug',
+      },
     },
-    defaultVariants: { ton: 'info' },
+    defaultVariants: { ton: 'info', taille: 'normale' },
   },
 )
 
 export function Alerte({
   className,
   ton,
+  taille,
   titre,
+  icone: Icone,
   children,
   ...props
-}: React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof varianteAlerte> & { titre?: string }) {
+}: React.HTMLAttributes<HTMLDivElement> &
+  VariantProps<typeof varianteAlerte> & {
+    titre?: string
+    /** Une icone posee devant le texte, a la couleur du ton. */
+    icone?: React.ComponentType<{ className?: string }>
+  }) {
   return (
-    <div role="status" className={cn(varianteAlerte({ ton }), className)} {...props}>
+    <div role="status" className={cn(varianteAlerte({ ton, taille }), className)} {...props}>
+      {Icone && (
+        <Icone
+          className={cn(
+            'shrink-0',
+            taille === 'compacte' ? 'mt-px size-3' : 'mt-0.5 size-4',
+            ton === 'succes' ? 'text-succes' : ton === 'alerte' ? 'text-alerte' : ton === 'danger' ? 'text-danger' : 'text-info',
+          )}
+        />
+      )}
       <div className="min-w-0 flex-1">
         {titre && <p className="font-semibold">{titre}</p>}
         <div className={titre ? 'mt-0.5' : undefined}>{children}</div>

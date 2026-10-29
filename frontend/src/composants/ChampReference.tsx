@@ -18,7 +18,7 @@
  */
 import { useMemo } from 'react'
 import { api } from '../api/client'
-import { ChampRecherche, type Suggestion } from './ChampRecherche'
+import { ChampRecherche, type Resultat, type Suggestion } from './ChampRecherche'
 
 /** Ce qu'une reference doit porter pour etre proposee et convertie. */
 export interface RefTrouvee extends Record<string, unknown> {
@@ -57,6 +57,17 @@ export async function chercherCatalogue(
   return api.get<RefTrouvee[]>(`/api/catalogue?${p}`)
 }
 
+/**
+ * La meme recherche, en enveloppe : les lignes ET le total (24/10/2026). La
+ * liste des suggestions dit ainsi qu'il en reste, au lieu de s'arreter a vingt
+ * sans un mot.
+ */
+async function chercherCatalogueAvecTotal(motif: string, fournisseur?: string) {
+  const p = new URLSearchParams({ actif: '1', recherche: motif, limite: '20', offset: '0' })
+  if (fournisseur) p.set('code_fournisseur', fournisseur)
+  return api.get<{ lignes: RefTrouvee[]; total: number; plus?: boolean }>(`/api/catalogue?${p}`)
+}
+
 export function ChampReference({
   valeur,
   surChoix,
@@ -91,9 +102,9 @@ export function ChampReference({
   ariaLabel?: string
 }) {
   const chercher = useMemo(
-    () => async (motif: string): Promise<Suggestion[]> => {
-      const refs = await chercherCatalogue(motif, { fournisseur })
-      return refs.map((r) => {
+    () => async (motif: string): Promise<Resultat> => {
+      const env = await chercherCatalogueAvecTotal(motif, fournisseur)
+      const suggestions = env.lignes.map((r): Suggestion => {
         const m = mention?.(r)
         return {
           valeur: r.code_reference,
@@ -106,6 +117,7 @@ export function ChampReference({
           charge: r,
         }
       })
+      return { suggestions, plus: env.total > env.lignes.length, total: env.total }
     },
     [fournisseur, dejaPrises, mention],
   )

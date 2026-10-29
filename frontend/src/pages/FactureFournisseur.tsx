@@ -18,6 +18,12 @@
  * figee ; elle se corrige par un avoir ou une facture complementaire.
  *
  * Saisie sur la page, pas dans une fenetre : c'est un document qu'on relit.
+ *
+ * L'APERCU ET LA VALIDATION PORTENT SUR LA FACTURE ENREGISTREE (24/10/2026).
+ * Le serveur simule ce qui est en base, pas ce qui est a l'ecran : tant qu'un
+ * champ a change (en-tete, notes ou lignes), l'apercu affiche ne vaut plus et
+ * « Aperçu » comme « Valider » attendent l'enregistrement — la raison est
+ * ecrite dans la barre du bas.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -42,9 +48,23 @@ import {
 } from '../composants/ui/base'
 import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
-import { lireNombre } from '../lib/nombres'
+import { lireNombre, versSaisie } from '../lib/nombres'
+import { nouvelIdentifiant } from '../lib/identifiant'
+import { useGardeSaisie } from '../hooks/useGardeSaisie'
 
 const MODULE = 'RECEPTIONS'
+
+/** Le statut se lit en mots, pas en code. */
+const LIBELLE_STATUT: Record<string, string> = {
+  BROUILLON: 'Brouillon',
+  VALIDEE: 'Validée',
+  ANNULEE: 'Annulée',
+}
+const TON_STATUT: Record<string, 'neutre' | 'succes' | 'danger'> = {
+  BROUILLON: 'neutre',
+  VALIDEE: 'succes',
+  ANNULEE: 'danger',
+}
 
 interface Candidate {
   id_ligne_reception: string
@@ -86,6 +106,8 @@ interface LigneLue {
 
 interface Entete {
   id_facture: string
+  /** La version lue (verrou optimiste, groupe 3, 20/10/2026). */
+  version: number
   numero_facture: string
   code_fournisseur: string
   fournisseur_nom: string
@@ -125,6 +147,159 @@ const signe = (n: number) => `${n > 0 ? '+' : ''}${fmt.nombre(n, 2)}`
 /** L'empreinte du document a l'ecran : elle dit s'il a change. */
 const signature = (e: Record<string, string>, c: Record<string, Saisie>) =>
   JSON.stringify([e, Object.entries(c).sort(([a], [b]) => a.localeCompare(b))])
+
+/* UNE PESEE, UNE RANGEE (24/10/2026). « Les champs de rapprochement sur la meme
+   ligne que la ligne de reception ; quand il coche, il active la saisie, sinon
+   desactive et vide les champs. » Au-dela de 58rem de carte, tout tient sur une
+   rangee alignee sous les intitules ; en dessous, la saisie passe sur la
+   rangee « ↳ », chaque case avec son intitule. */
+const GRILLE =
+  '@min-[58rem]:grid @min-[58rem]:grid-cols-[1rem_minmax(9rem,1fr)_5.5rem_5.5rem_6.5rem_6rem_4rem_6.5rem_7.5rem] @min-[58rem]:items-center @min-[58rem]:gap-x-2.5'
+
+/** Une rangee du tableau : la pesee proposee et, cochee, sa ligne de facture. */
+interface Rangee {
+  id: string
+  /** La pesee telle que la liste « a facturer » la rend (brouillon seulement). */
+  candidate: Candidate | null
+  /** La ligne de facture : calculee a l'ecran (cochee) ou relue (facture figee). */
+  ligne: LigneLue | null
+}
+
+function RangeeFacture({
+  rangee,
+  saisie,
+  modifiable,
+  devise,
+  basculer,
+  poser,
+}: {
+  rangee: Rangee
+  saisie: Saisie | undefined
+  modifiable: boolean
+  devise: string
+  basculer: (c: Pick<Candidate, 'id_ligne_reception' | 'quantite_stock_kg' | 'prix_kg_devise'>) => void
+  poser: (idLigne: string, champ: keyof Saisie, v: string) => void
+}) {
+  const { id, candidate: c, ligne: l } = rangee
+  const coche = !!saisie
+  const numero = c?.numero_reception ?? l?.numero_reception ?? ''
+  const reference = c?.code_reference ?? l?.code_reference ?? ''
+  const designation = c?.designation ?? l?.designation ?? null
+  const bc = c?.numero_bc ?? l?.numero_bc ?? null
+  const pesee = c?.quantite_stock_kg ?? l?.quantite_pesee_kg ?? 0
+  const engage = c ? c.prix_kg_devise : l?.prix_engage_devise
+  const precisions = [
+    c?.lot_fournisseur ? `lot ${c.lot_fournisseur}` : null,
+    bc,
+    c?.dossier_numero ? `dossier ${c.dossier_numero}` : null,
+  ].filter(Boolean)
+  const horsQte = !!l && Math.abs(l.ecart_quantite_kg) > 0.001
+  const horsPrix = !!l && l.ecart_prix_pct != null && l.ecart_prix_pct !== 0
+  // La saisie : une case a la largeur de ce qu'elle attend, la valeur a droite.
+  const champ = (cle: keyof Saisie, prefixe: string, intitule: string, largeur: string) => (
+    <label className="flex items-center gap-1.5">
+      <span className="text-[11px] text-attenue-texte @min-[58rem]:hidden">{intitule}</span>
+      {modifiable ? (
+        <Champ
+          id={`${prefixe}-${id}`}
+          inputMode="decimal"
+          aria-label={`${intitule} — ${reference} de ${numero}`}
+          className={cn('h-8 text-right tabular-nums @min-[58rem]:w-full', largeur)}
+          value={saisie?.[cle] ?? ''}
+          disabled={!coche}
+          onChange={(e) => poser(id, cle, e.target.value)}
+        />
+      ) : (
+        <span className="w-full text-right">
+          {cle === 'qte'
+            ? fmt.nombre(l?.quantite_facturee_kg ?? 0, 2)
+            : cle === 'prix'
+              ? fmt.nombre(l?.prix_kg_devise ?? 0, 4)
+              : l?.remise_pct
+                ? fmt.nombre(l.remise_pct, 2)
+                : '—'}
+        </span>
+      )}
+    </label>
+  )
+  return (
+    <li
+      className={cn(
+        'flex flex-col gap-1 px-3 py-1.5 text-[13px] tabular-nums',
+        GRILLE,
+        modifiable && !coche && 'text-attenue-texte',
+      )}
+    >
+      <div className="grid grid-cols-[1rem_minmax(0,1fr)_auto_auto] items-center gap-x-2.5 @min-[58rem]:contents">
+        {modifiable ? (
+          <input
+            type="checkbox"
+            checked={coche}
+            onChange={() =>
+              basculer({
+                id_ligne_reception: id,
+                quantite_stock_kg: pesee,
+                prix_kg_devise: engage,
+              })
+            }
+            aria-label={`Facturer ${reference} de ${numero}`}
+          />
+        ) : (
+          <span />
+        )}
+        <div className="min-w-0" title={designation ?? undefined}>
+          <div className="truncate">
+            <span className="font-medium">{reference}</span>
+            <span className="text-attenue-texte"> · {numero}</span>
+          </div>
+          {precisions.length > 0 && (
+            <div className="truncate text-[11px] text-attenue-texte">{precisions.join(' · ')}</div>
+          )}
+        </div>
+        <span className="text-right">
+          {fmt.nombre(pesee, 2)}
+          <span className="text-[11px] text-attenue-texte @min-[58rem]:hidden"> kg pesés</span>
+        </span>
+        <span className="text-right">
+          <span className="text-[11px] text-attenue-texte @min-[58rem]:hidden">engagé </span>
+          {engage != null ? fmt.nombre(engage, 4) : '—'}
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-[1.625rem] @min-[58rem]:contents">
+        <span className="text-attenue-texte @min-[58rem]:hidden" aria-hidden>
+          ↳
+        </span>
+        {champ('qte', 'q', 'Facturé kg', 'w-[6.5rem]')}
+        {champ('prix', 'p', `Prix ${devise}/kg`, 'w-[6rem]')}
+        {champ('remise', 'r', 'Remise %', 'w-[4rem]')}
+        <span className="text-right font-medium">
+          {l?.montant_devise != null ? `${fmt.nombre(l.montant_devise, 2)}` : ''}
+          {l?.montant_devise != null && (
+            <span className="text-[11px] font-normal text-attenue-texte @min-[58rem]:hidden"> {devise}</span>
+          )}
+        </span>
+        {/* LES ECARTS : le chiffre, sa couleur et ce qu'il mesure. */}
+        <span className="flex flex-col text-[11.5px] leading-tight">
+          {horsQte && (
+            <span className="font-medium text-alerte" title="Facturé moins pesé">
+              {signe(l!.ecart_quantite_kg)} kg
+            </span>
+          )}
+          {horsPrix && (
+            <span
+              className={cn('font-medium', l!.ecart_prix_pct! > 0 ? 'text-alerte' : 'text-succes')}
+              title={`Prix ${fmt.nombre(l!.prix_kg_devise ?? 0, 4)} / engagé ${fmt.nombre(l!.prix_engage_devise ?? 0, 4)}`}
+            >
+              {l!.ecart_prix_pct! > 0 ? '+' : ''}
+              {fmt.nombre(l!.ecart_prix_pct!, 2)} % prix
+            </span>
+          )}
+          {l && !horsQte && !horsPrix && <span className="text-attenue-texte">conforme</span>}
+        </span>
+      </div>
+    </li>
+  )
+}
 
 export function FactureFournisseur() {
   const { id = '' } = useParams()
@@ -168,10 +343,22 @@ export function FactureFournisseur() {
     queryFn: ({ signal }) =>
       api.get<{ entete: Entete; lignes: LigneLue[] }>(`/api/factures-fournisseur/${id}`, { signal }),
     enabled: !nouvelle,
+    // Un brouillon en cours de saisie ne se relit pas sous les doigts : la
+    // version relue passerait pour celle de la saisie et le verrou ne verrait
+    // plus l'ecriture concurrente.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
   const lue = qFacture.data
   const statut = lue?.entete.statut ?? 'BROUILLON'
   const modifiable = statut === 'BROUILLON' && droits.peutEcrire
+  /* LA GARDE DE SAISIE : un brouillon commence ne se perd pas d'un clic. Une
+     facture nouvelle n'arme la garde qu'une fois quelque chose saisi. */
+  const sigCourante = signature(entete, choisies)
+  const touche = nouvelle
+    ? entete.numero_facture.trim() !== '' || entete.code_fournisseur !== '' || Object.keys(choisies).length > 0
+    : initiale !== null && sigCourante !== initiale
+  const quitter = useGardeSaisie(modifiable && touche)
 
   // L'en-tete relu entre dans la saisie, une fois.
   useEffect(() => {
@@ -182,9 +369,9 @@ export function FactureFournisseur() {
       code_fournisseur: e.code_fournisseur,
       date_facture: e.date_facture?.slice(0, 10) ?? '',
       code_devise: e.code_devise,
-      taux: String(e.taux_change ?? ''),
-      montant: e.montant_devise != null ? String(e.montant_devise) : '',
-      frais: e.frais_devise ? String(e.frais_devise) : '',
+      taux: versSaisie(e.taux_change),
+      montant: versSaisie(e.montant_devise),
+      frais: e.frais_devise ? versSaisie(e.frais_devise) : '',
       nette: e.facture_nette == null ? '' : e.facture_nette === 1 ? '1' : '0',
       notes: e.notes ?? '',
     })
@@ -192,9 +379,9 @@ export function FactureFournisseur() {
       lue.lignes.map((l) => [
         l.id_ligne_reception,
         {
-          qte: String(l.quantite_facturee_kg),
-          prix: l.prix_kg_devise != null ? String(l.prix_kg_devise) : '',
-          remise: l.remise_pct ? String(l.remise_pct) : '',
+          qte: versSaisie(l.quantite_facturee_kg),
+          prix: versSaisie(l.prix_kg_devise),
+          remise: l.remise_pct ? versSaisie(l.remise_pct) : '',
         },
       ]),
     )
@@ -206,9 +393,9 @@ export function FactureFournisseur() {
           code_fournisseur: e.code_fournisseur,
           date_facture: e.date_facture?.slice(0, 10) ?? '',
           code_devise: e.code_devise,
-          taux: String(e.taux_change ?? ''),
-          montant: e.montant_devise != null ? String(e.montant_devise) : '',
-          frais: e.frais_devise ? String(e.frais_devise) : '',
+          taux: versSaisie(e.taux_change),
+          montant: versSaisie(e.montant_devise),
+          frais: e.frais_devise ? versSaisie(e.frais_devise) : '',
           nette: e.facture_nette == null ? '' : e.facture_nette === 1 ? '1' : '0',
           notes: e.notes ?? '',
         },
@@ -251,7 +438,7 @@ export function FactureFournisseur() {
   })
   useEffect(() => {
     if (enDevise && !entete.taux && qTaux.data?.reference) {
-      setEntete((e) => ({ ...e, taux: String(qTaux.data!.reference) }))
+      setEntete((e) => ({ ...e, taux: versSaisie(qTaux.data!.reference) }))
     }
   }, [qTaux.data?.reference, enDevise, entete.taux])
 
@@ -295,6 +482,26 @@ export function FactureFournisseur() {
     })
   }, [choisies, candidates, lue, modifiable])
 
+  /* LES RANGEES DU TABLEAU. En brouillon : chaque pesee a facturer (les lignes
+     de ce brouillon comprises, par `sauf`), sa ligne de facture a cote quand
+     elle est cochee ; une ligne deja sur la facture que la liste ne rend plus
+     reste en fin de tableau, cochee. Facture figee : ses lignes seules. */
+  const rangees: Rangee[] = useMemo(() => {
+    const parId = new Map(rapprochees.map((l) => [l.id_ligne_reception, l]))
+    if (!modifiable) return rapprochees.map((l) => ({ id: l.id_ligne_reception, candidate: null, ligne: l }))
+    const proposees = new Set(candidates.map((c) => c.id_ligne_reception))
+    return [
+      ...candidates.map((c) => ({
+        id: c.id_ligne_reception,
+        candidate: c,
+        ligne: parId.get(c.id_ligne_reception) ?? null,
+      })),
+      ...rapprochees
+        .filter((l) => !proposees.has(l.id_ligne_reception))
+        .map((l) => ({ id: l.id_ligne_reception, candidate: null, ligne: l })),
+    ]
+  }, [rapprochees, candidates, modifiable])
+
   const totalLignes = rapprochees.reduce((s, l) => s + (l.montant_devise ?? 0), 0)
   const fraisSaisis = lireNombre(entete.frais) ?? 0
   const imprime = lireNombre(entete.montant)
@@ -319,13 +526,16 @@ export function FactureFournisseur() {
     })),
   })
 
+  // L'identifiant du document, tire a l'ouverture : un second envoi du meme
+  // formulaire rend le meme document (audit P3, 19/10/2026).
+  const [idDocument] = useState(nouvelIdentifiant)
   const enregistrer = useMutation({
     mutationFn: async () => {
       if (nouvelle) {
-        const r = await api.post<{ id_facture: string }>('/api/factures-fournisseur', corps())
+        const r = await api.post<{ id_facture: string }>('/api/factures-fournisseur', { ...corps(), id_document: idDocument })
         return r.id_facture
       }
-      await api.patch(`/api/factures-fournisseur/${id}`, corps())
+      await api.patch(`/api/factures-fournisseur/${id}`, { ...corps(), version: lue?.entete.version })
       return id
     },
     onSuccess: (idFacture) => {
@@ -358,7 +568,7 @@ export function FactureFournisseur() {
   })
 
   const supprimer = useMutation({
-    mutationFn: () => api.delete(`/api/factures-fournisseur/${id}`),
+    mutationFn: () => api.delete(`/api/factures-fournisseur/${id}?version=${lue?.entete.version ?? ''}`),
     onSuccess: () => {
       toast.success('Brouillon supprimé')
       void qc.invalidateQueries({ queryKey: ['factures-fournisseur'] })
@@ -367,7 +577,7 @@ export function FactureFournisseur() {
     onError: echec,
   })
 
-  const basculer = (c: Candidate) =>
+  const basculer = (c: Pick<Candidate, 'id_ligne_reception' | 'quantite_stock_kg' | 'prix_kg_devise'>) =>
     setChoisies((x) => {
       const copie = { ...x }
       if (copie[c.id_ligne_reception]) delete copie[c.id_ligne_reception]
@@ -375,8 +585,8 @@ export function FactureFournisseur() {
         copie[c.id_ligne_reception] = {
           // CE QUI EST ATTENDU SERT DE DEPART : les kilos peses et le prix
           // engage. On ne corrige que ce que le papier dit autrement.
-          qte: String(c.quantite_stock_kg),
-          prix: c.prix_kg_devise != null ? String(c.prix_kg_devise) : '',
+          qte: versSaisie(c.quantite_stock_kg),
+          prix: versSaisie(c.prix_kg_devise),
           remise: '',
         }
       setApercu(null)
@@ -393,6 +603,13 @@ export function FactureFournisseur() {
 
   // Rien a enregistrer tant que rien n'a bouge : le bouton ne s'offre pas.
   const modifie = initiale === null || signature(entete, choisies) !== initiale
+  // L'apercu decrit la facture ENREGISTREE : un changement a l'ecran le perime.
+  const apercuValable = modifie ? null : apercu
+  const raisonValidation = modifie
+    ? 'Enregistrez d’abord : l’aperçu et la validation portent sur la facture enregistrée.'
+    : !apercuValable
+      ? 'Faites d’abord l’aperçu.'
+      : null
 
   const complet =
     entete.numero_facture.trim() !== '' &&
@@ -413,8 +630,8 @@ export function FactureFournisseur() {
         }
         actions={
           <div className="flex items-center gap-2">
-            {!nouvelle && <Badge ton={statut === 'VALIDEE' ? 'succes' : 'neutre'}>{statut}</Badge>}
-            <Bouton variante="contour" onClick={() => naviguer('/factures-fournisseur')}>
+            {!nouvelle && <Badge ton={TON_STATUT[statut] ?? 'neutre'}>{LIBELLE_STATUT[statut] ?? statut}</Badge>}
+            <Bouton variante="contour" onClick={() => quitter(() => naviguer('/factures-fournisseur'))}>
               <ArrowLeft />
               Retour
             </Bouton>
@@ -559,199 +776,110 @@ export function FactureFournisseur() {
                 <option value="0">Facture brute (avoir à venir)</option>
               </Selecteur>
             </div>
+            <div className="sm:col-span-2 lg:col-span-4">
+              <Etiq htmlFor="f-notes">Notes</Etiq>
+              <Champ
+                id="f-notes"
+                value={entete.notes}
+                disabled={!modifiable}
+                placeholder="Ce qu’il faut savoir de cette facture"
+                onChange={(e) => setEntete({ ...entete, notes: e.target.value })}
+              />
+            </div>
           </CarteCorps>
         </Carte>
 
-        {modifiable && (
-          <Carte repliable="facture.2">
-            <CarteEntete>
-              <CarteTitre>
-                Ce qui attend sa facture
-                <Aide>
-                  Les pesées validées de ce fournisseur qu’aucune facture ne couvre. Les kilos et
-                  le prix proposés sont ceux du quai et du bon : ne corrigez que ce que le papier
-                  dit autrement.
-                </Aide>
-              </CarteTitre>
-              <span className="text-[12px] text-attenue-texte tabular-nums">
-                {Object.keys(choisies).length} / {candidates.length} cochée(s)
-              </span>
-            </CarteEntete>
-            <CarteCorps className="p-0">
-              {!fournisseur ? (
-                <p className="px-4 py-6 text-center text-[13px] text-attenue-texte">
-                  Choisissez d’abord le fournisseur.
-                </p>
-              ) : candidates.length === 0 ? (
-                <p className="px-4 py-6 text-center text-[13px] text-attenue-texte">
-                  Rien n’attend de facture chez ce fournisseur en {devise}.
-                </p>
-              ) : (
-                <ul className="divide-y divide-bordure">
-                  {candidates.map((c) => {
-                    const coche = !!choisies[c.id_ligne_reception]
-                    return (
-                      <li key={c.id_ligne_reception} className="px-3 py-2">
-                        <label className="flex items-start gap-2.5">
-                          <input
-                            type="checkbox"
-                            className="mt-1"
-                            checked={coche}
-                            onChange={() => basculer(c)}
-                            aria-label={`Facturer ${c.code_reference} de ${c.numero_reception}`}
-                          />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-baseline gap-x-2 text-[13px]">
-                              <span className="font-medium">{c.code_reference}</span>
-                              <span className="text-attenue-texte">{c.numero_reception}</span>
-                              {c.numero_bc && (
-                                <span className="rounded-[var(--radius-sm)] bg-attenue px-1.5 py-0.5 text-[11px] text-attenue-texte">
-                                  {c.numero_bc}
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[11.5px] text-attenue-texte tabular-nums">
-                              ↳ {fmt.nombre(c.quantite_stock_kg, 2)} kg pesés
-                              {c.prix_kg_devise != null &&
-                                ` · engagé ${fmt.nombre(c.prix_kg_devise, 4)} ${c.code_devise}/kg`}
-                              {c.lot_fournisseur ? ` · lot ${c.lot_fournisseur}` : ''}
-                              {c.dossier_numero ? ` · dossier ${c.dossier_numero}` : ''}
-                            </div>
-                          </div>
-                        </label>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </CarteCorps>
-          </Carte>
-        )}
-
-        <Carte repliable="facture.3">
+        <Carte repliable="facture.2">
           <CarteEntete>
             <CarteTitre>
-              Rapprochement
+              {modifiable ? 'Ce que la facture couvre' : 'Lignes de la facture'}
               <Aide>
-                Facturé contre pesé, facturé contre engagé. Les deux écarts ne disent pas la même
-                chose et aucun ne bloque — ils se lisent avant de signer.
+                Une rangée par pesée validée de ce fournisseur qu’aucune facture ne couvre. Cochée,
+                elle part sur la facture : les kilos pesés et le prix engagé sont proposés, ne
+                corrigez que ce que le papier dit autrement. Décochée, elle se vide et sort de la
+                facture. Facturé contre pesé, facturé contre engagé : les deux écarts ne disent pas
+                la même chose et aucun ne bloque — ils se lisent avant de signer.
               </Aide>
             </CarteTitre>
-            <span className="text-[13px] font-medium tabular-nums">
-              {fmt.nombre(totalLignes, 2)} {devise}
-              {fraisSaisis > 0 && (
-                <span className="text-attenue-texte"> + {fmt.nombre(fraisSaisis, 2)} de frais</span>
-              )}
-            </span>
+            {modifiable && (
+              <span className="text-[12px] text-attenue-texte tabular-nums">
+                {Object.keys(choisies).length} / {rangees.length} cochée(s)
+              </span>
+            )}
           </CarteEntete>
-          <CarteCorps className="p-0">
-            {rapprochees.length === 0 ? (
+          <CarteCorps className="@container p-0">
+            {modifiable && !fournisseur ? (
               <p className="px-4 py-6 text-center text-[13px] text-attenue-texte">
-                Aucune ligne. Cochez ce que la facture couvre.
+                Choisissez d’abord le fournisseur.
+              </p>
+            ) : modifiable && qCandidates.isLoading ? (
+              <p className="px-4 py-6 text-center text-[13px] text-attenue-texte">Chargement…</p>
+            ) : rangees.length === 0 ? (
+              <p className="px-4 py-6 text-center text-[13px] text-attenue-texte">
+                {modifiable
+                  ? `Rien n’attend de facture chez ce fournisseur en ${devise}.`
+                  : 'Aucune ligne.'}
               </p>
             ) : (
-              <ul className="divide-y divide-bordure">
-                {rapprochees.map((l) => {
-                  const s = choisies[l.id_ligne_reception]
-                  const horsQte = Math.abs(l.ecart_quantite_kg) > 0.001
-                  const horsPrix = (l.ecart_prix_pct ?? 0) !== 0
-                  return (
-                    <li key={l.id_ligne_reception} className="px-3 py-2">
-                      <div className="flex flex-wrap items-baseline gap-x-2 text-[13px]">
-                        <span className="font-medium">{l.code_reference}</span>
-                        <span className="text-attenue-texte">{l.numero_reception}</span>
-                        {l.numero_bc && (
-                          <span className="text-[11px] text-attenue-texte">{l.numero_bc}</span>
-                        )}
-                        {modifiable && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setChoisies((x) => {
-                                const c = { ...x }
-                                delete c[l.id_ligne_reception]
-                                return c
-                              })
-                            }
-                            aria-label={`Retirer ${l.code_reference}`}
-                            className="ml-auto text-attenue-texte transition-colors hover:text-danger"
-                          >
-                            <Trash2 className="size-4" />
-                          </button>
-                        )}
-                      </div>
-
-                      {modifiable && s ? (
-                        <div className="mt-1.5 grid gap-2 sm:grid-cols-3">
-                          <div>
-                            <Etiq htmlFor={`q-${l.id_ligne_reception}`}>Quantité facturée (kg)</Etiq>
-                            <Champ
-                              id={`q-${l.id_ligne_reception}`}
-                              inputMode="decimal"
-                              className="h-9 text-right tabular-nums"
-                              value={s.qte}
-                              onChange={(e) => poser(l.id_ligne_reception, 'qte', e.target.value)}
-                            />
-                          </div>
-                          <div>
-                            <Etiq htmlFor={`p-${l.id_ligne_reception}`}>Prix facturé ({devise}/kg)</Etiq>
-                            <Champ
-                              id={`p-${l.id_ligne_reception}`}
-                              inputMode="decimal"
-                              className="h-9 text-right tabular-nums"
-                              value={s.prix}
-                              onChange={(e) => poser(l.id_ligne_reception, 'prix', e.target.value)}
-                            />
-                          </div>
-                          <div>
-                            <Etiq htmlFor={`r-${l.id_ligne_reception}`}>Remise (%)</Etiq>
-                            <Champ
-                              id={`r-${l.id_ligne_reception}`}
-                              inputMode="decimal"
-                              className="h-9 text-right tabular-nums"
-                              value={s.remise}
-                              onChange={(e) => poser(l.id_ligne_reception, 'remise', e.target.value)}
-                            />
-                          </div>
-                        </div>
-                      ) : null}
-
-                      <div className="mt-1 flex flex-wrap items-baseline gap-x-3 text-[12px] tabular-nums">
-                        <span className="text-attenue-texte">
-                          ↳ {fmt.nombre(l.quantite_facturee_kg, 2)} kg facturés / {fmt.nombre(l.quantite_pesee_kg, 2)} pesés
-                        </span>
-                        {horsQte && (
-                          <span className={cn('font-medium', 'text-alerte')}>
-                            {signe(l.ecart_quantite_kg)} kg
-                          </span>
-                        )}
-                        {l.prix_engage_devise != null && (
-                          <span className="text-attenue-texte">
-                            prix {fmt.nombre(l.prix_kg_devise ?? 0, 4)} / engagé{' '}
-                            {fmt.nombre(l.prix_engage_devise, 4)}
-                          </span>
-                        )}
-                        {horsPrix && l.ecart_prix_pct != null && (
-                          <span
-                            className={cn(
-                              'font-medium',
-                              l.ecart_prix_pct > 0 ? 'text-alerte' : 'text-succes',
-                            )}
-                          >
-                            {l.ecart_prix_pct > 0 ? '+' : ''}
-                            {fmt.nombre(l.ecart_prix_pct, 2)} %
-                          </span>
-                        )}
-                        {l.montant_devise != null && (
-                          <span className="ml-auto font-medium">
-                            {fmt.nombre(l.montant_devise, 2)} {devise}
-                          </span>
-                        )}
-                      </div>
-                    </li>
-                  )
-                })}
-              </ul>
+              <>
+                {/* Les intitules ne servent qu'a la rangee unique ; en ↳, chaque case porte le sien. */}
+                <div
+                  className={cn(
+                    'hidden border-b border-bordure px-3 py-1.5 text-[11px] uppercase tracking-wider text-attenue-texte',
+                    GRILLE,
+                  )}
+                  aria-hidden
+                >
+                  <span />
+                  <span>Pesée</span>
+                  <span className="text-right">Pesés kg</span>
+                  <span className="text-right">Engagé /kg</span>
+                  <span className="text-right">Facturé kg</span>
+                  <span className="text-right">Prix /kg</span>
+                  <span className="text-right">Remise %</span>
+                  <span className="text-right">Montant</span>
+                  <span>Écarts</span>
+                </div>
+                <ul className="divide-y divide-bordure">
+                  {rangees.map((r) => (
+                    <RangeeFacture
+                      key={r.id}
+                      rangee={r}
+                      saisie={choisies[r.id]}
+                      modifiable={modifiable}
+                      devise={devise}
+                      basculer={basculer}
+                      poser={poser}
+                    />
+                  ))}
+                </ul>
+                {/* LE PIED : la somme des lignes contre le total imprime. */}
+                <div className="flex flex-wrap items-baseline justify-end gap-x-4 gap-y-1 border-t border-bordure px-3 py-2 text-[12.5px] tabular-nums">
+                  <span>
+                    <span className="text-attenue-texte">Lignes </span>
+                    <span className="font-medium">
+                      {fmt.nombre(totalLignes, 2)} {devise}
+                    </span>
+                  </span>
+                  {fraisSaisis > 0 && (
+                    <span>
+                      <span className="text-attenue-texte">+ frais </span>
+                      {fmt.nombre(fraisSaisis, 2)}
+                    </span>
+                  )}
+                  {imprime != null && imprime > 0 && (
+                    <span>
+                      <span className="text-attenue-texte">imprimé </span>
+                      {fmt.nombre(imprime, 2)}
+                      {Math.abs(ecartImprime) > 0.05 ? (
+                        <span className="font-medium text-alerte"> · écart {signe(ecartImprime)}</span>
+                      ) : (
+                        <span className="text-succes"> · retombe juste</span>
+                      )}
+                    </span>
+                  )}
+                </div>
+              </>
             )}
           </CarteCorps>
           {Math.abs(ecartImprime) > 0.05 && (
@@ -765,16 +893,16 @@ export function FactureFournisseur() {
           )}
         </Carte>
 
-        {apercu && (
+        {apercuValable && (
           <Carte>
             <CarteEntete>
               <CarteTitre>Ce que la validation va faire</CarteTitre>
             </CarteEntete>
             <CarteCorps className="space-y-2">
-              {(apercu.avis?.length ?? 0) > 0 && (
+              {(apercuValable.avis?.length ?? 0) > 0 && (
                 <Alerte ton="alerte" titre="À vérifier avant de signer">
                   <ul className="list-inside list-disc">
-                    {apercu.avis!.map((a) => (
+                    {apercuValable.avis!.map((a) => (
                       <li key={a}>{a}</li>
                     ))}
                   </ul>
@@ -782,11 +910,11 @@ export function FactureFournisseur() {
               )}
               <dl className="grid gap-3 text-[13px] sm:grid-cols-2 lg:grid-cols-5">
                 {[
-                  ['Valeur provisoire', fmt.mad(apercu.valeur_provisoire_mad)],
-                  ['Valeur facturée', fmt.mad(apercu.valeur_definitive_mad)],
-                  ['Différence', signe(apercu.difference_mad)],
-                  ['Au stock (CMUP)', signe(apercu.au_stock_mad)],
-                  ['Écart de prix (tracé)', signe(apercu.ecart_prix_mad)],
+                  ['Valeur provisoire', fmt.mad(apercuValable.valeur_provisoire_mad)],
+                  ['Valeur facturée', fmt.mad(apercuValable.valeur_definitive_mad)],
+                  ['Différence', signe(apercuValable.difference_mad)],
+                  ['Au stock (CMUP)', signe(apercuValable.au_stock_mad)],
+                  ['Écart de prix (tracé)', signe(apercuValable.ecart_prix_mad)],
                 ].map(([k, v]) => (
                   <div key={k as string}>
                     <dt className="text-[11px] uppercase tracking-wider text-attenue-texte">{k}</dt>
@@ -794,9 +922,9 @@ export function FactureFournisseur() {
                   </div>
                 ))}
               </dl>
-              {(apercu.receptions?.length ?? 0) > 0 && (
+              {(apercuValable.receptions?.length ?? 0) > 0 && (
                 <p className="text-[12px] text-attenue-texte">
-                  {apercu.receptions!.map((r) => `${r.numero_reception} (${signe(r.difference_mad)}${r.cloturee ? ', clôturé' : ', reste à facturer'})`).join(' · ')}
+                  {apercuValable.receptions!.map((r) => `${r.numero_reception} (${signe(r.difference_mad)}${r.cloturee ? ', clôturé' : ', reste à facturer'})`).join(' · ')}
                 </p>
               )}
             </CarteCorps>
@@ -818,13 +946,15 @@ export function FactureFournisseur() {
         )}
         {!nouvelle && statut === 'BROUILLON' && droits.peutValider && (
           <>
-            <Bouton variante="contour" chargement={voir.isPending} onClick={() => voir.mutate()}>
+            <Bouton variante="contour" chargement={voir.isPending} disabled={modifie}
+              title={modifie ? (raisonValidation ?? undefined) : undefined} onClick={() => voir.mutate()}>
               <Eye />
               Aperçu
             </Bouton>
             <Bouton
-              disabled={!apercu}
-              title={!apercu ? 'Faites d’abord l’aperçu' : undefined}
+              variante={modifie ? 'contour' : 'principal'}
+              disabled={!!raisonValidation}
+              title={raisonValidation ?? undefined}
               chargement={valider.isPending}
               onClick={() =>
                 confirmation.demander({
@@ -859,6 +989,10 @@ export function FactureFournisseur() {
           </Bouton>
         )}
         <span className="ml-auto text-[12px] text-attenue-texte">
+          {/* LA RAISON D'UN BOUTON GRISE, ECRITE : on ne la cherche pas au survol. */}
+          {statut === 'BROUILLON' && !nouvelle && droits.peutValider && raisonValidation && (
+            <span className="text-alerte">{raisonValidation} </span>
+          )}
           {statut === 'BROUILLON'
             ? 'Brouillon : rien n’est au CMUP avant la validation.'
             : 'Document figé.'}

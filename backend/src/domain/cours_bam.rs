@@ -108,8 +108,8 @@ const INTERVALLE: Duration = Duration::from_secs(30 * 60);
 /// Lit la page si le cours du jour manque et qu'on n'a pas essaye recemment.
 /// Rend l'erreur en clair quand la lecture a echoue ; `None` sinon.
 pub async fn rafraichir(db: &Db) -> AppResult<Option<String>> {
-    let aujourd_hui = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let deja: i64 = sqlx::query_scalar("SELECT count(*) FROM cours_bam WHERE date_cours = $1")
+    let aujourd_hui = crate::db::aujourdhui();
+    let deja: i64 = sqlx::query_scalar("SELECT count(*) FROM cours_bam WHERE date_cours = fn_jour_casablanca($1)")
         .bind(&aujourd_hui)
         .fetch_one(db)
         .await?;
@@ -142,7 +142,7 @@ pub async fn rafraichir(db: &Db) -> AppResult<Option<String>> {
     for c in &cours {
         sqlx::query(
             "INSERT INTO cours_bam (code_devise, date_cours, cours_mad)
-             SELECT $1, $2, $3 WHERE EXISTS (SELECT 1 FROM devise WHERE code_devise = $1)
+             SELECT $1, fn_jour_casablanca($2), $3 WHERE EXISTS (SELECT 1 FROM devise WHERE code_devise = $1)
              ON CONFLICT (code_devise, date_cours) DO UPDATE
                 SET cours_mad = excluded.cours_mad, date_lecture = excluded.date_lecture",
         )

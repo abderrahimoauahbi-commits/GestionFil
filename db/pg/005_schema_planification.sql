@@ -14,6 +14,8 @@
 --  * BL-6 : `besoin_mrp` n'avait qu'un index NON unique. Chaque relance du MRP
 --    empilait des lignes que v_stock_projete sommait -> besoins et budget
 --    doubles a chaque recalcul. -> contrainte UNIQUE + recalcul idempotent.
+--    (v_stock_projete est retiree depuis le 27/10/2026 : une seule source de
+--    verite, le moteur de couverture — migration 2026-10-27e.)
 --
 --  * Ambiguite saisonnalite : `m2_prevus` est desormais DEFINI comme la valeur
 --    mensuelle DEFINITIVE (deja saisonnalisee). `saisonnalite` et
@@ -27,6 +29,7 @@
 CREATE TABLE plan_production (
     id_plan             text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
+    version             integer NOT NULL DEFAULT 1,  -- verrou optimiste (2026-10-17d)
     annee               bigint NOT NULL CHECK (annee BETWEEN 2000 AND 2200),
     numero_version      bigint NOT NULL DEFAULT 1 CHECK (numero_version > 0),
     libelle             text    NOT NULL,
@@ -193,6 +196,12 @@ CREATE INDEX ix_besoin_mrp_plan ON besoin_mrp(id_plan, mois);
 
 -- -----------------------------------------------------------------------------
 -- snapshot_mrp  (photo figee a la validation d'un plan, B1)
+--
+-- 27/10/2026 : une seule source de verite, le moteur de couverture (migration
+-- 2026-10-27e). La photo prend le solde projete par le moteur en fin de mois
+-- (stock_projete_kg) et son etat (statut_couleur : PLAN_NON_COUVERT,
+-- SOUS_SECURITE, COUVERT). Les anciens etats de v_stock_projete (RUPTURE,
+-- CRITIQUE, ATTENTION, OK) restent admis : l'historique reste lisible.
 -- -----------------------------------------------------------------------------
 CREATE TABLE snapshot_mrp (
     id_snapshot         text    NOT NULL PRIMARY KEY
@@ -205,7 +214,10 @@ CREATE TABLE snapshot_mrp (
     annee_mois          text,
     quantite_besoin_kg  numeric(18,4)    NOT NULL,
     stock_projete_kg    numeric(18,4),
-    statut_couleur      text    CHECK (statut_couleur IS NULL OR statut_couleur IN ('RUPTURE','CRITIQUE','ATTENTION','OK')),
+    statut_couleur      text    CHECK (statut_couleur IS NULL OR statut_couleur IN
+                                       ('PLAN_NON_COUVERT','SOUS_SECURITE','COUVERT',
+                                        -- l'historique d'avant le 27/10/2026
+                                        'RUPTURE','CRITIQUE','ATTENTION','OK')),
     donnees_json        text    CHECK (donnees_json IS NULL OR (donnees_json)::jsonb IS NOT NULL),
     UNIQUE (date_snapshot, id_plan, code_reference, rang_mois)
 );

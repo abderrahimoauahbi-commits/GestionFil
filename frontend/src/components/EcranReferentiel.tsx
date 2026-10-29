@@ -133,7 +133,9 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
       },
     }
     if (creation) crud.creer.mutate(donnees, suite)
-    else if (edition) crud.modifier.mutate({ id: String(edition[cle]), donnees }, suite)
+    // LA VERSION LUE A L'OUVERTURE DE LA FICHE : si un autre l'a modifiee depuis,
+    // le serveur refuse au lieu d'ecraser sa saisie (19/10/2026).
+    else if (edition) crud.modifier.mutate({ id: String(edition[cle]), donnees: { ...donnees, version: edition.version } }, suite)
   }
 
   /* REMETTRE EN SERVICE : le geste inverse de « mettre de cote ».
@@ -319,6 +321,7 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
         surFermeture={() => setASupprimer(null)}
         entite={chemin}
         id={aSupprimer ? String(aSupprimer[cle]) : ''}
+        version={aSupprimer?.version}
         libelle={aSupprimer ? `${libelleUnite} ${String(aSupprimer[cle])}` : undefined}
       />
     </div>

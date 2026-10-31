@@ -15,6 +15,8 @@ export function ModaleReference({
   designation,
   surFermer,
   enrichi = false,
+  rattrapage = null,
+  restes = null,
   surSimuler,
 }: {
   /** La référence ouverte ; null : fenêtre fermée. */
@@ -23,6 +25,10 @@ export function ModaleReference({
   surFermer: () => void
   /** Le détail enrichi du stock projeté. */
   enrichi?: boolean
+  /** L'option de rattrapage du stock projeté pour cette ligne (§ 16). */
+  rattrapage?: boolean | null
+  /** Les restes comptés ou non (31/10/2026) ; `null` : le réglage. */
+  restes?: boolean | null
   surSimuler?: (reference: string) => void
 }) {
   const suite = reference ? designationUtile({ code_reference: reference, designation }) : null
@@ -31,12 +37,14 @@ export function ModaleReference({
       {reference && (
         <DialogueContenu
           titre={suite ? `${reference} — ${suite}` : reference}
-          description={enrichi ? 'Stock projeté — le moteur de couverture' : 'Couverture du plan — le moteur de couverture'}
+          description={enrichi ? 'Stock projeté — combien commander' : 'Couverture du plan — le moteur de couverture'}
           className="h-[92vh] max-w-[min(76rem,calc(100%-2rem))] max-sm:h-[96vh]"
         >
           <DetailReference
             reference={reference}
             enrichi={enrichi}
+            rattrapage={rattrapage}
+            restes={restes}
             surSimuler={
               surSimuler
                 ? (r) => {

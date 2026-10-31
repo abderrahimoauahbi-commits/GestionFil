@@ -37,13 +37,14 @@
 
 use crate::auth::{rbac::module, rbac::Action, Utilisateur};
 use crate::db::{arrondi_kg, Db};
+use crate::domain::projete;
 use crate::domain::couverture::{
     self, jours_du_mois, signal, Arrivee, Couverture, MoisPlan, Reglages, Signal, Source, MAX_PROPOSITIONS,
     trop_tard_pour_commander,
 };
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::Json;
 use chrono::{Datelike, NaiveDate};
 use serde::Deserialize;
@@ -93,6 +94,46 @@ struct Parametres {
     securite: [i64; 3],
     delai_defaut: i64,
     marge_jours: i64,
+    /// Les paliers de rupture du stock projeté (31/10/2026) : [imminente,
+    /// critique, attention] = P_SeuilImminent, P_SeuilCritique, P_SeuilAlerte.
+    seuils_rupture: [i64; 3],
+    /// Les restes comptés dans le stock du projeté, par défaut (31/10/2026,
+    /// `P_ProjeteRestes`, oui sauf réglage) : le plan d'achat suit ce réglage,
+    /// l'écran peut le basculer.
+    restes: bool,
+    /// Les réglages du stock projeté (31/10/2026), chacun à son comportement
+    /// d'avant tant qu'on n'y touche pas.
+    projete: ReglagesProjete,
+}
+
+/// LES RÉGLAGES DU STOCK PROJETÉ (31/10/2026) — le plan d'achat les suit ; les
+/// boutons de l'écran (rattrapage, restes) ne changent que l'affichage.
+#[derive(Clone)]
+struct ReglagesProjete {
+    /// `P_ProjeteRattrapage` (1) : le rattrapage par défaut.
+    rattrapage: bool,
+    /// `P_ProjeteAgeConstatMax` (0 = sans limite) : au-delà de cet âge, le fil
+    /// d'un constat machine ne compte plus.
+    age_constat_max_j: i64,
+    /// `P_ProjeteQuarantaine` (0) : la quarantaine comptée (en urgence).
+    quarantaine: bool,
+    /// `P_ProjeteRetardJours` (0) : un bon en retard compte à aujourd'hui + N.
+    retard_j: i64,
+    /// `P_ProjeteSansDate` (0) : un arrivage sans date compte à aujourd'hui + délai.
+    sans_date: bool,
+    /// `P_ProjeteMinMultiple` (1) : minimum de commande et multiple appliqués.
+    min_multiple: bool,
+    /// `P_ProjeteMinimumAlerte` (1) : le stock minimum dans le seuil d'alerte.
+    minimum_alerte: bool,
+}
+
+/// Un réglage oui / non : `0`, `non`, `false`, `faux` disent non ; absent, le défaut.
+fn oui(v: Option<String>, defaut: bool) -> bool {
+    match v.map(|s| s.trim().to_lowercase()).as_deref() {
+        None | Some("") => defaut,
+        Some("0" | "non" | "false" | "faux") => false,
+        Some(_) => true,
+    }
 }
 
 #[derive(Clone)]
@@ -219,7 +260,18 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
                 (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_SecuriteB') AS sec_b,
                 (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_SecuriteC') AS sec_c,
                 (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_DelaiDefaut') AS delai,
-                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_MargeJours') AS marge",
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_MargeJours') AS marge,
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_SeuilImminent') AS seuil_imminent,
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_SeuilCritique') AS seuil_critique,
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_SeuilAlerte') AS seuil_attention,
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_ProjeteRestes') AS restes,
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_ProjeteRattrapage') AS pj_rattrapage,
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_ProjeteAgeConstatMax') AS pj_age,
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_ProjeteQuarantaine') AS pj_quarantaine,
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_ProjeteRetardJours') AS pj_retard,
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_ProjeteSansDate') AS pj_sans_date,
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_ProjeteMinMultiple') AS pj_min_multiple,
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_ProjeteMinimumAlerte') AS pj_minimum_alerte",
     )
     .fetch_one(db)
     .await?;
@@ -233,6 +285,22 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
         ],
         delai_defaut: entier(ctx.try_get("delai")?, 60),
         marge_jours: entier(ctx.try_get("marge")?, 30),
+        seuils_rupture: [
+            entier(ctx.try_get("seuil_imminent")?, 30),
+            entier(ctx.try_get("seuil_critique")?, 60),
+            entier(ctx.try_get("seuil_attention")?, 90),
+        ],
+        // Absent : oui (les restes comptent, décision du 26/10/2026).
+        restes: oui(ctx.try_get("restes")?, true),
+        projete: ReglagesProjete {
+            rattrapage: oui(ctx.try_get("pj_rattrapage")?, true),
+            age_constat_max_j: entier(ctx.try_get("pj_age")?, 0).max(0),
+            quarantaine: oui(ctx.try_get("pj_quarantaine")?, false),
+            retard_j: entier(ctx.try_get("pj_retard")?, 0).max(0),
+            sans_date: oui(ctx.try_get("pj_sans_date")?, false),
+            min_multiple: oui(ctx.try_get("pj_min_multiple")?, true),
+            minimum_alerte: oui(ctx.try_get("pj_minimum_alerte")?, true),
+        },
     };
 
     // Le plan en service (un seul : ux_plan_unique_en_cours).
@@ -1061,8 +1129,11 @@ pub struct PremiereProposition {
     pub complement_multiple_kg: f64,
 }
 
-/// Les premières propositions du moteur, une par référence ACTIVE qui en a une
-/// (toutes, ou la seule référence demandée), avec la date du jour du calcul.
+/// Les propositions du STOCK PROJETÉ (§ 16.6, 30/10/2026), une par référence
+/// ACTIVE qui en a une (toutes, ou la seule référence demandée), avec la date du
+/// jour du calcul. La MÊME fonction que l'écran /stock, rattrapage INCLUS : même
+/// référence, mêmes entrées, même quantité. La réception est la date théorique
+/// aujourd'hui + délai ; « avant le », s'il est passé, vaut aujourd'hui.
 pub async fn premieres_propositions(
     db: &Db,
     reference: Option<&str>,
@@ -1071,17 +1142,300 @@ pub async fn premieres_propositions(
     let mut sortie = Vec::new();
     for fiche in d.fiches.values().filter(|f| f.actif) {
         let a = analyser(&d, fiche);
-        if let Some(p) = a.resultat.propositions.first().filter(|p| p.quantite_proposee_kg > 0.0) {
+        let p = projete_de(&d, &a, d.parametres.projete.rattrapage, d.parametres.restes);
+        if let Some(q) = p.quantite.as_ref().filter(|q| q.quantite_kg > 0.0) {
             sortie.push(PremiereProposition {
                 code_reference: fiche.code_reference.clone(),
-                quantite_kg: arrondi_kg(p.quantite_proposee_kg),
-                date_disponibilite: p.date_disponibilite,
-                date_limite_commande: p.date_limite_commande,
-                complement_multiple_kg: arrondi_kg((p.quantite_proposee_kg - p.apres_minimum_kg).max(0.0)),
+                quantite_kg: arrondi_kg(q.quantite_kg),
+                date_disponibilite: q.date_reception,
+                date_limite_commande: p.avant_le.map_or(d.aujourdhui, |x| x.max(d.aujourdhui)),
+                complement_multiple_kg: arrondi_kg(q.complement_multiple_kg),
             });
         }
     }
     Ok((d.aujourdhui, sortie))
+}
+
+// ============================================================================
+// Le STOCK PROJETÉ (§ 16, 30/10/2026) : combien commander, sans chronologie
+// ============================================================================
+
+/// LE STOCK PROJETÉ d'une analyse (`domain/projete.rs`) : le même stock compté
+/// et les mêmes arrivages que la lecture du moteur, mais TOUTES les commandes
+/// ouvertes datées (une date passée compte aujourd'hui, aucun filtre d'horizon) ;
+/// seuls un bon non validé et un arrivage sans date restent à part.
+///
+/// `restes` (31/10/2026) : les restes comptés dans le stock (par défaut,
+/// `P_ProjeteRestes`), ou exclus — le bouton de l'écran.
+/// L'option RESTES lue dans une requête (31/10/2026) : `exclus` ou `comptes` ;
+/// absente ou autre, `None` (le réglage `P_ProjeteRestes` s'applique).
+pub fn restes_demandes(v: Option<&str>) -> Option<bool> {
+    match v.map(str::trim) {
+        Some("exclus") => Some(false),
+        Some("comptes") => Some(true),
+        _ => None,
+    }
+}
+
+/// L'option RATTRAPAGE lue dans une requête : `exclu` ou `inclus` ; absente ou
+/// autre, `None` (le réglage `P_ProjeteRattrapage` s'applique).
+pub fn rattrapage_demande(v: Option<&str>) -> Option<bool> {
+    match v.map(str::trim) {
+        Some("exclu") => Some(false),
+        Some("inclus") => Some(true),
+        _ => None,
+    }
+}
+
+/// LE STOCK DU PROJETÉ, magasins et machines (31/10/2026) : le stock compté,
+/// moins les restes s'ils sont exclus, moins le fil d'un constat machine plus
+/// vieux que `P_ProjeteAgeConstatMax`, plus la quarantaine si
+/// `P_ProjeteQuarantaine`. Le calcul et la ligne affichée lisent la même chose,
+/// pour que stock disponible + sur machine + arrivages = position.
+fn stock_du_projete(d: &Donnees, a: &Analyse, restes: bool) -> (f64, f64) {
+    let o = &d.parametres.projete;
+    let (mut perime, mut perime_restes) = (0.0, 0.0);
+    if o.age_constat_max_j > 0 {
+        for e in d.machine.get(a.fiche.code_reference.as_str()).into_iter().flatten() {
+            let vieux = e.date_constat.is_none_or(|dc| (d.aujourdhui - dc).num_days() > o.age_constat_max_j);
+            if !e.bloque && vieux {
+                perime += e.kg;
+                if e.reste {
+                    perime_restes += e.kg;
+                }
+            }
+        }
+    }
+    let retrait_machine = if restes { perime } else { a.restes_machine_kg + (perime - perime_restes) };
+    let retrait_magasin = if restes { 0.0 } else { a.restes_magasin_kg };
+    let quarantaine = if o.quarantaine { a.quarantaine_kg } else { 0.0 };
+    (
+        (a.magasin_compte_kg - retrait_magasin).max(0.0) + quarantaine,
+        (a.machine_compte_kg - retrait_machine).max(0.0),
+    )
+}
+
+fn projete_de(d: &Donnees, a: &Analyse, rattrapage: bool, restes: bool) -> projete::Projete {
+    let code = a.fiche.code_reference.as_str();
+    let o = &d.parametres.projete;
+    let (magasin, machine) = stock_du_projete(d, a, restes);
+    let conso = match &d.plan {
+        Some(p) => {
+            let plan: Vec<MoisPlan> = d.besoin.get(code).into_iter().flatten().map(|(_, m)| *m).collect();
+            couverture::plan_au_jour(&plan, d.aujourdhui, p.fin_horizon)
+        }
+        None => vec![0.0],
+    };
+    let arrivees = a
+        .arrivages
+        .iter()
+        .filter(|x| x.categorie != "NON_VALIDE")
+        .filter_map(|x| match x.date {
+            // Un bon en retard : aujourd'hui + P_ProjeteRetardJours (0 : aujourd'hui).
+            Some(dt) if dt < d.aujourdhui => Some((d.aujourdhui + chrono::Duration::days(o.retard_j), x.kg)),
+            Some(dt) => Some((dt, x.kg)),
+            // Sans date : hors calcul, sauf P_ProjeteSansDate (aujourd'hui + délai).
+            None if o.sans_date => Some((d.aujourdhui + chrono::Duration::days(a.reglages.delai_j.max(0)), x.kg)),
+            None => None,
+        })
+        .collect();
+    projete::calculer(&projete::Entrees {
+        aujourdhui: d.aujourdhui,
+        conso,
+        stock_kg: magasin + machine,
+        arrivees,
+        cible_j: a.reglages.cible_j,
+        couverture_j: a.reglages.couverture_j,
+        delai_j: a.reglages.delai_j,
+        jours_securite: a.reglages.jours_securite,
+        stock_min_kg: a.reglages.stock_min_kg.filter(|_| o.minimum_alerte),
+        moq_kg: a.reglages.moq_kg.filter(|_| o.min_multiple),
+        multiple_kg: a.reglages.multiple_kg.filter(|_| o.min_multiple),
+        kg_palette: a.reglages.kg_palette,
+        soumis_mrp: a.reglages.soumis_mrp,
+        rattrapage,
+        restes,
+        seuils_rupture: d.parametres.seuils_rupture,
+    })
+}
+
+/// Les signaux du stock projeté, avec leur message (même forme que ceux du moteur).
+fn signaux_projete(p: &projete::Projete) -> Value {
+    Value::Array(
+        p.signaux
+            .iter()
+            .map(|code| {
+                let message = match *code {
+                    projete::signal::CIBLE_NON_DEFINIE => {
+                        "configuration MRP incomplète : couverture cible non définie, aucune quantité proposée"
+                    }
+                    projete::signal::HORIZON_COURT => {
+                        "le plan s'arrête avant cible + couverture d'une commande : la quantité s'arrête à l'horizon"
+                    }
+                    _ => "",
+                };
+                json!({ "code": code, "date": Value::Null, "message": message })
+            })
+            .collect(),
+    )
+}
+
+/// LA LIGNE DU STOCK PROJETÉ (§ 16.5, 19 colonnes) : les colonnes du stock
+/// gardent leurs noms ; « Position projetée » (`stock_total_projete_kg`) et
+/// « Couverture projetée » (`jours_couverture`) viennent du calcul du projeté.
+fn ligne_projete(d: &Donnees, a: &Analyse, p: &projete::Projete) -> Value {
+    // L'ONGLET EMPLACEMENTS (31/10/2026) : chaque magasin au plan, compté hors
+    // bloqués et hors restes (les restes ont leur colonne) ; la somme des
+    // magasins, de la machine et des restes rend le disponible.
+    let mut par_magasin = serde_json::Map::new();
+    for m in d.magasins.get(a.fiche.code_reference.as_str()).into_iter().flatten() {
+        if m.quarantaine || !m.inclure_mrp {
+            continue;
+        }
+        let compte = (m.quantite_kg - m.bloque_kg).max(0.0);
+        let kg = compte - m.restes_kg.clamp(0.0, compte);
+        let cumul = par_magasin.get(&m.code_magasin).and_then(Value::as_f64).unwrap_or(0.0);
+        par_magasin.insert(m.code_magasin.clone(), json!(arrondi_kg(cumul + kg) + 0.0));
+    }
+    // En route = les transferts entre magasins ; commandé = les autres
+    // arrivages du projeté (bons validés, datés).
+    let transit = a.somme("TRANSIT");
+    // Le stock montré est celui du calcul (restes, constat trop vieux,
+    // quarantaine) : stock disponible + sur machine + en route = position.
+    let (magasin, machine) = stock_du_projete(d, a, p.restes);
+    let disponible = magasin + machine;
+    let emplacements = json!({
+        // L'onglet Approvisionnement (31/10/2026) : magasins et machine restes
+        // compris, pour que disponible + machine + arrivages = position.
+        "magasin_kg": arrondi_kg(magasin) + 0.0,
+        "machine_kg": arrondi_kg(machine) + 0.0,
+        "restes_comptes": p.restes,
+        "stock_par_magasin": par_magasin,
+        "jours_sans_fil": p.jours_sans_fil,
+        "commande_kg": arrondi_kg((p.arrivages_kg - transit).max(0.0)) + 0.0,
+        "stock_apres_arrivage_kg": arrondi_kg(disponible + a.quarantaine_kg + p.arrivages_kg) + 0.0,
+        // Ce qui arrive après aujourd'hui + délai : trop tard pour éviter une
+        // rupture qu'une commande passée aujourd'hui ne couvrirait pas non plus.
+        "en_route_apres_delai_kg": arrondi_kg(
+            a.arrivages
+                .iter()
+                .filter(|x| x.categorie != "NON_VALIDE")
+                .filter(|x| x.date.is_some_and(|dt| (dt - d.aujourdhui).num_days() > a.reglages.delai_j))
+                .map(|x| x.kg)
+                .sum::<f64>(),
+        ) + 0.0,
+    });
+    // LES PALIERS DE RUPTURE et le trou avant le camion (31/10/2026).
+    let rupture = json!({
+        "rupture_j": p.rupture_j,
+        "rupture_le": p.rupture_le,
+        "palier_rupture": p.palier,
+        "palier_suivant": p.palier_suivant,
+        "date_palier_suivant": p.date_palier_suivant,
+        "a_sec": p.a_sec,
+    });
+    let mut v = json!({
+        "code_reference": a.fiche.code_reference,
+        "designation": a.fiche.designation,
+        "classe_abc": a.fiche.classe_abc,
+        "actif": a.fiche.actif,
+        "code_fournisseur": a.fiche.code_fournisseur,
+        "fournisseur_nom": a.fiche.fournisseur_nom,
+        "disponible_kg": arrondi_kg(disponible) + 0.0,
+        "arrivages_comptes_kg": p.arrivages_kg,
+        "stock_total_projete_kg": p.position_kg,
+        "besoin_delai_kg": p.besoin_delai_kg,
+        "jours_couverture": p.couverture_j,
+        "horizon_j": p.horizon_j,
+        "couvert_jusqu_au": p.couvert_jusqu_au,
+        "couverture_cible_j": p.cible_j,
+        "couverture_cible_mois": a.cible_mois,
+        "source_cible": a.source_cible,
+        "ecart_cible_j": p.ecart_cible_j,
+        "delai_j": a.reglages.delai_j,
+        "source_delai": a.source_delai,
+        "couverture_commande_j": a.reglages.couverture_j,
+        "source_couverture": a.source_couverture,
+        "jours_securite": a.reglages.jours_securite,
+        "source_securite": a.source_securite,
+    });
+    let suite = json!({
+        "qte_a_commander_kg": p.quantite.as_ref().map(|q| q.quantite_kg),
+        "palettes_equivalentes": p.quantite.as_ref().and_then(|q| q.palettes),
+        "date_reception_theorique": p.quantite.as_ref().map(|q| q.date_reception),
+        "avant_le": p.avant_le,
+        "statut": p.etat,
+        "raison_etat": p.raison,
+        "signaux": signaux_projete(p),
+        "rattrapage": p.rattrapage,
+        "manque_kg": p.manque_kg,
+        "seuil_alerte_j": p.seuil_alerte_j,
+        "couverture_livraison_j": p.couverture_livraison_j,
+        "stock_min_kg": a.reglages.stock_min_kg,
+        "quarantaine_kg": arrondi_kg(a.quarantaine_kg),
+        "bloque_kg": arrondi_kg(a.bloque_kg),
+        "hors_plan_kg": arrondi_kg(a.hors_plan_kg),
+        "restes_kg": arrondi_kg(a.restes_kg),
+        "sans_date_kg": a.somme("SANS_DATE"),
+        "non_valide_kg": a.somme("NON_VALIDE"),
+        "plan_mois_kg": a.plan_mois_kg(),
+        "defaut_donnees": a.defaut_donnees,
+    });
+    if let (Some(o), Value::Object(s)) = (v.as_object_mut(), suite) {
+        o.extend(s);
+    }
+    if let (Some(o), Value::Object(s)) = (v.as_object_mut(), emplacements) {
+        o.extend(s);
+    }
+    if let (Some(o), Value::Object(s)) = (v.as_object_mut(), rupture) {
+        o.extend(s);
+    }
+    if let Some(o) = v.as_object_mut() {
+        o.insert("transit_kg".into(), json!(transit));
+        for (cle, kg) in a.colonnes_stock_projete().into_iter().take(3) {
+            o.insert(cle.into(), json!(kg));
+        }
+    }
+    v
+}
+
+/// Une ligne du stock projeté, avec ce qu'il faut pour la trier et la compléter.
+pub struct LigneProjetee {
+    pub code_reference: String,
+    pub statut: &'static str,
+    pub qte_a_commander_kg: Option<f64>,
+    pub ligne: Value,
+}
+
+/// LE STOCK PROJETÉ de toutes les références listées (§ 16) : `rattrapage` est
+/// l'option de la barre d'outils ; les références de `inverses` prennent
+/// l'option contraire (le bouton de la ligne).
+pub async fn stock_projete(
+    db: &Db,
+    rattrapage: Option<bool>,
+    inverses: &std::collections::HashSet<String>,
+    restes: Option<bool>,
+) -> AppResult<(NaiveDate, Vec<LigneProjetee>)> {
+    let d = charger(db, None).await?;
+    let restes = restes.unwrap_or(d.parametres.restes);
+    let rattrapage = rattrapage.unwrap_or(d.parametres.projete.rattrapage);
+    let lignes = d
+        .fiches
+        .values()
+        .map(|f| analyser(&d, f))
+        .filter(Analyse::a_lister)
+        .map(|a| {
+            let option = rattrapage != inverses.contains(&a.fiche.code_reference);
+            let p = projete_de(&d, &a, option, restes);
+            LigneProjetee {
+                code_reference: a.fiche.code_reference.clone(),
+                statut: p.etat,
+                qte_a_commander_kg: p.quantite.as_ref().map(|q| q.quantite_kg),
+                ligne: ligne_projete(&d, &a, &p),
+            }
+        })
+        .collect();
+    Ok((d.aujourdhui, lignes))
 }
 
 // ============================================================================
@@ -1153,8 +1507,6 @@ pub struct Etat {
     /// « Trop tard pour commander » : 1re rupture avant aujourd'hui + délai —
     /// l'état RUPTURE_INEVITABLE (`domain::couverture::trop_tard_pour_commander`).
     pub trop_tard: bool,
-    /// La ligne complète de la liste « À commander » (mêmes champs).
-    pub ligne: Value,
     pub mois: Vec<MoisFrise>,
 }
 
@@ -1424,7 +1776,6 @@ fn etat_de(a: &Analyse) -> Etat {
         stock_min_kg: r.stock_minimum.kg,
         sous_minimum_le: r.stock_minimum.franchi_le,
         trop_tard: trop_tard_pour_commander(r.premiere_rupture, a.reglages.aujourdhui, a.reglages.delai_j),
-        ligne: ligne(a),
         mois: frise(r),
     }
 }
@@ -1728,6 +2079,16 @@ fn retirer_quantites_masquees(v: &mut Value) {
     if let Some(achat) = v.get_mut("achat").and_then(Value::as_object_mut) {
         achat.remove("montant_estime_mad");
     }
+    // Le stock projeté porte la même quantité sous d'autres noms (§ 16).
+    if let Some(p) = v.get_mut("projete").and_then(Value::as_object_mut) {
+        for champ in ["quantite", "montant_estime_mad", "montant_devise"] {
+            p.remove(champ);
+        }
+        if let Some(l) = p.get_mut("ligne").and_then(Value::as_object_mut) {
+            l.remove("qte_a_commander_kg");
+            l.remove("palettes_equivalentes");
+        }
+    }
 }
 
 fn json_reference(f: &Fiche) -> Value {
@@ -1752,7 +2113,13 @@ pub async fn detail(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(reference): Path<String>,
+    Query(q): Query<HashMap<String, String>>,
 ) -> AppResult<Json<Value>> {
+    // L'option de rattrapage du stock projeté (§ 16.1-4) : `inclus` ou `exclu` ;
+    // absente, le réglage P_ProjeteRattrapage.
+    let rattrapage_demande = rattrapage_demande(q.get("rattrapage").map(String::as_str));
+    // `?leger=1` (la fenêtre du stock projeté) : sans le classement, lu à part.
+    let leger = matches!(q.get("leger").map(String::as_str), Some("1") | Some("true"));
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
     let reference = reference.trim();
     let d = charger(&state.db, Some(reference)).await?;
@@ -1962,12 +2329,100 @@ pub async fn detail(
         "prix_devise": prix_devise,
         "montant_devise": crate::domain::plan_achat::montant_estime(qte, prix_devise),
     });
-    v["stock_projete"] = stock_projete_detail(&state.db, &user, &d, &a).await?;
+    v["stock_projete"] = stock_projete_detail(&state.db, &user, &d, &a, !leger).await?;
     v["approvisionnement"] = approvisionnement;
+    // LE STOCK PROJETÉ (§ 16, 30/10/2026) : la formation de la couverture,
+    // l'alerte et la quantité, avec l'option de rattrapage demandée. Le montant
+    // suit la quantité du projeté.
+    let rattrapage = rattrapage_demande.unwrap_or(d.parametres.projete.rattrapage);
+    let p = projete_de(&d, &a, rattrapage, restes_demandes(q.get("restes").map(String::as_str)).unwrap_or(d.parametres.restes));
+    // Les réglages appliqués, pour que la fenêtre dise ce qu'elle compte.
+    let options = json!({
+        "sans_date": d.parametres.projete.sans_date,
+        "retard_j": d.parametres.projete.retard_j,
+        "quarantaine": d.parametres.projete.quarantaine,
+        "age_constat_max_j": d.parametres.projete.age_constat_max_j,
+        "min_multiple": d.parametres.projete.min_multiple,
+        "minimum_alerte": d.parametres.projete.minimum_alerte,
+    });
+    let qte_projete = p.quantite.as_ref().map(|q| q.quantite_kg);
+    v["projete"] = serde_json::to_value(&p).unwrap_or(Value::Null);
+    v["projete"]["ligne"] = ligne_projete(&d, &a, &p);
+    v["projete"]["signaux"] = signaux_projete(&p);
+    v["projete"]["options"] = options;
+    v["projete"]["montant_estime_mad"] = json!(crate::domain::plan_achat::montant_estime(qte_projete, prix_mad));
+    v["projete"]["montant_devise"] = json!(crate::domain::plan_achat::montant_estime(qte_projete, prix_devise));
     user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;
     user.masquer(&state.db, module::STOCK, &mut v["stock_projete"]["classement"]).await?;
     user.masquer_prix_au_cmup(&state.db, &mut v["achat"]).await?;
     retirer_quantites_masquees(&mut v);
+    Ok(Json(v))
+}
+
+/// LE CLASSEMENT ET LE RISQUE d'une référence (fenêtre du stock projeté) : ce
+/// que les vues fournissent déjà — ABC, rang, XYZ et CV, politique, palier,
+/// sources, groupe d'équivalence, dormance. La lecture coûte plus d'une seconde
+/// (le classement ABC se recalcule sur toutes les références) : la fenêtre la
+/// demande à part (`GET /api/couverture/{ref}/classement`) et s'ouvre sans elle.
+async fn classement_de(db: &Db, code: &str) -> AppResult<Value> {
+    let classement = sqlx::query(
+        "SELECT a.classe_abc, a.rang, a.pct_cumule::float8 AS pct_cumule,
+                a.valeur_conso_annuelle_mad::float8 AS valeur_conso_annuelle_mad, a.classe_xyz, a.politique,
+                (SELECT r.coef_variation_xyz::float8 FROM reference r WHERE r.code_reference = a.code_reference)
+                    AS coef_variation_xyz,
+                s.nb_sources, s.risque_source, s.tier,
+                (SELECT e.code_groupe_equiv FROM v_equivalence e WHERE e.code_reference = a.code_reference LIMIT 1)
+                    AS code_groupe_equiv,
+                (SELECT e.groupe_libelle FROM v_equivalence e WHERE e.code_reference = a.code_reference LIMIT 1)
+                    AS groupe_libelle,
+                (SELECT g.nb_fournisseurs FROM v_equivalence e
+                   JOIN v_groupe_equiv_detail g ON g.code_groupe_equiv = e.code_groupe_equiv
+                  WHERE e.code_reference = a.code_reference LIMIT 1) AS nb_fournisseurs_groupe,
+                es.derniere_sortie, es.jours_sans_mouvement::bigint AS jours_sans_mouvement,
+                EXISTS (SELECT 1 FROM v_stock_dormant sd WHERE sd.code_reference = a.code_reference) AS dormant
+           FROM v_analyse_abc_xyz a
+           LEFT JOIN v_risque_sourcing s ON s.code_reference = a.code_reference
+           LEFT JOIN v_etat_stock es ON es.code_reference = a.code_reference
+          WHERE a.code_reference = $1",
+    )
+    .bind(code)
+    .fetch_optional(db)
+    .await?;
+    let classement = match classement {
+        None => Value::Null,
+        Some(l) => json!({
+            "classe_abc": l.try_get::<Option<String>, _>("classe_abc")?,
+            "rang": l.try_get::<Option<i64>, _>("rang")?,
+            "pct_cumule": l.try_get::<Option<f64>, _>("pct_cumule")?,
+            "valeur_conso_annuelle_mad": l.try_get::<Option<f64>, _>("valeur_conso_annuelle_mad")?,
+            "classe_xyz": l.try_get::<Option<String>, _>("classe_xyz")?,
+            "politique": l.try_get::<Option<String>, _>("politique")?,
+            "coef_variation_xyz": l.try_get::<Option<f64>, _>("coef_variation_xyz")?,
+            "tier": l.try_get::<Option<String>, _>("tier")?,
+            "nb_sources": l.try_get::<Option<i64>, _>("nb_sources")?,
+            "risque_source": l.try_get::<Option<String>, _>("risque_source")?,
+            "code_groupe_equiv": l.try_get::<Option<String>, _>("code_groupe_equiv")?,
+            "groupe_libelle": l.try_get::<Option<String>, _>("groupe_libelle")?,
+            "nb_fournisseurs_groupe": l.try_get::<Option<i64>, _>("nb_fournisseurs_groupe")?,
+            "derniere_sortie": l.try_get::<Option<String>, _>("derniere_sortie")?,
+            "jours_sans_mouvement": l.try_get::<Option<i64>, _>("jours_sans_mouvement")?,
+            "dormant": l.try_get::<bool, _>("dormant")?,
+        }),
+    };
+
+    Ok(classement)
+}
+
+/// `GET /api/couverture/{reference}/classement` — le classement et le risque
+/// d'une référence, lus à part de la fenêtre du stock projeté (voir `classement_de`).
+pub async fn classement(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(reference): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
+    let mut v = classement_de(&state.db, reference.trim()).await?;
+    user.masquer(&state.db, module::STOCK, &mut v).await?;
     Ok(Json(v))
 }
 
@@ -1977,7 +2432,13 @@ pub async fn detail(
 /// est la somme exacte des lignes au-dessus), le classement et le risque (ce que
 /// les vues fournissent déjà), les lots, et l'historique (avec le droit de lire
 /// les mouvements).
-async fn stock_projete_detail(db: &Db, user: &Utilisateur, d: &Donnees, a: &Analyse<'_>) -> AppResult<Value> {
+async fn stock_projete_detail(
+    db: &Db,
+    user: &Utilisateur,
+    d: &Donnees,
+    a: &Analyse<'_>,
+    avec_classement: bool,
+) -> AppResult<Value> {
     let code = a.fiche.code_reference.as_str();
     let r = &a.resultat;
     let premiere = r.propositions.first();
@@ -2047,47 +2508,7 @@ async fn stock_projete_detail(db: &Db, user: &Utilisateur, d: &Donnees, a: &Anal
         "raison_etat": a.raison_etat(),
     });
 
-    // ---- Le classement et le risque : ce que les vues fournissent déjà ----------
-    let classement = sqlx::query(
-        "SELECT a.classe_abc, a.rang, a.pct_cumule::float8 AS pct_cumule,
-                a.valeur_conso_annuelle_mad::float8 AS valeur_conso_annuelle_mad, a.classe_xyz, a.politique,
-                s.nb_sources, s.risque_source,
-                (SELECT e.code_groupe_equiv FROM v_equivalence e WHERE e.code_reference = a.code_reference LIMIT 1)
-                    AS code_groupe_equiv,
-                (SELECT e.groupe_libelle FROM v_equivalence e WHERE e.code_reference = a.code_reference LIMIT 1)
-                    AS groupe_libelle,
-                (SELECT g.nb_fournisseurs FROM v_equivalence e
-                   JOIN v_groupe_equiv_detail g ON g.code_groupe_equiv = e.code_groupe_equiv
-                  WHERE e.code_reference = a.code_reference LIMIT 1) AS nb_fournisseurs_groupe,
-                es.derniere_sortie, es.jours_sans_mouvement::bigint AS jours_sans_mouvement,
-                EXISTS (SELECT 1 FROM v_stock_dormant sd WHERE sd.code_reference = a.code_reference) AS dormant
-           FROM v_analyse_abc_xyz a
-           LEFT JOIN v_risque_sourcing s ON s.code_reference = a.code_reference
-           LEFT JOIN v_etat_stock es ON es.code_reference = a.code_reference
-          WHERE a.code_reference = $1",
-    )
-    .bind(code)
-    .fetch_optional(db)
-    .await?;
-    let classement = match classement {
-        None => Value::Null,
-        Some(l) => json!({
-            "classe_abc": l.try_get::<Option<String>, _>("classe_abc")?,
-            "rang": l.try_get::<Option<i64>, _>("rang")?,
-            "pct_cumule": l.try_get::<Option<f64>, _>("pct_cumule")?,
-            "valeur_conso_annuelle_mad": l.try_get::<Option<f64>, _>("valeur_conso_annuelle_mad")?,
-            "classe_xyz": l.try_get::<Option<String>, _>("classe_xyz")?,
-            "politique": l.try_get::<Option<String>, _>("politique")?,
-            "nb_sources": l.try_get::<Option<i64>, _>("nb_sources")?,
-            "risque_source": l.try_get::<Option<String>, _>("risque_source")?,
-            "code_groupe_equiv": l.try_get::<Option<String>, _>("code_groupe_equiv")?,
-            "groupe_libelle": l.try_get::<Option<String>, _>("groupe_libelle")?,
-            "nb_fournisseurs_groupe": l.try_get::<Option<i64>, _>("nb_fournisseurs_groupe")?,
-            "derniere_sortie": l.try_get::<Option<String>, _>("derniere_sortie")?,
-            "jours_sans_mouvement": l.try_get::<Option<i64>, _>("jours_sans_mouvement")?,
-            "dormant": l.try_get::<bool, _>("dormant")?,
-        }),
-    };
+    let classement = if avec_classement { classement_de(db, code).await? } else { Value::Null };
 
     // ---- Les lots (tous, comptés ou non) ----------------------------------------
     let lots: Vec<Value> = sqlx::query(
@@ -2555,7 +2976,9 @@ mod tests_simulation {
         )]);
         Donnees {
             aujourdhui: j(1),
-            parametres: Parametres { securite: [5, 5, 5], delai_defaut: 60, marge_jours: 30 },
+            parametres: Parametres { securite: [5, 5, 5], delai_defaut: 60, marge_jours: 30, seuils_rupture: [30, 60, 90], restes: true,
+                projete: ReglagesProjete { rattrapage: true, age_constat_max_j: 0, quarantaine: false, retard_j: 0,
+                    sans_date: false, min_multiple: true, minimum_alerte: true } },
             plan: Some(PlanEnService {
                 id_plan: "P1".into(),
                 libelle: None,

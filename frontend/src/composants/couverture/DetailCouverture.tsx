@@ -55,15 +55,21 @@ export function Titre({ children }: { children: ReactNode }) {
 export function DetailReference({
   reference,
   enrichi = false,
+  rattrapage = null,
+  restes = null,
   surSimuler,
 }: {
   reference: string
   /** Le stock projeté : situation, approvisionnement, projection, résultat MRP. */
   enrichi?: boolean
+  /** L'option de rattrapage du stock projeté (§ 16), inclus par défaut. */
+  rattrapage?: boolean | null
+  /** Les restes comptés ou non (31/10/2026) ; `null` : le réglage. */
+  restes?: boolean | null
   /** Ouvre l'espace « Simulation » sur cette référence (stock projeté). */
   surSimuler?: (reference: string) => void
 }) {
-  const q = useDetailCouverture(reference)
+  const q = useDetailCouverture(reference, rattrapage, enrichi, restes)
   if (q.isLoading) return <Chargement />
   if (q.error || !q.data)
     return (

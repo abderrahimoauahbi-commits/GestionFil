@@ -439,27 +439,34 @@ fn fenetre_de(stock: f64, b: &[f64], r: usize, cible: i64, delai: usize, couv: u
     Calcul { r, d_etoile, d, debut, fin, manque, reste, q0 }
 }
 
-/// Calcule la couverture d'une référence à partir du plan MENSUEL (la photo
-/// `besoin_mrp`), réparti au jour.
-pub fn calculer(stock_initial: f64, plan: &[MoisPlan], arrivees: &[Arrivee], r: &Reglages) -> Couverture {
-    let auj = r.aujourdhui;
-    // Un plan déjà terminé ne projette rien : un seul jour, sans consommation.
-    let fin = r.fin_horizon.max(auj);
-    let n = ((fin - auj).num_days() + 1) as usize;
-    let date = |i: usize| auj + Duration::days(i as i64);
+/// LE PLAN AU JOUR : p(t) pour t ∈ [aujourd'hui, fin], le kg du mois ÷ les
+/// jours réels du mois (profil « uniforme dans le mois »). Un plan déjà terminé
+/// ne projette rien : un seul jour, sans consommation. Le stock projeté
+/// (`domain/projete.rs`) lit la même répartition.
+pub fn plan_au_jour(plan: &[MoisPlan], aujourdhui: NaiveDate, fin_horizon: NaiveDate) -> Vec<f64> {
+    let fin = fin_horizon.max(aujourdhui);
+    let n = ((fin - aujourdhui).num_days() + 1) as usize;
     let mut par_mois: HashMap<(i32, u32), f64> = HashMap::new();
     for m in plan {
         *par_mois.entry((m.annee, m.mois)).or_default() += m.kg;
     }
-    let conso: Vec<f64> = (0..n)
+    (0..n)
         .map(|i| {
-            let d = date(i);
+            let d = aujourdhui + Duration::days(i as i64);
             par_mois
                 .get(&(d.year(), d.month()))
                 .filter(|kg| **kg > 0.0)
                 .map_or(0.0, |kg| kg / jours_du_mois(d.year(), d.month()) as f64)
         })
-        .collect();
+        .collect()
+}
+
+/// Calcule la couverture d'une référence à partir du plan MENSUEL (la photo
+/// `besoin_mrp`), réparti au jour.
+pub fn calculer(stock_initial: f64, plan: &[MoisPlan], arrivees: &[Arrivee], r: &Reglages) -> Couverture {
+    let auj = r.aujourdhui;
+    let conso = plan_au_jour(plan, auj, r.fin_horizon);
+    let n = conso.len();
     let mut arr = vec![0.0; n];
     for a in arrivees {
         let k = (a.date - auj).num_days();

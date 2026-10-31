@@ -40,6 +40,18 @@ pub struct Filtres {
     /// y mettait une reference et recevait tout. Le nom juste existe
     /// maintenant ; l'ancien reste accepte, des paquets deployes l'utilisent.
     pub id_reception: Option<String>,
+    /// LE RATTRAPAGE du stock projeté (§ 16, 30/10/2026) : `exclu` pour exclure,
+    /// inclus sinon ; `inverses` : les références (une liste JSON) qui prennent
+    /// l'option contraire (le bouton de la ligne).
+    pub rattrapage: Option<String>,
+    pub inverses: Option<String>,
+    /// LES RESTES du stock projeté (31/10/2026) : `exclus` ou `comptes` ; absent,
+    /// le réglage `P_ProjeteRestes`.
+    pub restes: Option<String>,
+    /// LE MODE LÉGER du stock projeté (`?leger=1`, l'écran /stock) : sans les
+    /// compléments du stock (valeur, physique, unité), que lisent le cockpit et
+    /// les états imprimés.
+    pub leger: Option<String>,
 }
 
 impl Filtres {
@@ -1078,22 +1090,39 @@ fn tronquer(v: &mut Value, limite: i64) {
     }
 }
 
-/// `GET /api/stock/projete` — LE STOCK PROJETE EST UNE VUE DU MOTEUR DE COUVERTURE
-/// (27/10/2026) : une ligne par reference suivie (active, avec une demande au plan,
-/// du stock ou un arrivage), ses ressources comptees, sa couverture (1re rupture,
-/// couvert jusqu'au, plan non couvert), sa premiere proposition, et ce qui est
-/// compte a part — les memes champs que l'onglet « A commander ». `?statut=`
-/// filtre sur l'etat du moteur (RUPTURE_INEVITABLE, SOUS_SECURITE, SOUS_CIBLE, COUVERT).
+/// `GET /api/stock/projete` — LE STOCK PROJETÉ (§ 16, 30/10/2026) : COMBIEN
+/// COMMANDER, sans chronologie. Une ligne par référence suivie (active, avec une
+/// demande au plan, du stock ou un arrivage) : les colonnes de l'onglet
+/// Approvisionnement (`couverture::stock_projete`). Les onglets Risques et
+/// Sourcing lisent `GET /api/stock/projete/complements`, à leur ouverture.
+/// `?rattrapage=exclu` exclut le rattrapage (inclus sinon) ; `?inverses=["A","B"]`
+/// (liste JSON) : ces références prennent l'option contraire. `?statut=` filtre sur l'état
+/// (ALERTE, SOUS_CIBLE, COUVERT).
 pub async fn stock_projete(
     State(state): State<AppState>,
     user: Utilisateur,
     Query(f): Query<Filtres>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
-    let etats = super::couverture::etats(&state.db).await?;
+    let rattrapage = super::couverture::rattrapage_demande(f.rattrapage.as_deref());
+    // Une liste JSON : un code de référence peut contenir une virgule.
+    let inverses: std::collections::HashSet<String> = match f.inverses.as_deref().map(str::trim) {
+        None | Some("") => Default::default(),
+        Some(s) => serde_json::from_str::<Vec<String>>(s)
+            .map_err(|_| AppError::Invalide("inverses : une liste JSON de références est attendue".into()))?
+            .into_iter()
+            .collect(),
+    };
+    let restes = super::couverture::restes_demandes(f.restes.as_deref());
+    let (_, projetees) = super::couverture::stock_projete(&state.db, rattrapage, &inverses, restes).await?;
     // Ce que le stock dit en plus : le physique, la valeur, l'unite, la regularite,
-    // et le fil sur machine total (compte ou non).
-    let complements = lignes_en_json(
+    // et le fil sur machine total (compte ou non). Pas en mode leger (l'ecran
+    // /stock ne les affiche pas) : la lecture coute autant que le calcul.
+    let leger = matches!(f.leger.as_deref().map(str::trim), Some("1") | Some("true"));
+    let complements = if leger {
+        Value::Array(Vec::new())
+    } else {
+        lignes_en_json(
         &sqlx::query(
             "SELECT s.code_reference, s.classe_xyz, s.unite_catalogue, s.cmup_mad, s.valeur_totale_mad,
                     s.stock_physique_net_kg, s.stock_total_kg, s.reel_mois_kg,
@@ -1103,8 +1132,30 @@ pub async fn stock_projete(
         )
         .fetch_all(&state.db)
         .await?,
-    );
+        )
+    };
     let par_code: HashMap<String, &Value> = complements
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|l| l["code_reference"].as_str().map(|c| (c.to_string(), l)))
+                .collect()
+        })
+        .unwrap_or_default();
+    // LES ATTRIBUTS MATIÈRE des filtres (31/10/2026) : composition et rôle (la
+    // catégorie et son rôle par défaut), type de fil, titrage, couleur. Une
+    // lecture simple, toujours faite, mode léger compris.
+    let attributs = lignes_en_json(
+        &sqlx::query(
+            "SELECT r.code_reference, c.libelle AS composition, c.code_role_defaut AS role,
+                    r.type_fil, r.titrage, r.couleur
+               FROM reference r
+               LEFT JOIN categorie_matiere c ON c.code_categorie = r.code_categorie",
+        )
+        .fetch_all(&state.db)
+        .await?,
+    );
+    let par_attribut: HashMap<String, &Value> = attributs
         .as_array()
         .map(|a| {
             a.iter()
@@ -1116,16 +1167,24 @@ pub async fn stock_projete(
     // proposition du moteur x LE MEME PRIX que la proposition du plan d'achat
     // (`domain::plan_achat::PRIX_MAD_SQL`). Masque selon la grille, comme les
     // autres montants ; au CMUP, masque a qui ne voit pas le CMUP.
-    let prix = crate::domain::plan_achat::prix_estimes(&state.db, None).await?;
+    // Seules les lignes qui ont une quantite se chiffrent.
+    let a_chiffrer: Vec<String> = projetees
+        .iter()
+        .filter(|e| e.qte_a_commander_kg.is_some_and(|q| q > 0.0))
+        .map(|e| e.code_reference.clone())
+        .collect();
+    let prix = crate::domain::plan_achat::prix_estimes_pour(&state.db, &a_chiffrer).await?;
     let filtre = f.statut.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let mut lignes: Vec<Value> = etats
-        .suivies()
+    let mut lignes: Vec<Value> = projetees
+        .iter()
         .filter(|e| filtre.is_none_or(|s| s == e.statut))
         .map(|e| {
             let mut l = e.ligne.clone();
-            if let (Some(o), Some(c)) = (l.as_object_mut(), par_code.get(&e.code_reference).and_then(|c| c.as_object())) {
-                for (k, v) in c {
-                    o.entry(k.clone()).or_insert_with(|| v.clone());
+            for source in [par_code.get(&e.code_reference), par_attribut.get(&e.code_reference)] {
+                if let (Some(o), Some(c)) = (l.as_object_mut(), source.and_then(|c| c.as_object())) {
+                    for (k, v) in c {
+                        o.entry(k.clone()).or_insert_with(|| v.clone());
+                    }
                 }
             }
             if let Some(o) = l.as_object_mut() {
@@ -1140,11 +1199,11 @@ pub async fn stock_projete(
             l
         })
         .collect();
-    // LE TRI PAR DEFAUT DU STOCK PROJETE (27/10/2026) : la gravite de l'etat, puis
-    // « Avant le » (la date limite de commande ; sans date, apres).
+    // LE TRI PAR DÉFAUT DU STOCK PROJETÉ (§ 16) : la gravité de l'état, puis
+    // « Avant le » (sans date, après).
     lignes.sort_by(|x, y| {
-        let rang = |l: &Value| super::couverture::rang_statut(l["statut"].as_str().unwrap_or(""));
-        let avant_le = |l: &Value| l["date_limite_commande"].as_str().unwrap_or("9999").to_string();
+        let rang = |l: &Value| crate::domain::projete::rang_etat(l["statut"].as_str().unwrap_or(""));
+        let avant_le = |l: &Value| l["avant_le"].as_str().unwrap_or("9999").to_string();
         let code = |l: &Value| l["code_reference"].as_str().unwrap_or("").to_string();
         (rang(x), avant_le(x), code(x)).cmp(&(rang(y), avant_le(y), code(y)))
     });
@@ -1158,6 +1217,52 @@ pub async fn stock_projete(
             l.remove("montant_estime_mad");
         }
     }
+    Ok(Json(valeur))
+}
+
+/// `GET /api/stock/projete/complements` — LES ONGLETS RISQUES ET SOURCING DU
+/// STOCK PROJETÉ (§ 16.5) : ce que les vues fournissent déjà, toutes les
+/// références en une lecture, chargé à l'ouverture de l'onglet (la liste reste
+/// légère). Classement ABC/XYZ, CV, politique, palier ; sources, groupe
+/// d'équivalence, substituts (leur liste séparée par « | » : un code de
+/// référence peut contenir une virgule), dormance. La couverture des
+/// substituts se lit sur les lignes du stock projeté.
+pub async fn stock_projete_complements(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    let mut valeur = lignes_en_json(
+        &sqlx::query(
+            "SELECT r.code_reference, r.classe_xyz, r.coef_variation_xyz::float8 AS coef_variation_xyz,
+                    a.rang, a.pct_cumule::float8 AS pct_cumule,
+                    a.valeur_conso_annuelle_mad::float8 AS valeur_conso_annuelle_mad, a.politique,
+                    s.nb_sources, s.risque_source, s.tier,
+                    g.code_groupe_equiv, g.groupe_libelle,
+                    (SELECT count(DISTINCT rge2.code_reference)
+                       FROM reference_groupe_equiv rge1
+                       JOIN reference_groupe_equiv rge2 ON rge2.code_groupe_equiv = rge1.code_groupe_equiv
+                                                       AND rge2.code_reference <> rge1.code_reference
+                                                       AND rge2.actif = 1
+                       JOIN reference r2 ON r2.code_reference = rge2.code_reference AND r2.actif = 1
+                      WHERE rge1.code_reference = r.code_reference AND rge1.actif = 1) AS nb_substituts,
+                    (SELECT COALESCE(sum(x.kg), 0)::float8
+                       FROM (SELECT DISTINCT sd.ref_substitut, sd.stock_substitut_kg AS kg
+                               FROM v_substitution_dispo sd WHERE sd.ref_principale = r.code_reference) x)
+                        AS substituts_stock_kg,
+                    (SELECT string_agg(DISTINCT sd.ref_substitut, '|')
+                       FROM v_substitution_dispo sd WHERE sd.ref_principale = r.code_reference) AS substituts_en_stock,
+                    es.derniere_sortie, es.jours_sans_mouvement::bigint AS jours_sans_mouvement,
+                    EXISTS (SELECT 1 FROM v_stock_dormant sd WHERE sd.code_reference = r.code_reference) AS dormant
+               FROM reference r
+               LEFT JOIN v_analyse_abc_xyz a ON a.code_reference = r.code_reference
+               LEFT JOIN v_risque_sourcing s ON s.code_reference = r.code_reference
+               LEFT JOIN LATERAL (SELECT e.code_groupe_equiv, e.groupe_libelle FROM v_equivalence e
+                                   WHERE e.code_reference = r.code_reference
+                                   ORDER BY e.code_groupe_equiv LIMIT 1) g ON true
+               LEFT JOIN v_etat_stock es ON es.code_reference = r.code_reference",
+        )
+        .fetch_all(&state.db)
+        .await?,
+    );
+    user.masquer(&state.db, module::STOCK, &mut valeur).await?;
     Ok(Json(valeur))
 }
 

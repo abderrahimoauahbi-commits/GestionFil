@@ -221,6 +221,36 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
   `v_of_bilan`, `v_qualite_consommation`. Le besoin « OF retenus + plan non couvert » de `22c` est **remplacé par
   le plan seul** (`2026-10-27b`, exigée au démarrage) : l'OF ne sert que l'axe production / statistiques (C64 signale
   toujours un OF au-delà du plan) ; le fil sur machine compte au dernier constat, quel que soit son âge.
+- **Le Stock projeté n'est PAS chronologique** (§ 16, décidé et livré le 30/10/2026) : il dit COMBIEN COMMANDER.
+  `domain/projete.rs` (calcul pur, tests T1–T10) : toutes les commandes ouvertes à leur date (date passée = aujourd'hui,
+  aucun filtre d'horizon), consommation du plan déduite avant chaque arrivage, **rattrapage** du manque avant un arrivage
+  tardif = bouton de l'écran (inclus par défaut, `?rattrapage=exclu`, `?inverses=[…]` en JSON : un code de référence
+  contient une virgule) ; déclenchement couverture projetée < C ; Q = plus petite quantité reçue à aujourd'hui + L qui
+  porte la couverture à C + N ; état ALERTE (T − L < sécurité ABC + stock minimum en jours) / SOUS_CIBLE / COUVERT ; le
+  minimum ne change jamais Q. L'écran /stock (vues Approvisionnement, Risques, Sourcing, Emplacements ; Référence ·
+  Fournisseur · État en tête de chacune) et la génération du
+  plan d'achat appellent la MÊME fonction (`couverture::projete_de`, rattrapage inclus pour le plan). Le CV est conservé
+  (`reference.coef_variation_xyz`, `2026-10-30a`, exigée). Décisions du 31/10 (`2026-10-31a`, exigée) : la couverture
+  montre en NÉGATIF les jours sans fil jusqu'au prochain approvisionnement — arrivage connu, sinon une commande passée
+  aujourd'hui (+ L) — (`projete.jours_sans_fil`) ; onglet Emplacements = un magasin
+  par colonne (`stock_par_magasin`, colonne au droit `droit:` de `ColonneDT`), sur machines, restes, quarantaine, en route
+  = TRANSFERTS seuls, commandé = autres arrivages datés, stock après l'arrivage = disponible + quarantaine + en route +
+  commandé ; la fenêtre suit la disposition « pont de calcul » (décision, 4 chiffres, `projete.pont` du stock compté au
+  niveau C + N, répartition, arrivages, onglets dont Calcul). **Paliers de rupture** (`2026-10-31b`, exigée) : jours
+  jusqu'au PREMIER jour sans fil, échelonnés par `P_SeuilImminent` (30, nouveau) / `P_SeuilCritique` (60) /
+  `P_SeuilAlerte` (90) → RUPTURE / IMMINENTE / CRITIQUE / ATTENTION (`projete::palier`), avec palier suivant et sa date ;
+  une autre question que l'état (combien commander). `projete.a_sec` = premier trou avant un camion connu (bandeau du
+  plan d'achat). Plan d'achat sur une ligne : les valeurs regroupées dans une cellule s'exportent en colonnes (`joints`
+  de `ColonneDT`). **Restes** (`2026-10-31c`) : `P_ProjeteRestes` (1 = comptés, défaut) que suit le plan d'achat ;
+  bouton de l'écran `?restes=exclus|comptes` (session seulement). Pied de total : `total: true` sur une `ColonneDT`
+  (lignes filtrées, toutes pages). Plan d'achat : paliers par fournisseur, bouton Préparer, mono / multi-source sous le
+  fournisseur, tri pondéré ABC (A × 3, B × 2). Filtres matière du /stock : composition et rôle (catégorie,
+  `code_role_defaut`), type de fil, titrage, couleur, magasin principal. **Réglages du projeté** (`2026-10-31d`, section
+  « Stock projeté » de Configuration, chacun au comportement d'avant) : `P_ProjeteRattrapage` (1), `P_ProjeteAgeConstatMax`
+  (0 = sans limite), `P_ProjeteQuarantaine` (0), `P_ProjeteRetardJours` (0), `P_ProjeteSansDate` (0),
+  `P_ProjeteMinMultiple` (1), `P_ProjeteMinimumAlerte` (1). Le stock lu par le calcul ET affiché vient de
+  `couverture::stock_du_projete` (restes, constat trop vieux, quarantaine) ; le plan d'achat suit tous ces réglages. Le reste du moteur v2 ci-dessous (B(t), R, Q0, états
+  RUPTURE_INEVITABLE…, `couverture::etats()` lu par cockpit, briefing, assistant, contrôles) est la future Surveillance.
 - **Moteur de couverture v2 : la couverture cible** (spécification `docs/A-DECIDER-of-supply-chain.md` § 15, livré le
   27/10/2026 au soir) : `domain/couverture.rs` (calcul pur ; les cas 1, 2, 3, 4a, 4b du § 15.6 sont des tests aux
   chiffres exacts, avec bilan, équivalence classique et propriété sur plans aléatoires), `routes/couverture.rs`

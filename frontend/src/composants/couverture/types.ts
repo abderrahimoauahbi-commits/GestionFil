@@ -362,6 +362,8 @@ export interface DetailCouverture extends EnteteCouverture, VueAnalyse {
   } | null
   /** La fenêtre du stock projeté (27/10/2026). */
   stock_projete?: StockProjeteDetail
+  /** LE STOCK PROJETÉ (§ 16, 30/10/2026) : combien commander, sans chronologie. */
+  projete?: ProjeteDetail
   /** Les réglages de la fiche (couverture cible, stock minimum = garde-fou), et le réel du grand livre. */
   approvisionnement?: {
     stock_min_fiche_kg?: number | null
@@ -369,6 +371,93 @@ export interface DetailCouverture extends EnteteCouverture, VueAnalyse {
     seuil_alerte_j?: number | null
     unite_catalogue?: string | null
     reel_mois_kg?: number | null
+  } | null
+}
+
+/** Une étape de la formation de la couverture (§ 16.2). */
+export interface EtapeProjete {
+  date: string
+  /** ARRIVAGE ou EPUISEMENT. */
+  nature: 'ARRIVAGE' | 'EPUISEMENT'
+  conso_kg: number
+  manque_kg: number
+  arrivee_kg: number
+  solde_kg: number
+}
+
+/** LE STOCK PROJETÉ d'une référence (§ 16, `domain/projete.rs`). */
+export interface ProjeteDetail {
+  rattrapage: boolean
+  horizon_j: number
+  arrivages_kg: number
+  position_kg: number
+  besoin_delai_kg: number
+  couverture_j: number | null
+  couvert_jusqu_au: string | null
+  manque_kg: number
+  cible_j: number | null
+  ecart_cible_j: number | null
+  avant_le: string | null
+  stock_min_j: number | null
+  seuil_alerte_j: number
+  couverture_livraison_j: number | null
+  /** ALERTE | SOUS_CIBLE | COUVERT. */
+  etat: string
+  raison: string
+  signaux: SignalCouverture[]
+  /** Absente : rien à commander, ou masquée selon les droits. */
+  quantite?: {
+    date_reception: string
+    niveau_vise_j: number
+    besoin_kg: number
+    moq_kg: number | null
+    apres_minimum_kg: number
+    multiple_kg: number | null
+    complement_multiple_kg: number
+    quantite_kg: number
+    palettes: number | null
+  } | null
+  motif_sans_quantite: string | null
+  etapes: EtapeProjete[]
+  /** Les jours sans fil jusqu'au prochain approvisionnement (31/10/2026). */
+  jours_sans_fil?: number
+  /** Les paliers de rupture (31/10/2026). */
+  rupture_j?: number | null
+  rupture_le?: string | null
+  palier?: string | null
+  palier_suivant?: string | null
+  date_palier_suivant?: string | null
+  a_sec?: { date_sec: string; date_arrivage: string; jours: number; manque_kg: number } | null
+  /** Le pont de la fenêtre : du stock compté au niveau visé C + N ; absent sans cible. */
+  pont?: {
+    vise_j: number
+    date_vise: string
+    arrivages_kg: number
+    plan_kg: number
+    solde_kg: number
+  } | null
+  /** La ligne du tableau (onglets Approvisionnement et Emplacements). */
+  ligne?: {
+    stock_par_magasin?: Record<string, number> | null
+    machine_hors_restes_kg?: number
+    restant_kg?: number
+    quarantaine_kg?: number
+    transit_kg?: number
+    commande_kg?: number
+    stock_apres_arrivage_kg?: number
+    disponible_kg?: number
+    [k: string]: unknown
+  }
+  montant_estime_mad?: number | null
+  montant_devise?: number | null
+  /** Les réglages du stock projeté appliqués (31/10/2026, P_Projete*). */
+  options?: {
+    sans_date: boolean
+    retard_j: number
+    quarantaine: boolean
+    age_constat_max_j: number
+    min_multiple: boolean
+    minimum_alerte: boolean
   } | null
 }
 
@@ -415,6 +504,10 @@ export interface StockProjeteDetail {
     valeur_conso_annuelle_mad?: number | null
     classe_xyz?: string | null
     politique?: string | null
+    /** Le coefficient de variation qui fixe la classe XYZ (§ 16, 30/10/2026). */
+    coef_variation_xyz?: number | null
+    /** Le palier de montant (v_risque_sourcing). */
+    tier?: string | null
     nb_sources?: number | null
     risque_source?: string | null
     code_groupe_equiv?: string | null

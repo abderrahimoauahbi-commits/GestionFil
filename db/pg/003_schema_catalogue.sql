@@ -189,6 +189,8 @@ CREATE TABLE reference (
     -- Classification (calculee par fn_classifier_abc_xyz cote applicatif)
     classe_abc          text    CHECK (classe_abc IS NULL OR classe_abc IN ('A','B','C')),
     classe_xyz          text    CHECK (classe_xyz IS NULL OR classe_xyz IN ('X','Y','Z')),
+    -- Le coefficient de variation qui fixe la classe XYZ (2026-10-30a, stock projeté)
+    coef_variation_xyz  numeric(10,4) CHECK (coef_variation_xyz IS NULL OR coef_variation_xyz >= 0),
     date_dernier_abc    text,
 
     -- Valorisation (RG-08 : NULL tant qu'aucune reception reelle)

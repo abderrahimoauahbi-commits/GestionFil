@@ -65,7 +65,15 @@ const MODULE = 'PLAN_ACHAT'
 /** Entetes de la repartition par fournisseur, dans l'ordre de la feuille. */
 const ENTETES_FRS = [
   'Fournisseur', 'Pays', 'Devise', 'Délai', 'Refs',
-  'Quantité', 'Montant MAD', '% budget', 'TIER 1', 'Rupture inévitable', 'Contact',
+  'Quantité', 'Montant MAD', '% budget', 'TIER 1', 'Rupture inévitable', 'Paliers de rupture', 'Contact', '',
+]
+
+/** « 3 rupt. · 2 imm. · 1 crit. » : les paliers de rupture d'un ensemble de références. */
+const ABREGES_PALIER: [string, string][] = [
+  ['RUPTURE', 'rupt.'],
+  ['IMMINENTE', 'imm.'],
+  ['CRITIQUE', 'crit.'],
+  ['ATTENTION', 'att.'],
 ]
 
 interface Proposition extends Record<string, unknown> {
@@ -286,7 +294,34 @@ export function PlanAchat() {
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Impossible d’ecarter.'),
   })
 
-  const lignes = q.data ?? []
+  // LE STOCK PROJETÉ (31/10/2026) : le plan d'achat le suit. Ses lignes donnent
+  // le palier de rupture et le trou avant le camion ; ses compléments, le
+  // sourcing (mono / multi-source). Lus sous le droit de lecture du stock.
+  const lireStock = useDroits('STOCK').peutLire
+  const qProjete = useQuery({
+    queryKey: ['plan-achat-projete'],
+    queryFn: ({ signal }) => api.get<LigneProjetePlan[]>('/api/stock/projete?limite=2000&leger=1', { signal }),
+    enabled: lireStock,
+    staleTime: 60_000,
+  })
+  const qSources = useQuery({
+    queryKey: ['stock-projete-complements'],
+    queryFn: ({ signal }) => api.get<SourcePlan[]>('/api/stock/projete/complements', { signal }),
+    enabled: lireStock,
+    staleTime: 60_000,
+  })
+  const palierDe = useMemo(
+    () => new Map((qProjete.data ?? []).map((l) => [l.code_reference, l.palier_rupture ?? null])),
+    [qProjete.data],
+  )
+  const sourceDe = useMemo(() => new Map((qSources.data ?? []).map((c) => [c.code_reference, c])), [qSources.data])
+  // LE TRI PONDÉRÉ PAR L'ABC (31/10/2026) : le montant × 3 en A, × 2 en B.
+  const [triPondere, setTriPondere] = useState(false)
+
+  const lignes = useMemo(() => {
+    const brutes = q.data ?? []
+    return triPondere ? [...brutes].sort((a, b) => poidsAbc(b) - poidsAbc(a)) : brutes
+  }, [q.data, triPondere])
   const ouvertes = useMemo(() => lignes.filter(convertible), [lignes])
 
   // La selection ne retient que ce qui est encore convertible : une proposition
@@ -338,7 +373,7 @@ export function PlanAchat() {
     {
       champ: 'selection',
       entete: '',
-      largeur: '38px',
+      largeur: '32px',
       rendu: (p) =>
         convertible(p) ? (
           <input
@@ -353,57 +388,60 @@ export function PlanAchat() {
           />
         ) : null,
     },
-    {
-      champ: 'classe_abc',
-      entete: 'ABC',
-      largeur: '54px',
-      secondaire: true,
-      // La classe est un rang, pas une note : A ne veut pas dire « bon » mais
-      // « porte l'essentiel du budget ». On la teinte donc par le poids, pas
-      // par une echelle de gravite.
-      rendu: (p) =>
-        !p.classe_abc ? (
-          <span className="text-attenue-texte">—</span>
-        ) : (
-          <span
-            className={cn(
-              'inline-block rounded-[3px] px-1.5 py-px text-[11px] font-medium',
-              p.classe_abc === 'A'
-                ? 'bg-primaire/15 text-primaire'
-                : p.classe_abc === 'B'
-                  ? 'bg-attenue text-texte'
-                  : 'text-attenue-texte',
-            )}
-          >
-            {p.classe_abc}
-            {p.classe_xyz && <span className="opacity-60">{p.classe_xyz}</span>}
-          </span>
-        ),
-    },
-    {
-      champ: 'action_recommandee',
-      entete: 'Action',
-      secondaire: true,
-      rendu: (p) => (
-        <span className="text-[11px] text-attenue-texte">{p.action_recommandee ?? '—'}</span>
-      ),
-    },
+    /* UNE SEULE LIGNE PAR PROPOSITION, SANS ↳ (31/10/2026) : ce qui va ensemble
+       tient dans une cellule (la classe ABC à côté de la référence, l'action sous
+       l'urgence, le prix en devise sous le prix en dirhams, le montant en devise
+       sous le montant, le complément sous les palettes, le besoin sous la date
+       limite) ; l'export et l'impression les rendent en colonnes à part
+       (`joints`). */
     {
       champ: 'urgence',
       entete: 'Urgence',
-      largeur: '90px',
+      largeur: '96px',
       filtre: 'liste',
-      rendu: (p) => <StatutBadge entite="urgence_achat" code={p.urgence} />,
+      joints: [{ champ: 'action_recommandee', entete: 'Action', valeur: (p) => p.action_recommandee }],
+      rendu: (p) => (
+        <div className="min-w-0 max-w-[6.5rem]">
+          <StatutBadge entite="urgence_achat" code={p.urgence} />
+          {p.action_recommandee && (
+            <div className="mt-0.5 whitespace-normal text-[11px] leading-snug text-attenue-texte">{p.action_recommandee}</div>
+          )}
+        </div>
+      ),
     },
     {
       champ: 'code_reference',
       entete: 'Référence',
       filtre: 'texte',
+      joints: [
+        { champ: 'classe_abc', entete: 'ABC', valeur: (p) => (p.classe_abc ? `${p.classe_abc}${p.classe_xyz ?? ''}` : null) },
+      ],
       rendu: (p) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium">{p.code_reference}</div>
-          {p.designation && (
-            <div className="truncate text-[11px] text-attenue-texte">{p.designation}</div>
+        <div className="min-w-[8rem] max-w-[11.5rem]">
+          <div className="whitespace-normal break-words font-medium leading-snug">
+            {p.code_reference}
+            {/* La classe est un rang, pas une note : A ne veut pas dire « bon »
+                mais « porte l'essentiel du budget ». On la teinte donc par le
+                poids, pas par une echelle de gravite. */}
+            {p.classe_abc && (
+              <span
+                title="Classe ABC / XYZ"
+                className={cn(
+                  'ml-1.5 inline-block rounded-[3px] px-1 py-px align-[1px] text-[10.5px] font-medium',
+                  p.classe_abc === 'A'
+                    ? 'bg-primaire/15 text-primaire'
+                    : p.classe_abc === 'B'
+                      ? 'bg-attenue text-texte'
+                      : 'text-attenue-texte',
+                )}
+              >
+                {p.classe_abc}
+                {p.classe_xyz && <span className="opacity-60">{p.classe_xyz}</span>}
+              </span>
+            )}
+          </div>
+          {p.designation && p.designation !== p.code_reference && (
+            <div className="truncate text-[11px] text-attenue-texte" title={p.designation}>{p.designation}</div>
           )}
         </div>
       ),
@@ -418,13 +456,22 @@ export function PlanAchat() {
          lire les cent six lignes pour en retenir douze. */
       champ: 'fournisseur_nom',
       entete: 'Fournisseur',
-      largeur: '150px',
+      largeur: '110px',
       filtre: 'liste',
       rendu: (p) => (
-        <div className="min-w-0">
-          <div className="truncate">{p.fournisseur_nom || '—'}</div>
-          {p.fournisseur_pays && (
-            <div className="truncate text-[11px] text-attenue-texte">{p.fournisseur_pays}</div>
+        <div className="min-w-0 max-w-[9rem]">
+          <div className="whitespace-normal break-words leading-snug">{p.fournisseur_nom || '—'}</div>
+          {(p.fournisseur_pays || sourceDe.get(p.code_reference)?.risque_source) && (
+            <div className="truncate text-[11px] text-attenue-texte">
+              {p.fournisseur_pays}
+              {p.fournisseur_pays && sourceDe.get(p.code_reference)?.risque_source ? ' · ' : ''}
+              {/* LE SOURCING SUR LA LIGNE (31/10/2026) : une seule source = un risque. */}
+              {sourceDe.get(p.code_reference)?.risque_source === 'MONO_SOURCE' ? (
+                <span className="font-medium text-danger">mono-source</span>
+              ) : sourceDe.get(p.code_reference)?.risque_source === 'MULTI_SOURCE' ? (
+                <span className="text-succes">multi-source ({sourceDe.get(p.code_reference)?.nb_sources ?? '?'})</span>
+              ) : null}
+            </div>
           )}
         </div>
       ),
@@ -432,7 +479,7 @@ export function PlanAchat() {
     {
       champ: 'statut',
       entete: 'Statut',
-      largeur: '150px',
+      largeur: '110px',
       filtre: 'liste',
       rendu: (p) => (
         <div className="flex flex-wrap items-center gap-1">
@@ -445,9 +492,10 @@ export function PlanAchat() {
     },
     {
       champ: 'quantite_suggeree_kg',
+      total: true,
       entete: 'A commander',
       numerique: true,
-      largeur: '140px',
+      largeur: '96px',
       // LECTURE SEULE DANS LE PLAN (14/10/2026) : la quantite s'ajuste sur la
       // commande, pas ici — editer dans le plan relancait le calcul a chaque
       // frappe, lent sur des centaines de lignes.
@@ -466,9 +514,13 @@ export function PlanAchat() {
     },
     {
       champ: 'prix_estime_mad',
-      entete: 'Prix MAD/kg',
+      entete: 'Prix /kg',
       numerique: true,
-      largeur: '120px',
+      largeur: '96px',
+      joints: [
+        { champ: 'prix_devise', entete: 'Prix devise', numerique: true, valeur: (p) => p.prix_devise },
+        { champ: 'code_devise', entete: 'Devise', valeur: (p) => p.code_devise },
+      ],
       // LE PRIX EN LECTURE : il se negocie et s'ajuste sur la commande, plus
       // dans le plan. La source (dernier achat / catalogue / cout moyen) reste
       // affichee pour juger de sa fiabilite.
@@ -477,7 +529,18 @@ export function PlanAchat() {
           <span className="text-attenue-texte">—</span>
         ) : (
           <div>
-            <div className="tabular-nums">{p.prix_a_saisir ? '—' : fmt.nombre(p.prix_estime_mad, 3)}</div>
+            <div className="tabular-nums">
+              {p.prix_a_saisir ? '—' : fmt.nombre(p.prix_estime_mad, 3)}
+              <span className="ml-1 text-[11px] text-attenue-texte">MAD</span>
+            </div>
+            {/* Le fournisseur est turc ou indien : le bon se libelle dans SA
+                devise ; le prix en devise se lit sous le prix en dirhams. */}
+            {p.prix_devise != null && p.code_devise && p.code_devise !== 'MAD' && (
+              <div className="tabular-nums">
+                {fmt.nombre(p.prix_devise, 3)}
+                <span className="ml-1 text-[11px] text-attenue-texte">{p.code_devise}</span>
+              </div>
+            )}
             {/* Le meme prix dans l'unite d'achat : au metre, un prix au kg ne
                 se reconnait pas sur la facture. */}
             {p.unite_catalogue !== 'kg' && p.quantite_suggeree_unite ? (
@@ -501,98 +564,80 @@ export function PlanAchat() {
           </div>
         ),
     },
-    // LES TROIS COLONNES DU CLASSEUR. Le fournisseur est turc ou indien : le
-    // bon se libelle dans SA devise, et le dirham ne sert qu'au budget. Les
-    // afficher cote a cote evite la conversion de tete au moment de negocier.
-    {
-      champ: 'prix_devise',
-      entete: 'Prix devise',
-      numerique: true,
-      largeur: '110px',
-      rendu: (p) =>
-        p.prix_devise == null ? (
-          '—'
-        ) : (
-          <span className="tabular-nums">
-            {fmt.nombre(p.prix_devise, 3)}
-            <span className="ml-1 text-[11px] text-attenue-texte">{p.code_devise}</span>
-          </span>
-        ),
-    },
-    {
-      champ: 'montant_devise',
-      entete: 'Montant devise',
-      numerique: true,
-      largeur: '140px',
-      rendu: (p) =>
-        p.montant_devise == null ? (
-          '—'
-        ) : (
-          <span className="font-medium tabular-nums">
-            {fmt.nombre(p.montant_devise, 2)}
-            <span className="ml-1 text-[11px] text-attenue-texte">{p.code_devise}</span>
-          </span>
-        ),
-    },
+    // LE MONTANT : en dirhams (le budget), et dessous dans la devise du
+    // fournisseur (le bon) — côte à côte, pas de conversion de tête.
     {
       champ: 'montant_total_mad',
-      entete: 'Montant MAD',
+      total: true,
+      entete: 'Montant',
       numerique: true,
-      largeur: '130px',
-      rendu: (p) => (p.montant_total_mad == null ? '—' : fmt.mad(p.montant_total_mad)),
+      largeur: '112px',
+      joints: [{ champ: 'montant_devise', entete: 'Montant devise', numerique: true, valeur: (p) => p.montant_devise }],
+      rendu: (p) => (
+        <div>
+          <div className="tabular-nums">{p.montant_total_mad == null ? '—' : fmt.mad(p.montant_total_mad)}</div>
+          {p.montant_devise != null && p.code_devise && p.code_devise !== 'MAD' && (
+            <div className="font-medium tabular-nums">
+              {fmt.nombre(p.montant_devise, 2)}
+              <span className="ml-1 text-[11px] font-normal text-attenue-texte">{p.code_devise}</span>
+            </div>
+          )}
+        </div>
+      ),
     },
     {
       champ: 'palettes_a_commander',
       entete: 'Palettes',
       numerique: true,
-      largeur: '90px',
+      largeur: '84px',
+      joints: [
+        { champ: 'complement_palette_kg', entete: 'Complément palette', numerique: true, valeur: (p) => p.complement_palette_kg },
+      ],
       // Les palettes ne sont qu'un EQUIVALENT (21/10/2026 : jamais de palette
       // pleine par defaut) : la proposition du moteur n'en porte pas, l'ecran
       // les deduit du conditionnement de la fiche ; l'acheteur choisit kg ou
       // palettes dans les lignes a commander.
       rendu: (p) => {
-        if (p.palettes_a_commander != null)
-          return <span className="tabular-nums">{fmt.entier(p.palettes_a_commander)}</span>
         const kgPalette = (p.poids_bobine_kg ?? 0) * (p.bobines_par_palette ?? 0)
-        return kgPalette > 0 ? (
-          <span className="tabular-nums text-attenue-texte" title="Équivalent en palettes ordinaires de la fiche, pour information">
-            ≈ {fmt.nombre(p.quantite_suggeree_kg / kgPalette, 1)}
-          </span>
-        ) : (
-          <span className="text-attenue-texte">—</span>
+        const palettes =
+          p.palettes_a_commander != null ? (
+            <span className="tabular-nums">{fmt.entier(p.palettes_a_commander)}</span>
+          ) : kgPalette > 0 ? (
+            <span className="tabular-nums text-attenue-texte" title="Équivalent en palettes ordinaires de la fiche, pour information">
+              ≈ {fmt.nombre(p.quantite_suggeree_kg / kgPalette, 1)}
+            </span>
+          ) : (
+            <span className="text-attenue-texte">—</span>
+          )
+        // LE COMPLEMENT DE PALETTE, sous les palettes : ce qui est commande pour
+        // fermer la palette, pas pour produire.
+        return (
+          <div>
+            <div>{palettes}</div>
+            {p.complement_palette_kg != null && p.complement_palette_kg > 0 && (
+              <div className="text-[11px] tabular-nums text-attenue-texte" title="Ajouté pour fermer la palette, pas pour produire">
+                + {fmt.nombre(p.complement_palette_kg, 0)} kg
+              </div>
+            )}
+          </div>
         )
       },
     },
     {
-      // LE COMPLEMENT DE PALETTE : ce qui est commande pour fermer la palette,
-      // pas pour produire. Vide quand l'article n'est pas arrondi a la palette.
-      champ: 'complement_palette_kg',
-      entete: 'Complément palette',
-      numerique: true,
-      largeur: '120px',
-      rendu: (p) =>
-        !p.complement_palette_kg || p.complement_palette_kg <= 0 ? (
-          <span className="text-attenue-texte">—</span>
-        ) : (
-          <span className="tabular-nums" title="Ajouté pour fermer la palette, pas pour produire">
-            + {fmt.nombre(p.complement_palette_kg, 0)} kg
-          </span>
-        ),
-    },
-    {
-      // D, LA DATE DE DISPONIBILITE du moteur : elle devient la date de livraison
-      // prevue de la ligne de bon.
-      champ: 'date_besoin_prevue',
-      entete: 'Besoin le',
-      largeur: '110px',
-      secondaire: true,
-      rendu: (p) => fmt.date(p.date_besoin_prevue),
-    },
-    {
+      // La date limite, et dessous D, LA DATE DE DISPONIBILITE du moteur : elle
+      // devient la date de livraison prevue de la ligne de bon.
       champ: 'date_limite_commande',
       entete: 'Commander avant le',
-      largeur: '120px',
-      rendu: (p) => (p.date_limite_commande ? fmt.date(p.date_limite_commande) : <span className="text-attenue-texte">—</span>),
+      largeur: '104px',
+      joints: [{ champ: 'date_besoin_prevue', entete: 'Besoin le', valeur: (p) => p.date_besoin_prevue }],
+      rendu: (p) => (
+        <div>
+          <div>{p.date_limite_commande ? fmt.date(p.date_limite_commande) : <span className="text-attenue-texte">—</span>}</div>
+          {p.date_besoin_prevue && (
+            <div className="text-[11px] text-attenue-texte">besoin le {fmt.date(p.date_besoin_prevue)}</div>
+          )}
+        </div>
+      ),
     },
   ]
 
@@ -602,6 +647,7 @@ export function PlanAchat() {
         titre="Plan d'achat"
         description="Propositions du moteur de couverture (plan de production seul). Convertir ouvre un bon de commande en brouillon : rien n'est engagé avant sa validation."
       />
+      <ASecAvantCamion lignes={qProjete.data ?? []} surOuvrir={(code) => setOuverte({ code, designation: null })} />
 
       {/* LES ONGLETS (demandes des 30/09 et 01/10/2026). Le travail se fait en
           deux temps, chacun dans son onglet : les BESOINS, qu'on regenere et
@@ -752,6 +798,14 @@ export function PlanAchat() {
                 <tbody>
                   {(qKpi.data?.fournisseurs ?? []).map((f) => {
                     const part = kpi && kpi.budget_mad > 0 ? f.montant_mad / kpi.budget_mad : 0
+                    // Ses propositions : les paliers de rupture de leurs références,
+                    // et celles qui peuvent encore partir en commande.
+                    const siennes = lignes.filter((p) => p.code_fournisseur === f.code_fournisseur)
+                    const aPreparer = siennes.filter(convertible)
+                    const paliers = ABREGES_PALIER.map(([code, abrege]) => {
+                      const n = new Set(siennes.filter((p) => palierDe.get(p.code_reference) === code).map((p) => p.code_reference)).size
+                      return n > 0 ? `${n} ${abrege}` : null
+                    }).filter(Boolean)
                     return (
                       <tr key={f.code_fournisseur} className="hover:bg-attenue/60">
                         <td className="px-2.5 py-1.5">
@@ -775,7 +829,29 @@ export function PlanAchat() {
                             <span className="text-attenue-texte">—</span>
                           )}
                         </td>
+                        <td className="px-2.5 py-1.5 text-[11.5px]">
+                          {paliers.length > 0 ? (
+                            <span className="font-medium text-danger">{paliers.join(' · ')}</span>
+                          ) : (
+                            <span className="text-attenue-texte">—</span>
+                          )}
+                        </td>
                         <td className="px-2.5 py-1.5 text-[11px] text-attenue-texte">{f.contact_principal ?? '—'}</td>
+                        <td className="px-2.5 py-1.5 text-right">
+                          {/* PRÉPARER (31/10/2026) : coche les propositions ouvertes du
+                              fournisseur et ouvre les lignes à commander. */}
+                          {droits.peutEcrire && aPreparer.length > 0 && (
+                            <Bouton
+                              taille="xs"
+                              onClick={() => {
+                                setCoches(Object.fromEntries(aPreparer.map((p) => [p.id_proposition, true])))
+                                setOnglet('lignes')
+                              }}
+                            >
+                              Préparer
+                            </Bouton>
+                          )}
+                        </td>
                       </tr>
                     )
                   })}
@@ -791,7 +867,7 @@ export function PlanAchat() {
                       {fmt.mad((qKpi.data?.fournisseurs ?? []).reduce((s, f) => s + f.montant_mad, 0))}
                     </td>
                     <td className="px-2.5 py-1.5 text-right tabular-nums">100 %</td>
-                    <td colSpan={3} />
+                    <td colSpan={5} />
                   </tr>
                 </tbody>
               </table>
@@ -882,6 +958,16 @@ export function PlanAchat() {
         </div>
       )}
 
+      <div className="mb-2 flex items-center gap-2">
+        <Bouton
+          taille="xs"
+          variante={triPondere ? 'primaire' : 'discret'}
+          onClick={() => setTriPondere((v) => !v)}
+          title="Trier par montant pondéré par la classe ABC : × 3 en A, × 2 en B"
+        >
+          Tri pondéré ABC (A × 3, B × 2) : {triPondere ? 'oui' : 'non'}
+        </Bouton>
+      </div>
       <DataTable<Proposition>
           exportable="plan-achat"
           imprimable="Plan achat"
@@ -1410,5 +1496,66 @@ function LignesACommander({
         </div>
       )}
     </div>
+  )
+}
+
+/** Une ligne du stock projeté, réduite à ce que le bandeau lit. */
+interface LigneASec {
+  code_reference: string
+  fournisseur_nom: string | null
+  a_sec?: { date_sec: string; date_arrivage: string; jours: number; manque_kg: number } | null
+}
+
+/** Une ligne du stock projeté, réduite à ce que le plan d'achat lit (31/10/2026). */
+interface LigneProjetePlan extends LigneASec {
+  palier_rupture?: string | null
+}
+
+/** Le sourcing d'une référence (`/api/stock/projete/complements`). */
+interface SourcePlan {
+  code_reference: string
+  risque_source?: string | null
+  nb_sources?: number | null
+}
+
+/** Le poids du tri pondéré : le montant × 3 en classe A, × 2 en B. */
+function poidsAbc(p: Proposition): number {
+  const facteur = p.classe_abc === 'A' ? 3 : p.classe_abc === 'B' ? 2 : 1
+  return (p.montant_total_mad ?? 0) * facteur
+}
+
+
+/**
+ * LES MATIÈRES À SEC AVANT LEUR CAMION (31/10/2026) : le fil manque avant un
+ * arrivage déjà commandé. Commander ne sert à rien (la commande arriverait
+ * après le camion) : il faut faire avancer la livraison, ou acheter sur place.
+ * Lu dans le stock projeté (même calcul, rattrapage inclus), sous le droit de
+ * lecture du stock ; rien ne s'affiche sans ce droit ni sans trou.
+ */
+function ASecAvantCamion({ lignes, surOuvrir }: { lignes: LigneASec[]; surOuvrir: (code: string) => void }) {
+  const trous = lignes
+    .filter((l): l is LigneASec & { a_sec: NonNullable<LigneASec['a_sec']> } => !!l.a_sec)
+    .sort((x, y) => x.a_sec.date_sec.localeCompare(y.a_sec.date_sec))
+  if (trous.length === 0) return null
+  return (
+    <Alerte ton="danger" className="mb-3" titre={`${trous.length} matière(s) à sec avant leur camion`}>
+      <p className="mb-1">Commander ne suffit plus : faire avancer la livraison, ou acheter sur place.</p>
+      <ul className="space-y-0.5">
+        {trous.map((l) => (
+          <li key={l.code_reference}>
+            <button
+              type="button"
+              onClick={() => surOuvrir(l.code_reference)}
+              className="font-medium underline-offset-2 hover:underline"
+            >
+              {l.code_reference}
+            </button>
+            {l.fournisseur_nom && <span className="text-attenue-texte"> ({l.fournisseur_nom})</span>} : à sec le{' '}
+            {fmt.date(l.a_sec.date_sec)}, camion le {fmt.date(l.a_sec.date_arrivage)} — manque{' '}
+            {fmt.nombre(l.a_sec.manque_kg, 0)} kg, {l.a_sec.jours} j à sec
+          </li>
+        ))}
+      </ul>
+    </Alerte>
   )
 }

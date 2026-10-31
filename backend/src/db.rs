@@ -110,6 +110,28 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Les paliers de rupture du stock projeté (31/10/2026) : leurs colonnes
+        // déclarées, sinon l'écran les masquerait sans le dire.
+        "2026-10-31b_paliers_rupture.sql",
+        "SELECT EXISTS (SELECT 1 FROM champ_configurable
+                         WHERE module = 'STOCK' AND champ = 'palier_rupture')",
+    ),
+    (
+        // L'onglet Emplacements du Stock projeté (31/10/2026) : sans ses colonnes
+        // déclarées, l'écran les masquerait toutes sans le dire.
+        "2026-10-31a_stock_projete_emplacements.sql",
+        "SELECT EXISTS (SELECT 1 FROM champ_configurable
+                         WHERE module = 'STOCK' AND champ = 'stock_apres_arrivage_kg')",
+    ),
+    (
+        // Le nouveau Stock projeté (30/10/2026) : la classification écrit le
+        // coefficient de variation à côté de la classe XYZ (onglet Risques).
+        "2026-10-30a_stock_projete.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'reference'
+                           AND column_name = 'coef_variation_xyz')",
+    ),
+    (
         // La couverture cible (moteur v2, 27/10/2026) : la fiche article porte
         // couverture_cible_mois (ancienne couverture_min_mois), lue par le moteur
         // et ecrite par le CRUD ; la marge de securite de l'article est retiree.

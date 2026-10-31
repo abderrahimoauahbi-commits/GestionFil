@@ -45,7 +45,7 @@ import {
   X,
 } from 'lucide-react'
 import { useDroits } from '../auth/AuthContext'
-import { cn } from '../lib/utils'
+import { cn, fmt } from '../lib/utils'
 import { exporterCsv } from '../lib/export'
 import { TableauImprimable } from './Etat'
 import { Badge, Bouton, Champ, Chargement, EtatVide, Selecteur, Squelette } from './ui/base'
@@ -60,6 +60,12 @@ import {
 export interface ColonneDT<L> {
   /** Nom du champ, tel qu'il figure dans `champ_configurable`. */
   champ: string
+  /**
+   * Le champ dont la colonne suit le droit, quand `champ` n'est qu'un
+   * identifiant (31/10/2026 : une colonne par magasin, toutes sous
+   * `stock_par_magasin`).
+   */
+  droit?: string
   entete: string
   rendu?: (ligne: L) => React.ReactNode
   /** Valeur brute utilisee pour le tri et le filtrage, si differente de l'affichage. */
@@ -73,6 +79,18 @@ export interface ColonneDT<L> {
    * reste dessous), quelle que soit la largeur.
    */
   complement?: boolean
+  /**
+   * LES VALEURS JOINTES (31/10/2026, plan d'achat sur une seule ligne) : ce que
+   * la cellule montre en plus, sous sa valeur principale. L'export et
+   * l'impression les rendent en colonnes à part, juste après celle-ci.
+   */
+  joints?: { champ: string; entete: string; numerique?: boolean; valeur: (ligne: L) => string | number | null | undefined }[]
+  /**
+   * LA LIGNE DE TOTAL (31/10/2026) : la somme de la colonne sur les lignes
+   * FILTRÉES (toutes les pages, pas la seule page affichée), en pied de tableau.
+   * La valeur sommée est `valeurTri`, sinon le champ.
+   */
+  total?: boolean
   largeur?: string
   triable?: boolean
   /**
@@ -122,6 +140,11 @@ interface Props<L> {
    * principale est fixee colonne par colonne (Stock projete, 27/10/2026).
    */
   serre?: boolean
+  /**
+   * Texte plus grand (14 px, en-têtes 12 px) : pour une grille dense que l'on
+   * lit longtemps (le stock projeté, 30/10/2026).
+   */
+  lisible?: boolean
   /** Colonne d'actions, toujours rendue en fin de ligne. */
   actions?: (ligne: L) => React.ReactNode
   /**
@@ -189,6 +212,7 @@ export function DataTable<L extends Record<string, unknown>>({
   cle,
   surClic,
   serre = false,
+  lisible = false,
   actions,
   detail,
   menuContextuel,
@@ -245,7 +269,7 @@ export function DataTable<L extends Record<string, unknown>>({
   }
 
   const visibles = React.useMemo(
-    () => droits.colonnesVisibles(colonnes),
+    () => colonnes.filter((c) => droits.visible(c.droit ?? c.champ)),
     [colonnes, droits],
   )
 
@@ -260,7 +284,7 @@ export function DataTable<L extends Record<string, unknown>>({
         // un statut sur « contient » ferait sortir CLOTURE pour la saisie « O ».
         filterFn: c.filtre === 'liste' ? 'equalsString' : 'includesString',
         cell: ({ row }) => (c.rendu ? c.rendu(row.original) : String(row.original[c.champ] ?? '—')),
-        meta: { numerique: c.numerique, secondaire: c.secondaire, largeur: c.largeur },
+        meta: { numerique: c.numerique, secondaire: c.secondaire, largeur: c.largeur, total: c.total },
       })),
     [visibles],
   )
@@ -435,7 +459,18 @@ export function DataTable<L extends Record<string, unknown>>({
       numerique?: boolean
       secondaire?: boolean
       largeur?: string
+      total?: boolean
     }
+
+  // LA LIGNE DE TOTAL : les colonnes affichées (hors ligne ↳) qui la demandent.
+  // En mode serveur, la table n'a que la page reçue : pas de total trompeur.
+  const colonnesAffichees = table.getVisibleLeafColumns().filter((col) => !enComplement.includes(col.id))
+  const avecTotal = !serveur && colonnesAffichees.some((col) => meta(col.id).total)
+  const totalDe = (id: string) =>
+    table.getFilteredRowModel().rows.reduce((s, r) => {
+      const v = Number(r.getValue(id))
+      return Number.isFinite(v) ? s + v : s
+    }, 0)
 
   return (
     // LA BASCULE SE FAIT SUR LA PLACE DE LA LISTE, PAS SUR CELLE DE LA FENETRE
@@ -594,16 +629,24 @@ export function DataTable<L extends Record<string, unknown>>({
                   onClick={() =>
                     exporterCsv(
                       exportable,
-                      visibles.map((c) => ({
-                        champ: c.champ,
-                        entete: c.entete,
-                        numerique: c.numerique,
-                        // `valeurTri` porte deja la valeur brute quand
-                        // l'affichage differe — une date formatee, un statut
-                        // traduit. C'est ce qu'un tableur doit recevoir : le
-                        // rendu JSX ne s'exporte pas.
-                        valeurExport: c.valeurTri,
-                      })),
+                      visibles.flatMap((c) => [
+                        {
+                          champ: c.champ,
+                          entete: c.entete,
+                          numerique: c.numerique,
+                          // `valeurTri` porte deja la valeur brute quand
+                          // l'affichage differe — une date formatee, un statut
+                          // traduit. C'est ce qu'un tableur doit recevoir : le
+                          // rendu JSX ne s'exporte pas.
+                          valeurExport: c.valeurTri,
+                        },
+                        ...(c.joints ?? []).map((j) => ({
+                          champ: j.champ,
+                          entete: j.entete,
+                          numerique: j.numerique,
+                          valeurExport: (l: L) => j.valeur(l) ?? null,
+                        })),
+                      ]),
                       // Les lignes AFFICHEES, filtres et tri compris : on
                       // exporte ce qu'on voit. Exporter la table entiere
                       // surprendrait apres avoir pose trois filtres.
@@ -699,7 +742,7 @@ export function DataTable<L extends Record<string, unknown>>({
           >
             {/* 13 PX, PAS 12. Le tableau est ce qu'on lit le plus longtemps ;
                 il etait pourtant le texte le plus petit de l'ecran. */}
-            <table ref={tableRef} className="grille w-full text-[13px]">
+            <table ref={tableRef} className={cn('grille w-full', lisible ? 'text-[14px]' : 'text-[13px]')}>
               {/* L'en-tete se colle SOUS la barre d'outils : `top-12` la laisse
                   passer, sinon les deux se recouvrent au defilement. */}
               {/* CET EN-TETE NE COLLE PAS, ET CE N'EST PAS FAUTE DE `sticky`.
@@ -731,7 +774,8 @@ export function DataTable<L extends Record<string, unknown>>({
                           className={cn(
                             'bg-attenue py-2 text-left',
                             serre ? 'px-1.5' : 'px-2.5',
-                            'text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte',
+                            lisible ? 'text-[12px]' : 'text-[11px]',
+                            'font-medium uppercase tracking-[0.05em] text-attenue-texte',
                             entetesRepliables ? 'whitespace-normal align-bottom leading-tight' : 'whitespace-nowrap',
                             m.numerique && 'text-right',
                           )}
@@ -877,6 +921,24 @@ export function DataTable<L extends Record<string, unknown>>({
                   )
                 })}
               </tbody>
+              {avecTotal && (
+                <tfoot>
+                  <tr className="border-t-2 border-bordure bg-attenue/60 font-semibold">
+                    {colonnesAffichees.map((col, i) => {
+                      const m = meta(col.id)
+                      return (
+                        <td
+                          key={col.id}
+                          className={cn('whitespace-nowrap py-1.5', serre ? 'px-1.5' : 'px-2.5', m.numerique && 'text-right tabular-nums')}
+                        >
+                          {m.total ? fmt.nombre(totalDe(col.id), 0) : i === 0 ? 'Total' : null}
+                        </td>
+                      )
+                    })}
+                    {actions && <td />}
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
 
@@ -889,14 +951,24 @@ export function DataTable<L extends Record<string, unknown>>({
           {imprimable && (
             <TableauImprimable
               titre={imprimable}
-              colonnes={visibles.map((c) => ({
-                entete: c.entete,
-                numerique: c.numerique,
-                valeur: (l: L) => {
-                  const v = c.valeurTri ? c.valeurTri(l) : l[c.champ]
-                  return v == null ? '' : String(v)
+              colonnes={visibles.flatMap((c) => [
+                {
+                  entete: c.entete,
+                  numerique: c.numerique,
+                  valeur: (l: L) => {
+                    const v = c.valeurTri ? c.valeurTri(l) : l[c.champ]
+                    return v == null ? '' : String(v)
+                  },
                 },
-              }))}
+                ...(c.joints ?? []).map((j) => ({
+                  entete: j.entete,
+                  numerique: j.numerique,
+                  valeur: (l: L) => {
+                    const v = j.valeur(l)
+                    return v == null ? '' : String(v)
+                  },
+                })),
+              ])}
               lignes={rangs.map((r) => r.original)}
               resume={`${rangs.length} ligne(s)${
                 total !== rangs.length ? ` sur ${total}` : ''

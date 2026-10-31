@@ -128,45 +128,31 @@ export const EXEMPLES: Record<string, Exemple[]> = {
   ],
   '/stock': [
     {
-      titre: 'lire une ligne du stock projeté',
+      titre: 'combien commander (stock projeté)',
       situation:
-        'Aujourd’hui 01/01/2026. Disponible 2 000 kg ; plan 100 kg par jour jusqu’au 30/06/2026 (18 100 kg) ; un bon validé de 800 kg livré le 25/01.',
+        'Aujourd’hui 01/01/2026. Stock compté 1 475 kg ; plan 25 kg par jour ; aucune commande ; cible 60 j ; une commande couvre 30 j ; délai 30 j ; sécurité 30 j.',
       calcul: [
-        ['Couvert jusqu’au', '20/01/2026 · 20 j (les 2 000 kg servent 20 jours)'],
-        ['État', 'Plan non couvert — rupture le 21/01'],
-        ['Arrivages comptés', '800 kg (le 25/01 : la couverture reprend 8 jours)'],
-        ['Plan non couvert', '18 100 − 2 000 − 800 = 15 300 kg sur l’horizon'],
-        ['À commander', '2 200 kg · avant le 06/01'],
+        ['Couverture', '1 475 ÷ 25 = 59 j : sous la cible de 60 j'],
+        ['À commander', 'la plus petite quantité reçue le 31/01 qui porte la couverture à 60 + 30 = 90 j : 775 kg'],
+        ['Couverture à la livraison', '59 − 30 = 29 j, sous le seuil d’alerte de 30 j : état Alerte'],
+        ['Rupture', 'dans 59 j : Critique (< 60 j) ; passe Imminente le 30/01 (59 − 30 = jour 29)'],
       ],
       conclusion:
-        'L’état se lit sans la commande : la référence reste « plan non couvert » tant que le bon des 2 200 kg n’est pas validé et daté. Ce sont les chiffres de l’onglet « À commander » du plan d’achat.',
+        'Le lendemain, la commande de 775 kg passée et datée au 30/01, la couverture passe à 89 j : rien à commander, pas de double commande.',
     },
     {
-      titre: 'les colonnes du stock projeté, sans double comptage',
+      titre: 'un trou avant le camion (couverture négative)',
       situation:
-        'Aujourd’hui 01/01/2026. Magasin compté 2 000 kg dont un reste de 150 kg ; rien sur machine ; un bon validé de 800 kg le 25/01 ; délai fournisseur 10 j ; plan 100 kg par jour.',
+        'Aujourd’hui 01/01/2026. Stock compté 1 000 kg ; plan 25 kg par jour ; un bon de 1 500 kg arrive le 20/02 (jour 50).',
       calcul: [
-        ['Disponible (hors restes)', '2 000 − 150 = 1 850 kg'],
-        ['Sur machine', '0 kg'],
-        ['Restant', '150 kg (le reste, compté une fois)'],
-        ['Arrivages', '800 kg'],
-        ['Stock total projeté', '1 850 + 0 + 150 + 800 = 2 800 kg'],
-        ['Besoin jusqu’à livraison', 'plan du 01/01 au 10/01 inclus : 10 j × 100 = 1 000 kg'],
+        ['Épuisement', 'le stock sert 40 jours : à sec le 10/02 (jour 40)'],
+        ['Couverture', '−10 j : dix jours sans fil jusqu’au camion du 20/02'],
+        ['Manque avant arrivage', '10 × 25 = 250 kg non servis'],
+        ['Rattrapage inclus', 'le manque reste dû : couverture projetée 100 j'],
+        ['Rattrapage exclu', 'le manque est perdu : couverture projetée 110 j'],
       ],
       conclusion:
-        'Le jour d’arrivée d’une commande passée aujourd’hui (le 11/01) n’est pas dans le besoin jusqu’à livraison : son arrivage compte avant son plan.',
-    },
-    {
-      titre: 'une hypothèse dans la simulation',
-      situation:
-        'Même référence : la première proposition est disponible le 16/01 (D), fenêtre [16/01, 15/02[, 2 200 kg. Hypothèse : un arrivage de 400 kg le 30/01.',
-      calcul: [
-        ['Besoin de réapprovisionnement réel', 'sécurité 500 + plan du 16/01 au 14/02 3 000 − S(D) 500 − arrivages après D 800 = 2 200 kg'],
-        ['Avec l’hypothèse', '500 + 3 000 − 500 − (800 + 400) = 1 800 kg'],
-        ['Quantité à commander', '2 200 → 1 800 kg (sans minimum ni multiple)'],
-      ],
-      conclusion:
-        'Un arrivage dans la fenêtre réduit la proposition d’autant. Rien n’est enregistré : en quittant la page, l’hypothèse disparaît.',
+        'Commander ne sert à rien ici (la commande arriverait après le camion) : le bandeau du plan d’achat dit « à sec avant le camion » — faire avancer la livraison, ou acheter sur place.',
     },
   ],
 

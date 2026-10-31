@@ -18,6 +18,7 @@ pub mod mrp;
 pub mod numerotation;
 pub mod plan;
 pub mod plan_achat;
+pub mod projete;
 pub mod reception;
 pub mod retour_fournisseur;
 pub mod sauvegarde;

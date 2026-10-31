@@ -116,8 +116,9 @@ test('plan-achat : sans « À commander », le clic sur une ligne ouvre la fenê
   expect(veille.erreurs, 'erreurs JavaScript ou serveur').toEqual([])
 })
 
-/* LE STOCK PROJETÉ, TROIS ONGLETS SUR LE MÊME MOTEUR (27/10/2026) : la liste (21
-   colonnes, l'état en pastille) et sa fenêtre ouverte AU CLIC SUR LA LIGNE, la
+/* LE STOCK PROJETÉ, TROIS ONGLETS (27 et 30/10/2026) : la liste (19 colonnes et les
+   vues Risques et Sourcing, l'état en pastille, le bouton Rattrapage) et sa fenêtre
+   ouverte AU CLIC SUR LA LIGNE, sans chronologie (§ 16), la
    surveillance (le tableau « À commander », sans « Commander », sa fenêtre au clic),
    et la simulation, qui ne doit RIEN écrire — aucune requête d'écriture hors le
    POST de lecture de la simulation. */
@@ -144,9 +145,27 @@ test('stock : trois onglets, la fenêtre enrichie et la simulation sans écritur
       })
     expect(await deborde(), 'défilement horizontal (stock projeté)').toBeLessThanOrEqual(1)
 
-    // Les colonnes du moteur v2 et l'état en pastille (icône + libellé).
-    for (const entete of ['Couverture actuelle', 'Cible', 'Écart cible', 'Avant le', 'État'])
+    // LE STOCK PROJETÉ (§ 16, 30/10/2026) : ses colonnes, l'état en pastille, le bouton Rattrapage,
+    // et ses trois vues (Approvisionnement, Risques, Sourcing) sans défilement horizontal.
+    // Une seule ligne par référence (30/10/2026) ; référence, fournisseur et état en tête
+    // des quatre vues (31/10/2026) ; ni « 1re rupture » ni « Avant le » en Approvisionnement.
+    for (const entete of ['Référence', 'Fournisseur', 'État', 'Stock disponible', 'Position', 'Couverture', 'Cible', 'À commander'])
       await expect(page.locator('main thead th', { hasText: entete }).first()).toBeVisible()
+    for (const absente of ['1re rupture', 'Avant le', 'Écart cible', 'Désignation', 'Restant'])
+      await expect(page.locator('main thead th', { hasText: absente })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /Rattrapage : inclus/ })).toBeVisible()
+    for (const [vue, entete] of [
+      ['Risques', 'Avant le'],
+      ['Sourcing', 'Groupe d’équivalence'],
+      ['Emplacements', 'Stock global après l’arrivage'],
+    ] as const) {
+      await page.getByRole('tab', { name: vue, exact: true }).click()
+      await expect(page.locator('main thead th', { hasText: entete }).first()).toBeVisible()
+      for (const fixe of ['Référence', 'Fournisseur', 'État'])
+        await expect(page.locator('main thead th', { hasText: fixe }).first()).toBeVisible()
+      expect(await deborde(), `défilement horizontal (vue ${vue})`).toBeLessThanOrEqual(1)
+    }
+    await page.getByRole('tab', { name: 'Approvisionnement', exact: true }).click()
     // La fenêtre ENRICHIE au clic sur la LIGNE (pas seulement sur une icône).
     const lignes = page.locator('main tbody tr.cursor-pointer')
     let reference: string | null = null
@@ -155,13 +174,18 @@ test('stock : trois onglets, la fenêtre enrichie et la simulation sans écritur
       await lignes.first().click({ position: { x: 300, y: 8 } })
       const fenetre = page.getByRole('dialog')
       await expect(fenetre).toBeVisible()
-      for (const titre of ['Approvisionnement', 'Calcul de la quantité', 'Où se trouve la matière'])
+      // La disposition « pont de calcul » (31/10/2026) : décision, quatre chiffres, pont,
+      // matière et arrivages, puis l'onglet Calcul ouvert.
+      for (const titre of ['Comment on arrive à la quantité', 'Où se trouve la matière', 'Arrivages', 'Approvisionnement', 'Calcul de la quantité'])
         await expect(fenetre.getByRole('heading', { name: titre, exact: true })).toBeVisible()
       await expect(fenetre.locator('[data-statut]').first()).toBeVisible()
-      for (const tuile of ['Stock total', 'Disponible hors quarantaine', 'Stock à la réception', 'Couverture actuelle'])
+      await expect(fenetre.getByRole('region', { name: 'Décision' })).toBeVisible()
+      for (const tuile of ['Couverture', 'Couverture à la livraison', 'Position', 'Délai'])
         await expect(fenetre.getByText(tuile, { exact: true }).first()).toBeVisible()
-      await fenetre.getByRole('tab', { name: 'Projection', exact: true }).click()
-      await expect(fenetre.getByRole('tab', { name: 'Projection', exact: true })).toHaveAttribute('aria-selected', 'true')
+      // Pas de chronologie au stock projeté (§ 16) : ni onglet Projection, ni date de rupture.
+      await expect(fenetre.getByRole('tab', { name: 'Projection', exact: true })).toHaveCount(0)
+      await fenetre.getByRole('tab', { name: 'Lots', exact: false }).click()
+      await expect(fenetre.getByRole('tab', { name: /^Lots/ })).toHaveAttribute('aria-selected', 'true')
       reference = (await page.getByRole('dialog').locator('h2').first().textContent())?.split(' — ')[0]?.trim() ?? null
       // Échap ferme la fenêtre ; un nouveau clic sur la ligne la rouvre.
       await page.keyboard.press('Escape')

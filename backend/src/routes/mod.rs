@@ -460,6 +460,7 @@ pub fn router(state: AppState) -> Router {
         // `/api/plan-achat/detail`, v_plan_achat) est retire.
         .route("/api/couverture", get(couverture::liste))
         .route("/api/couverture/{reference}", get(couverture::detail))
+        .route("/api/couverture/{reference}/classement", get(couverture::classement))
         // L'espace « Simulation » (27/10/2026) : un POST qui ne fait que LIRE.
         .route("/api/couverture/{reference}/simulation", post(couverture::simulation))
         .route("/api/plan-achat/generer", post(operations::generer_plan_achat))
@@ -500,6 +501,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/stock", get(consultation::stock))
         .route("/api/etat-stock", get(consultation::etat_stock))
         .route("/api/stock/projete", get(consultation::stock_projete))
+        .route("/api/stock/projete/complements", get(consultation::stock_projete_complements))
         // Le besoin d'une reference, plan / au-dela du plan, et ses OF (22/10/2026).
         .route("/api/stock/besoin", get(consultation::besoin_reference))
         .route("/api/stock/dormant", get(consultation::stock_dormant))

@@ -288,6 +288,27 @@ export const STATUTS = {
     OK: d('OK (ancien calcul)', 'succes'),
   },
   /**
+   * LES ÉTATS DU STOCK PROJETÉ (§ 16.4, 30/10/2026) : en alerte (la couverture
+   * restante à la livraison passe sous le seuil d'alerte = sécurité ABC + stock
+   * minimum en jours), sous la cible (une quantité est proposée), couvert. Le
+   * plus grave l'emporte.
+   */
+  statut_projete: {
+    ALERTE: d('Alerte', 'danger'),
+    SOUS_CIBLE: d('Sous cible', 'alerte'),
+    COUVERT: d('Couvert', 'succes'),
+  },
+  /**
+   * LES PALIERS DE RUPTURE DU STOCK PROJETÉ (31/10/2026) : dans combien de
+   * jours le fil manque (P_SeuilImminent, P_SeuilCritique, P_SeuilAlerte).
+   */
+  palier_rupture: {
+    RUPTURE: d('Rupture', 'danger'),
+    IMMINENTE: d('Imminente', 'danger'),
+    CRITIQUE: d('Critique', 'alerte'),
+    ATTENTION: d('Attention', 'or'),
+  },
+  /**
    * LES SIGNAUX DU MOTEUR DE COUVERTURE (§ 15.4) : indépendants de l'état, ils
    * ne bloquent jamais. Affichés en pastilles, à côté de l'état.
    */
@@ -354,6 +375,8 @@ export const SOURCE_STATUTS: Record<EntiteStatut, string> = {
   alerte: 'alerte.statut',
   // Les états d'un mois (la photo) ET ceux d'une référence (le moteur v2).
   statut_stock: 'snapshot_mrp.statut_couleur+moteur:backend/src/domain/couverture.rs#etat',
+  statut_projete: 'moteur:backend/src/domain/projete.rs#etat',
+  palier_rupture: 'moteur:backend/src/domain/projete.rs#palier',
   signal_couverture: 'moteur:backend/src/domain/couverture.rs#signal',
   criticite: 'alerte.gravite',
   qualification_equivalence: 'calcule:db/pg/011_vues.sql#qualification',

@@ -98,9 +98,15 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
     }
 
     let mut classes_xyz: HashMap<String, &str> = HashMap::new();
+    // LE CV EST CONSERVÉ (décision du 30/10/2026, § 16) : l'onglet Risques du
+    // stock projeté l'affiche à côté de la classe qu'il fixe.
+    let mut cvs: HashMap<String, f64> = HashMap::new();
     let (mut nx, mut ny, mut nz) = (0usize, 0usize, 0usize);
 
     for (code, valeurs) in &series {
+        if let Some(cv) = cv_sur_12_mois(valeurs) {
+            cvs.insert(code.clone(), cv);
+        }
         if let Some(classe) = classe_xyz(valeurs, seuil_x, seuil_y) {
             match classe {
                 "X" => nx += 1,
@@ -135,13 +141,15 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
         }
         sqlx::query(
             "UPDATE reference
-                SET classe_abc = $2, classe_xyz = $3, date_dernier_abc = fn_instant($4)
+                SET classe_abc = $2, classe_xyz = $3, date_dernier_abc = fn_instant($4),
+                    coef_variation_xyz = ROUND($5::numeric, 4)
               WHERE code_reference = $1",
         )
         .bind(code)
         .bind(abc)
         .bind(xyz)
         .bind(&horodatage)
+        .bind(cvs.get(code).copied())
         .execute(&mut *tx)
         .await?;
     }
@@ -209,9 +217,7 @@ pub fn classer_abc(
 /// (sans consommation) comptent pour zero — c'est ce qui distingue une
 /// consommation reguliere d'une consommation erratique. `None` sans consommation.
 pub fn classe_xyz(mois: &[f64], seuil_x: f64, seuil_y: f64) -> Option<&'static str> {
-    let mut serie = mois.to_vec();
-    serie.resize(serie.len().max(12), 0.0);
-    coefficient_variation(&serie).map(|cv| {
+    cv_sur_12_mois(mois).map(|cv| {
         if cv < seuil_x {
             "X"
         } else if cv < seuil_y {
@@ -220,6 +226,14 @@ pub fn classe_xyz(mois: &[f64], seuil_x: f64, seuil_y: f64) -> Option<&'static s
             "Z"
         }
     })
+}
+
+/// Le coefficient de variation d'une serie mensuelle sur les 12 mois pleins, les
+/// mois absents comptant pour zero (celui qui fixe la classe XYZ).
+pub fn cv_sur_12_mois(mois: &[f64]) -> Option<f64> {
+    let mut serie = mois.to_vec();
+    serie.resize(serie.len().max(12), 0.0);
+    coefficient_variation(&serie)
 }
 
 /// Ecart-type / moyenne. `None` si la moyenne est nulle (aucune consommation).

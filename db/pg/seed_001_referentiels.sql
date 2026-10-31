@@ -136,6 +136,18 @@ INSERT INTO motif_ligne (code_motif_ligne, libelle, categorie) VALUES
 INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, unite, categorie, modifiable_par, verrouille) VALUES
     ('P_SeuilAlerte',      'Seuil d''alerte (statut ATTENTION)',        '90',    'ENTIER',  'jours', 'STOCK',   'DIRECTION', 0),
     ('P_SeuilCritique',    'Seuil critique (statut CRITIQUE)',          '60',    'ENTIER',  'jours', 'STOCK',   'DIRECTION', 0),
+    -- Le palier de rupture IMMINENTE du stock projeté (2026-10-31b).
+    ('P_SeuilImminent',    'Seuil de rupture imminente (statut IMMINENTE)', '30', 'ENTIER',  'jours', 'STOCK',   'DIRECTION', 0),
+    -- Les restes comptés dans le stock projeté et le plan d'achat (2026-10-31c).
+    ('P_ProjeteRestes',    'Stock projeté : restes comptés (1 = oui, 0 = non)', '1', 'ENTIER', NULL,  'STOCK',   'DIRECTION', 0),
+    -- Les réglages du stock projeté (2026-10-31d), au comportement d'avant.
+    ('P_ProjeteRattrapage',    'Stock projeté : rattrapage par défaut (1 = inclus, 0 = exclu)', '1', 'ENTIER', NULL, 'STOCK', 'DIRECTION', 0),
+    ('P_ProjeteAgeConstatMax', 'Stock projeté : âge maximum d''un constat machine', '0', 'ENTIER', 'jours', 'STOCK', 'DIRECTION', 0),
+    ('P_ProjeteQuarantaine',   'Stock projeté : quarantaine comptée (1 = oui, 0 = non)', '0', 'ENTIER', NULL, 'STOCK', 'DIRECTION', 0),
+    ('P_ProjeteRetardJours',   'Stock projeté : décalage d''un bon en retard', '0', 'ENTIER', 'jours', 'STOCK', 'DIRECTION', 0),
+    ('P_ProjeteSansDate',      'Stock projeté : arrivage sans date compté (1 = oui, 0 = non)', '0', 'ENTIER', NULL, 'STOCK', 'DIRECTION', 0),
+    ('P_ProjeteMinMultiple',   'Stock projeté : minimum et multiple appliqués (1 = oui, 0 = non)', '1', 'ENTIER', NULL, 'STOCK', 'DIRECTION', 0),
+    ('P_ProjeteMinimumAlerte', 'Stock projeté : stock minimum dans le seuil d''alerte (1 = oui, 0 = non)', '1', 'ENTIER', NULL, 'STOCK', 'DIRECTION', 0),
     -- P_RetardBCJours et P_EcartCouvertureJours (l'ancienne alerte a double
     -- declencheur) sont supprimes le 27/10/2026 (2026-10-27j) : sans lecteur depuis
     -- que le moteur de couverture remplace l'ancien calcul (2026-10-27e).

@@ -4244,7 +4244,17 @@ def scenario_migrations_rejouables(c, infra):
                 # elle remet l'etat final ; 27h, 27j et 27k se rejouent comme les autres.
                 "2026-10-27h_stock_projete_colonnes.sql", "2026-10-27i_retour_prod_grand_livre.sql",
                 "2026-10-27j_parametres_mrp_orphelins.sql", "2026-10-27k_import_taux_dossier_facultatif.sql",
-                "2026-10-27l_couverture_cible.sql", "2026-10-27m_stock_projete_colonnes_v2.sql"):
+                "2026-10-27l_couverture_cible.sql", "2026-10-27m_stock_projete_colonnes_v2.sql",
+                # Le nouveau stock projete (30/10/2026) : le CV et les colonnes des trois onglets.
+                "2026-10-30a_stock_projete.sql",
+                # L'onglet Emplacements et les jours sans fil (31/10/2026).
+                "2026-10-31a_stock_projete_emplacements.sql",
+                # Les paliers de rupture (31/10/2026).
+                "2026-10-31b_paliers_rupture.sql",
+                # Les restes, comptés ou non (31/10/2026).
+                "2026-10-31c_projete_restes.sql",
+                # Les réglages du stock projeté (31/10/2026).
+                "2026-10-31d_reglages_projete.sql"):
         try:
             infra.psql(infra.base, "-q", "-f", str(dossier / nom))
         except RuntimeError as e:
@@ -5335,6 +5345,13 @@ def scenario_couverture_moteur(c, infra):
     # « COMMANDER » (27/10/2026) : la proposition d'achat de la reference se regenere depuis le moteur,
     # avec SA quantite, D comme date de besoin, sa date limite, l'urgence qui s'en deduit ; convertie, la
     # ligne de bon porte ces kilos et D comme livraison prevue. Prix, devise, fournisseur : ceux d'avant.
+    # DEPUIS LE 30/10/2026 (§ 16), « le moteur » du plan d'achat est LE STOCK PROJETE (meme fonction que
+    # l'ecran, rattrapage inclus) : sa quantite, la reception theorique aujourd'hui + delai, et « avant le »
+    # (aujourd'hui s'il est passe). Le moteur v2 lu plus haut est la future Surveillance.
+    pj = c.ok("Choukri", "GET", f"/api/couverture/{q_ref}")["projete"]
+    qp = pj.get("quantite")
+    p = {"quantite_proposee_kg": qp["quantite_kg"], "date_disponibilite": qp["date_reception"],
+         "date_limite_commande": max(pj["avant_le"], auj.isoformat())} if qp else None
     if p:
         for id_bc_ancien, in infra.sql(
                 "SELECT DISTINCT pa.id_bc_genere FROM plan_achat pa JOIN bon_commande bc ON bc.id_bc = pa.id_bc_genere "
@@ -5516,9 +5533,10 @@ def scenario_couverture_simulation(c, infra):
             verifier(abs(l["montant_estime_mad"] - round(l["qte_a_commander_kg"] * l["prix_estime_mad"], 2)) < 0.011,
                      f"{l['code_reference']} : montant {l['montant_estime_mad']}")
     ligne = next(l for l in lignes if l["code_reference"] == ref)
+    # Le besoin pendant le delai (§ 16) : le meme plan au jour que le moteur.
     plan_livraison = sum(j["conso_prevue_kg"] for j in detail["jours"][:detail["reglages"]["delai_j"]])
-    verifier(abs(ligne["besoin_jusqu_livraison_kg"] - plan_livraison) < 0.01,
-             f"besoin jusqu'a livraison {ligne['besoin_jusqu_livraison_kg']}, jours du moteur {plan_livraison:.4f}")
+    verifier(abs(ligne["besoin_delai_kg"] - plan_livraison) < 0.01,
+             f"besoin pendant le delai {ligne['besoin_delai_kg']}, jours du moteur {plan_livraison:.4f}")
     # Le montant au stock projete est masque a qui ne voit pas les prix du plan d'achat (le magasin).
     vu = next((l for l in c.ok("Magasinie", "GET", "/api/stock/projete?limite=2000") if l["code_reference"] == ref), {})
     verifier("montant_estime_mad" not in vu and "prix_estime_mad" not in vu,
@@ -5765,14 +5783,23 @@ def scenario_source_unique(c, infra):
     cockpit = c.ok("Choukri", "GET", "/api/cockpit")
     verifier({k: cockpit.get("nb_" + k) for k in attendu} == {k: v for k, v in attendu.items()},
              f"cockpit {[(k, cockpit.get('nb_' + k)) for k in attendu]}, moteur {attendu}")
+    # LE STOCK PROJETE (§ 16, 30/10/2026) n'est plus une vue du moteur v2 : il liste les memes references,
+    # avec SES etats (ALERTE, SOUS_CIBLE, COUVERT), chacun deduit de ses propres champs.
     projete = c.ok("Choukri", "GET", "/api/stock/projete?limite=5000")
-    verifier(len(projete) == attendu["references"]
-             and sum(x["statut"] == "RUPTURE_INEVITABLE" for x in projete) == attendu["rupture_inevitable"],
-             f"le stock projete ({len(projete)} lignes) n'est pas la vue du moteur ({attendu})")
+    verifier(len(projete) == attendu["references"],
+             f"le stock projete ({len(projete)} lignes) ne liste pas les references suivies ({attendu['references']})")
+    for x in projete:
+        livraison, seuil = x["couverture_livraison_j"], x["seuil_alerte_j"]
+        t, cible = x["jours_couverture"], x["couverture_cible_j"]
+        etat = ("ALERTE" if livraison is not None and livraison < seuil
+                else "SOUS_CIBLE" if t is not None and cible is not None and t < cible else "COUVERT")
+        verifier(x["statut"] == etat, f"stock projete {x['code_reference']} : etat {x['statut']}, {etat} selon ses champs")
+        verifier(bool(x.get("qte_a_commander_kg")) <= (t is not None and cible is not None and t < cible),
+                 f"stock projete {x['code_reference']} : une quantite sans passer sous la cible")
     # Le stock projete se trie par gravite de l'etat, puis par « Avant le ».
-    rang = {"RUPTURE_INEVITABLE": 0, "SOUS_SECURITE": 1, "SOUS_CIBLE": 2}
-    cles = [(rang.get(x["statut"], 3), x["date_limite_commande"] or "9999") for x in projete]
-    verifier(cles == sorted(cles), "le stock projete n'est pas trie par gravite puis date limite")
+    rang = {"ALERTE": 0, "SOUS_CIBLE": 1}
+    cles = [(rang.get(x["statut"], 2), x["avant_le"] or "9999") for x in projete]
+    verifier(cles == sorted(cles), "le stock projete n'est pas trie par gravite puis « avant le »")
     par_frs = c.ok("Choukri", "GET", "/api/plan-achat/kpi")["fournisseurs"]
     etat = {x["code_reference"]: x["statut"] for x in lignes}
     for f in par_frs:

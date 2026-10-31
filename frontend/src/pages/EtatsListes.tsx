@@ -42,9 +42,9 @@ interface LigneStock {
   stock_physique_net_kg: number | null
   disponible_kg: number | null
   couvert_jusqu_au: string | null
-  couvert_tout_horizon: boolean | null
-  plan_non_couvert_kg: number | null
   jours_couverture: number | null
+  /** La quantité du stock projeté (§ 16). */
+  qte_a_commander_kg?: number | null
   statut: string
   valeur_totale_mad?: number | null
   [k: string]: unknown
@@ -71,15 +71,15 @@ export function EtatStockImprime() {
         <span className="text-[12px] text-attenue-texte">Restreindre à un état :</span>
         <Selecteur aria-label="Restreindre à un état" value={filtre} onChange={(e) => setFiltre(e.target.value)} className="w-52">
           <option value="">Toutes les références</option>
-          <option value="PLAN_NON_COUVERT">Plan non couvert</option>
-          <option value="SOUS_SECURITE">Sous la sécurité</option>
+          <option value="ALERTE">Alerte</option>
+          <option value="SOUS_CIBLE">Sous cible</option>
           <option value="COUVERT">Couvert</option>
         </Selecteur>
       </div>
 
       <EtatImprimable
         titre="État des stocks"
-        sousTitre={filtre ? `Restreint aux références à l’état « ${libelleStatut('statut_stock', filtre)} »` : undefined}
+        sousTitre={filtre ? `Restreint aux références à l’état « ${libelleStatut('statut_projete', filtre)} »` : undefined}
         enTete={
           <div className="flex flex-wrap gap-x-8 gap-y-1">
             <span>
@@ -120,16 +120,16 @@ export function EtatStockImprime() {
               valeur: (l) => fmt.nombre(l.disponible_kg ?? 0, 1),
             },
             {
+              // Le stock projeté (§ 16) : sans date, couvert sur tout l'horizon du plan.
               entete: 'Couvert jusqu’au',
-              valeur: (l) =>
-                l.couvert_tout_horizon ? 'tout l’horizon' : l.couvert_jusqu_au ? fmt.date(l.couvert_jusqu_au) : 'rupture',
+              valeur: (l) => (l.couvert_jusqu_au ? fmt.date(l.couvert_jusqu_au) : 'tout l’horizon'),
             },
             {
-              entete: 'Non couvert kg',
+              entete: 'À commander kg',
               numerique: true,
-              valeur: (l) => ((l.plan_non_couvert_kg ?? 0) > 0.05 ? fmt.nombre(l.plan_non_couvert_kg ?? 0, 0) : '—'),
+              valeur: (l) => ((l.qte_a_commander_kg ?? 0) > 0.05 ? fmt.nombre(l.qte_a_commander_kg ?? 0, 0) : '—'),
             },
-            { entete: 'État', valeur: (l) => libelleStatut('statut_stock', l.statut) },
+            { entete: 'État', valeur: (l) => libelleStatut('statut_projete', l.statut) },
             ...(valeurVisible
               ? [
                   {

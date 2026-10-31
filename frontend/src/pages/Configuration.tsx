@@ -153,7 +153,7 @@ const SECTIONS: Section[] = [
         intention:
           "Le statut d'une référence se lit en JOURS DE COUVERTURE, pas en kilos : " +
           '500 kg sont confortables sur une matière lente et déjà courts sur le fil de chaine.',
-        codes: ['P_SeuilAlerte', 'P_SeuilCritique', 'P_CouvMinMois', 'P_MargeSecurite'],
+        codes: ['P_SeuilAlerte', 'P_SeuilCritique', 'P_SeuilImminent', 'P_CouvMinMois', 'P_MargeSecurite'],
       },
       {
         titre: 'Réapprovisionnement',
@@ -161,6 +161,23 @@ const SECTIONS: Section[] = [
           "Ce que le plan d'achat suppose quand le fournisseur ne dit rien, et la marge " +
           'gardee avant la date de besoin.',
         codes: ['P_DelaiDefaut', 'P_MargeJours'],
+      },
+      {
+        titre: 'Stock projeté',
+        intention:
+          "Ce que le stock projeté compte, et que le plan d'achat suit : restes, rattrapage, " +
+          'fil sur machine, quarantaine, bons en retard ou sans date, minimum et multiple, ' +
+          "seuil d'alerte. Chaque réglage démarre sur le comportement d'avant (31/10/2026).",
+        codes: [
+          'P_ProjeteRestes',
+          'P_ProjeteRattrapage',
+          'P_ProjeteAgeConstatMax',
+          'P_ProjeteQuarantaine',
+          'P_ProjeteRetardJours',
+          'P_ProjeteSansDate',
+          'P_ProjeteMinMultiple',
+          'P_ProjeteMinimumAlerte',
+        ],
       },
     ],
   },

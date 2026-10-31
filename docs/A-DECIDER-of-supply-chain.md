@@ -658,3 +658,246 @@ tests de régression.
 - Le prix, la devise et le fournisseur du plan d'achat.
 - « Commander » = une référence.
 - Aucune décision automatique : le moteur propose, l'utilisateur décide.
+
+## 16. Nouveau Stock projeté (spécification du 30/10/2026, validée et codée le même jour)
+
+*Livré le 30/10/2026* : `domain/projete.rs` (T1 à T10 et les propriétés en tests unitaires),
+`couverture::stock_projete` / `projete_de` (écran et plan d'achat, même fonction),
+`GET /api/stock/projete?rattrapage=exclu&inverses=[…]`, bloc `projete` de
+`GET /api/couverture/{ref}?rattrapage=exclu`, migration `2026-10-30a_stock_projete.sql` (CV, colonnes
+déclarées ; exigée au démarrage), écran /stock (trois vues, bouton Rattrapage) et sa fenêtre. Le
+reste de l'ERP (cockpit, briefing, assistant, contrôles C05, C25, C68, C69, onglet Surveillance) lit
+encore le moteur v2 (`couverture::etats()`) : il passe à la Surveillance avec elle.
+
+Le § 16 remplace le § 15 **pour le Stock projeté**. La mécanique chronologique du § 15 (B(t), R,
+D\*, date limite, Q0, X, consolidation) n'est plus celle du projeté : elle passe à la Surveillance
+(spécification à venir). Son code reste en place pour elle.
+
+> **Frontière (verrouillée).** Le Stock projeté calcule une couverture estimative en tenant compte
+> des consommations planifiées entre aujourd'hui et chaque approvisionnement prévu. Un
+> approvisionnement n'augmente la couverture qu'à partir de sa date prévue d'arrivée. Un manque
+> entre deux approvisionnements est traité selon l'option de rattrapage ; cette règle modifie la
+> couverture projetée, mais ne fait pas du Stock projeté un outil de surveillance chronologique.
+> Le projeté répond à « quelle couverture aurai-je, combien dois-je commander ? » ; la Surveillance
+> à « où et quand est le risque ? ».
+
+### 16.1 Les décisions (tables rondes du 30/10/2026)
+
+| # | Décision |
+|---|---|
+| 1 | Le projeté n'est **pas chronologique** : ni date de rupture, ni frise, ni date limite |
+| 2 | **Toutes** les commandes ouvertes comptent, chacune **à partir de sa date d'arrivée** ; aucun filtre d'horizon ; une date dépassée compte à partir d'aujourd'hui |
+| 3 | La consommation du plan est **déduite avant chaque arrivage** |
+| 4 | **Rattrapage** du manque avant un arrivage tardif : un **bouton à l'écran** (global, et par ligne), **inclus par défaut**, non retenu d'une ouverture à l'autre ; ce n'est pas un champ de la fiche |
+| 5 | Déclenchement : couverture projetée **< C** (cible seule) |
+| 6 | Quantité : la plus petite quantité qui, reçue à **aujourd'hui + délai**, porte la couverture projetée à **C + N** |
+| 7 | Alerte, sur l'idée de gestion-mp-pro : seuil = sécurité de la classe ABC + stock minimum en jours ; le minimum ne change **jamais** une quantité |
+| 8 | Trois onglets : **Approvisionnement** (19 colonnes), **Risques**, **Sourcing** ; fenêtre de détail sur le modèle gestion-mp-pro |
+| 9 | Renommages : « Stock projeté » → **Position projetée** ; « Couverture actuelle » → **Couverture projetée** |
+| 10 | Le **CV** est conservé à chaque classification ; le stock minimum est **affiché pour information** dans la fenêtre |
+| 11 | Le plan d'achat appelle **la même fonction**, rattrapage **inclus** ; aucun recalcul parallèle |
+
+### 16.2 Les calculs
+
+```
+j = 0 (aujourd'hui) … H (fin de l'horizon du plan en service)
+p(t)    besoin planifié du jour t : le mois du plan ÷ jours du mois (profil « uniforme dans le
+        mois », AFFICHÉ comme hypothèse) ; aucune moyenne
+S0      stock compté : magasins inclus au MRP hors lots bloqués + fil sur machine au dernier
+        constat + restes (quarantaine, bloqué, hors MRP : à part) — inchangé
+A(t)    commandes ouvertes à leur date d'arrivée : reste à livrer des lignes de bon VALIDÉ /
+        ENVOYÉ / LIVRÉ PARTIEL (date de la ligne, sinon de l'en-tête) et transferts en route
+        (date prévue de disponibilité) ; une date passée ⇒ t = 0 ; sans date : à part, signalée
+
+Rattrapage INCLUS   E(t) = S0 + Σ_{k≤t} (A(k) − p(k))                (le manque reste dû)
+Rattrapage EXCLU    E(t) = max(E(t−1), 0) + A(t) − p(t), E(−1) = S0  (le manque est perdu)
+
+Couverture projetée T = premier jour à partir duquel E reste < 0 jusqu'à H ;
+                        aucun ⇒ « > H j »
+Manque avant arrivage = Σ du plan non servi avant T (kg, sans date)
+Position projetée      = S0 + Σ A (kg)
+```
+
+Tant qu'aucun arrivage n'arrive après l'épuisement du stock, T est le jour où la position épuise
+le plan, quelle que soit l'option de rattrapage.
+
+### 16.3 La quantité
+
+- **Déclenchement** : T < C.
+- **Q** = la plus petite quantité qui, ajoutée à A(aujourd'hui + L), donne T ≥ C + N, avec la même
+  option de rattrapage. Sans arrivage tardif, Q = P(0, C + N) − position projetée.
+- Puis le minimum de commande, puis le multiple d'achat (sinon la palette si la fiche le demande).
+- **C + N** : C est la couverture cible, N la couverture d'une commande
+  (`fournisseur.couverture_commande_j`, sinon `P_MargeJours`). Remonter à C + N revient à ce que
+  chaque commande couvre N jours de consommation : la commande suivante se déclenche N jours plus
+  tard.
+- Aujourd'hui + L est la date **théorique de la nouvelle proposition** ; les commandes existantes
+  gardent la leur.
+- Si C + N dépasse H, Q se calcule jusqu'à H et le signal `HORIZON_COURT` le dit.
+
+### 16.4 L'alerte et l'état
+
+```
+Seuil d'alerte (j)          = S (classe ABC : P_SecuriteA/B/C ; sans classe, la plus longue)
+                              + stock minimum converti en jours de plan (le minimum épuisé sur le
+                                plan à partir d'aujourd'hui + L)
+Couverture à la livraison   = T − L
+```
+
+| État (le plus grave l'emporte) | Condition |
+|---|---|
+| `ALERTE` | couverture à la livraison < seuil d'alerte |
+| `SOUS_CIBLE` | T < C (une quantité est proposée) |
+| `COUVERT` | sinon |
+
+Signal à part : `CIBLE_NON_DEFINIE` (aucune quantité, aucun repli). `P_SeuilAlerte` et
+`P_SeuilCritique` échelonnent les **paliers de rupture** depuis le 31/10/2026 (§ 16.13), une autre
+question que l'état.
+
+*Observation* : avec les réglages actuels (S = 30 j pour A, B et C ; L ≈ 30 j ; C = 60 j), le
+seuil d'alerte sans minimum vaut L + S = C : `ALERTE` et `SOUS_CIBLE` coïncident. Les deux états ne
+se sépareront qu'après la revue des cibles et des sécurités (R2).
+
+### 16.5 L'écran
+
+*Revu le 31/10/2026 : colonnes, onglets et fenêtre au § 16.13 ; ce qui suit est l'état du 30/10.*
+
+**Bouton « Rattrapage : inclus / exclu »** dans la barre d'outils (toutes les lignes) et sur chaque
+ligne (exception marquée). Il revient à « inclus » à chaque ouverture.
+
+**Onglet Approvisionnement** (19 colonnes) :
+
+| # | Colonne | Contenu |
+|---|---|---|
+| 1-4 | Référence, Désignation, Fournisseur, ABC / XYZ | fiche article |
+| 5 | Stock disponible | magasins inclus au MRP − bloqués − restes |
+| 6 | Sur machines | dernier constat − restes − bloqués |
+| 7 | Restant constaté | restes comptés (magasin + machine) |
+| 8 | Arrivages | Σ A (toutes les commandes ouvertes) |
+| 9 | **Position projetée** | 5 + 6 + 7 + 8 |
+| 10 | Besoin pendant le délai | P(0, L) |
+| 11 | **Couverture projetée** | T |
+| 12 | Cible | C |
+| 13 | Écart cible | T − C |
+| 14 | Délai | L, avec sa source |
+| 15 | À commander | Q (§ 16.3) |
+| 16 | Unité / palette | Q ÷ kg par palette |
+| 17 | Montant commande | Q × prix (prix, devise, fournisseur comme aujourd'hui) |
+| 18 | Avant le | aujourd'hui + (T − C) ; passée ⇒ « dépassée de n j » |
+| 19 | État | § 16.4, raison au survol |
+
+**Onglet Risques** : référence, désignation, état, classe ABC, rang, % cumulé, valeur consommée sur
+12 mois, classe XYZ, CV, politique ABC/XYZ (`v_analyse_abc_xyz`), palier de montant
+(`v_risque_sourcing`).
+
+**Onglet Sourcing** : référence, désignation, fournisseur, délai, nombre de sources et mono / multi
+(`v_risque_sourcing` : fournisseurs du groupe d'équivalence), groupe d'équivalence, substituts, stock
+et couverture projetée des substituts en stock (`v_substitution_dispo` + le même calcul), dernière
+sortie, jours sans mouvement, dormant (`v_stock_dormant`). Le contrôle C25 s'y rattache.
+
+**Fenêtre de détail** (clic sur une ligne) : Approvisionnement (fournisseur, délai, N et leurs
+sources, prix, montant en MAD et en devise, stock minimum pour information, seuil d'alerte et son
+calcul) ; Classement et risque ; Sourcing ; **Où se trouve la matière** (chaque stock, puis arrivage
+par arrivage : consommation avant l'arrivage, l'arrivage, le manque éventuel et l'option de
+rattrapage appliquée, « couvert jusqu'au … » ; chaque total est la somme exacte des lignes) ;
+**Calcul de la quantité** (P(0, C + N) − position = besoin → minimum → multiple → Q).
+
+### 16.6 Le plan d'achat
+
+La génération appelle la fonction du projeté avec rattrapage inclus et reprend Q, la réception
+théorique (aujourd'hui + L), le prix, la devise et le fournisseur. Même référence, mêmes entrées,
+même Q que l'écran.
+
+### 16.7 Ce qui quitte le projeté
+
+| Élément | Destination |
+|---|---|
+| B(t), R, D\*, D, date limite, Q0, X, consolidation | Surveillance (code v2 gardé) |
+| `RUPTURE_INEVITABLE`, `RETARD_CIBLE`, C05 | Surveillance |
+| `SOUS_MINIMUM`, C68 | Surveillance (repère) ; au projeté, le minimum n'entre que dans le seuil d'alerte |
+| C69 (article sans cible) | reste au projeté |
+| C25 (équivalent en tension) | onglet Sourcing |
+
+### 16.8 Les données
+
+Une migration datée : le **CV** sur la référence, écrit par la classification
+(`domain/classification.rs`), déclaré dans `champ_configurable`. Rien d'autre en base : le
+rattrapage est un paramètre de la demande.
+
+### 16.9 Les tests (plan 25 kg/j, C = 60 j, N = 30 j, L = 30 j, S = 30 j)
+
+| Cas | Données | T inclus / exclu | Q | État |
+|---|---|---|---|---|
+| T1 | S0 = 1 000 ; 1 500 kg à J20 | 100 / 100 | 0 | COUVERT |
+| T2 | S0 = 1 000 ; 1 500 kg à J50 (manque 250 kg) | **100 / 110** | 0 | COUVERT |
+| T3 | S0 = 1 000 ; 1 500 kg à J20 ; 2 000 kg à J50 | 180 / 180 | 0 | COUVERT |
+| T4 | S0 = 1 000 ; 1 500 kg à **J85**, puis à **J95** | **100 et 100** (inclus) ; 145 et 155 (exclu) | 0 | COUVERT |
+| T5 | S0 = 1 000 ; 1 500 kg prévus à J−5 (en retard) | 100 | 0 : pas de double commande | COUVERT |
+| T6 | S0 = 1 475 ; aucune commande | 59 | **775** | ALERTE |
+| T6b | le lendemain : S0 = 1 450 ; 775 kg à J29 | 89 | **0** : une seule commande | COUVERT |
+| T7 | T6 avec un stock minimum de 300 kg | 59 | **775** (inchangé) | ALERTE |
+| T8 | S0 = 1 200 ; minimum 300 kg ; palette 400 kg | 48 | 1 050 → **1 200** (3 palettes) | ALERTE (18 j < 30 + 12 = 42 j) |
+| T9 | T6 sans cible | 59 | aucune | signal `CIBLE_NON_DEFINIE` |
+| T10 | S0 = 1 000 ; 400 kg à J50 | **56 / 66** | **850 / 0** | ALERTE / COUVERT |
+
+T10 montre l'effet du rattrapage sur la quantité : inclus, le manque de 250 kg reste dû et la
+commande se déclenche ; exclu, il est perdu et la couverture reste au-dessus de la cible. Le plan
+d'achat prend l'option incluse.
+
+### 16.10 Critères d'acceptation
+
+1. T1 à T10 sont des tests unitaires d'un module de calcul pur, aux chiffres exacts ci-dessus.
+2. Propriétés sur plans et arrivages aléatoires : sans arrivage tardif, T ne dépend pas de l'option
+   de rattrapage ; déplacer une commande sans créer de trou ne change pas T (aucun effet de seuil) ;
+   le stock minimum ne change jamais Q ; une commande proposée puis passée annule la proposition du
+   lendemain.
+3. L'écran et le plan d'achat donnent le même Q pour la même référence.
+4. **Mode comparaison** sur une copie de la base : § 15 contre § 16, référence par référence
+   (couverture, état, Q), relu et validé par l'utilisateur avant la base de saisie.
+5. Le banc de tests et les tests de bout en bout passent ; l'aide et le manuel suivent.
+
+### 16.11 Les étapes
+
+Spécification validée → tests unitaires → module de calcul pur → migration du CV → route (paramètre
+de rattrapage) → plan d'achat rebranché → écran (bouton, trois onglets, fenêtre) → mode comparaison
+→ banc, e2e, aide → `gestionfil_saisie`.
+
+### 16.12 Points ouverts
+
+- ~~`P_SeuilAlerte` et `P_SeuilCritique`, lus par aucun calcul~~ : tranché le 31/10/2026, ils
+  échelonnent les paliers de rupture (§ 16.13). Ils restent aussi recopiés dans chaque qualité et
+  chaque plan de production (valeurs par défaut).
+- Le seuil d'alerte (sécurité + stock minimum) vaut 300 j sur la plupart des références : 65 en
+  `ALERTE`. Le réglage `P_ProjeteMinimumAlerte = 0` en laisse 55 ; la revue des minimums (R3) reste à
+  faire.
+- Un état `COUVERT` peut cacher une rupture aujourd'hui (un trou avant un camion, rattrapé) : le
+  palier de rupture et le bandeau « à sec avant le camion » la montrent ; la règle de déclenchement
+  (T < C) est inchangée.
+
+### 16.13 Décisions du 31/10/2026 (codées et livrées le même jour)
+
+Migrations `2026-10-31a` à `2026-10-31d` (31a et 31b exigées au démarrage), toutes appliquées à
+`gestionfil_saisie` après sauvegarde. Chaque réglage démarre sur le comportement d'avant.
+
+| # | Décision | Où |
+|---|---|---|
+| 1 | **Une seule ligne par référence**, sans ↳, sur les quatre onglets et le plan d'achat ; police 14 px | `DataTable` (`lisible`, `serre`) |
+| 2 | **Référence · Fournisseur · État** fixes en tête des quatre onglets | `pages/Stock.tsx` |
+| 3 | **Approvisionnement** : stock disponible, sur machine, en route (arrivages), position, conso / mois, couverture, rupture, cible, à commander, montant (stock disponible + sur machine + en route = position) | idem |
+| 4 | **Couverture négative** = jours sans fil jusqu'au prochain approvisionnement : arrivage connu, sinon une commande passée aujourd'hui (aujourd'hui + L) | `projete.jours_sans_fil` |
+| 5 | **Onglet Emplacements** : disponible total, un magasin par colonne, sur machines, restes, quarantaine, en route (transferts seuls), en route après le délai, commandé, stock global après l'arrivage | `stock_par_magasin`, `ColonneDT.droit` |
+| 6 | **Paliers de rupture** : jours jusqu'au premier jour sans fil → RUPTURE (aujourd'hui), IMMINENTE (< `P_SeuilImminent`, 30 j, nouveau), CRITIQUE (< `P_SeuilCritique`, 60 j), ATTENTION (< `P_SeuilAlerte`, 90 j) ; le palier suivant et sa date (« → Critique le 28/11 ») ; filtre du rail | `projete::palier`, `paliers()` |
+| 7 | **À sec avant le camion** : le premier trou avant un arrivage connu (date à sec, camion, manque, jours) ; bandeau en tête du plan d'achat (« faire avancer la livraison, ou acheter sur place ») | `projete.a_sec` |
+| 8 | **Fenêtre de détail en « pont de calcul »** : décision (à commander, montant, avant le, réception), quatre chiffres, pont stock compté + arrivages − plan jusqu'à C + N = solde, + quantité ; où se trouve la matière (barre) ; arrivages ; onglets Calcul, Besoins, Lots, Métiers, Classement, Historique | `FenetreStockProjete.tsx`, `projete.pont` |
+| 9 | **Restes** comptés ou non : réglage `P_ProjeteRestes` (1) que suit le plan d'achat, bouton de l'écran pour la session | `couverture::stock_du_projete` |
+| 10 | **Réglages globaux** (section « Stock projeté » de Configuration) : `P_ProjeteRattrapage` (1), `P_ProjeteAgeConstatMax` (0 = sans limite), `P_ProjeteQuarantaine` (0), `P_ProjeteRetardJours` (0), `P_ProjeteSansDate` (0), `P_ProjeteMinMultiple` (1), `P_ProjeteMinimumAlerte` (1) ; le plan d'achat les suit, les boutons de l'écran n'en changent que l'affichage | `ReglagesProjete` |
+| 11 | **Plan d'achat** : une ligne par proposition (valeurs regroupées dans une cellule, exportées en colonnes : `ColonneDT.joints`), paliers par fournisseur et bouton **Préparer**, mono / multi-source sous le fournisseur, tri pondéré ABC (A × 3, B × 2) | `pages/PlanAchat.tsx` |
+| 12 | **Pieds de total** (lignes filtrées, toutes pages) et **filtres matière** : composition, rôle (rôle par défaut de la catégorie), type de fil, titrage, couleur, magasin principal | `ColonneDT.total` |
+| 13 | Le magasin **Quarantaine** (type QUARANTAINE, hors MRP) créé dans `gestionfil_saisie` | donnée, aucun code |
+
+Refusé : les tuiles en tête de liste (règle d'écran de l'entreprise).
+
+Mesures sur une copie de la base (122 références) : 23 en rupture, 20 imminentes, 11 critiques,
+5 en attention ; 5 matières à sec avant leur camion ; chaque réglage testé seul (rattrapage à 0 =
+bouton « exclu » ; minimum hors alerte : 55 alertes au lieu de 65) ; stock + machine + arrivages =
+position sur chaque ligne, dans chaque cas.

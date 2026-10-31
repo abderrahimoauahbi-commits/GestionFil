@@ -126,6 +126,29 @@ pub async fn prix_estimes(
     Ok(lignes.into_iter().map(|(code, prix, source)| (code, (prix, source))).collect())
 }
 
+/// Les memes prix que `prix_estimes`, pour ces references seulement (le stock
+/// projete ne chiffre que les lignes qui ont une quantite : le dernier prix
+/// d'achat coute une requete par reference).
+pub async fn prix_estimes_pour(
+    db: &Db,
+    references: &[String],
+) -> AppResult<std::collections::HashMap<String, (Option<f64>, String)>> {
+    if references.is_empty() {
+        return Ok(Default::default());
+    }
+    let sql = format!(
+        "SELECT r.code_reference, ({prix})::float8 AS prix_mad, {source} AS source_prix
+           FROM reference r
+           {taux}
+          WHERE r.code_reference = ANY($1)",
+        prix = PRIX_MAD_SQL,
+        source = SOURCE_PRIX_SQL,
+        taux = TAUX_DU_JOUR_SQL,
+    );
+    let lignes: Vec<(String, Option<f64>, String)> = sqlx::query_as(&sql).bind(references).fetch_all(db).await?;
+    Ok(lignes.into_iter().map(|(code, prix, source)| (code, (prix, source))).collect())
+}
+
 /// Le montant estime d'une commande : quantite x prix, arrondi aux centimes.
 pub fn montant_estime(quantite_kg: Option<f64>, prix_mad: Option<f64>) -> Option<f64> {
     match (quantite_kg, prix_mad) {

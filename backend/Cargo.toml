@@ -23,7 +23,6 @@ path = "src/bin/import.rs"
 # `multipart` : le depot des pieces d'un dossier d'importation (scans, PDF).
 axum = { version = "0.8", features = ["macros", "multipart"] }
 tokio = { version = "1", features = ["full"] }
-tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "fs", "timeout", "set-header", "request-id"] }
 
 # sqlx en mode requetes dynamiques (pas de macros query!) : la couche SQL est
@@ -79,9 +78,6 @@ dotenvy = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rpassword = "7"
-
-[dev-dependencies]
-http-body-util = "0.1"
 
 [profile.release]
 lto = true

@@ -51,6 +51,9 @@ CONFIGURATION = [
     # apres les categories, qu'elles referencent.
     "couleur",
     "famille",
+    # Les conditionnements (bobine, rouleau, cuve...) : sans eux, aucune
+    # reference ne dit son contenant (oubli constate le 06/11/2026).
+    "conditionnement",
     "saison_mois",
     "champ_configurable",
     "devise",

@@ -343,7 +343,7 @@ export interface OfOuvert {
   qualite_nom: string | null
   date_of: string
   date_fin_prevue: string | null
-  metrage_m2: number
+  metrage_m2: number | null
 }
 
 // =============================================================================

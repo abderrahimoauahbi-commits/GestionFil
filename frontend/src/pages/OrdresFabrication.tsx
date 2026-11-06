@@ -43,7 +43,7 @@ export interface OfListe extends Record<string, unknown> {
   statut: string
   date_of: string
   date_fin_prevue: string | null
-  metrage_m2: number
+  metrage_m2: number | null
   kg_prevu: number
   kg_reel: number
   kg_conso_fil: number
@@ -63,7 +63,7 @@ interface QualiteConso extends Record<string, unknown> {
   mois: string
   nb_of: number
   nb_of_clotures: number
-  metrage_m2: number
+  metrage_m2: number | null
   kg_prevu: number
   kg_conso_fil: number
   kg_hors_machine: number
@@ -154,7 +154,7 @@ function ListeOf() {
     { champ: 'numero', entete: 'N° d’OF', rendu: (o) => <span className="font-mono text-xs">{o.numero}</span> },
     { champ: 'date_of', entete: 'Date', rendu: (o) => fmt.date(o.date_of) },
     { champ: 'code_qualite', entete: 'Qualité', rendu: (o) => <span title={o.qualite_nom}>{o.code_qualite}</span> },
-    { champ: 'metrage_m2', entete: 'Métrage (m²)', numerique: true, rendu: (o) => fmt.nombre(Number(o.metrage_m2), 0) },
+    { champ: 'metrage_m2', entete: 'Métrage (m²)', numerique: true, rendu: (o) => (o.metrage_m2 == null ? '—' : fmt.nombre(Number(o.metrage_m2), 0)) },
     {
       champ: 'statut',
       entete: 'Statut',
@@ -265,7 +265,7 @@ function ConsommationQualites() {
     },
     { champ: 'mois', entete: 'Mois', rendu: (l) => <span className="tabular-nums">{l.mois}</span> },
     { champ: 'nb_of', entete: 'OF', numerique: true, rendu: (l) => `${l.nb_of}${l.nb_of_clotures ? ` (${l.nb_of_clotures} clôt.)` : ''}` },
-    { champ: 'metrage_m2', entete: 'Métrage (m²)', numerique: true, rendu: (l) => fmt.nombre(Number(l.metrage_m2), 0) },
+    { champ: 'metrage_m2', entete: 'Métrage (m²)', numerique: true, rendu: (l) => (l.metrage_m2 == null ? '—' : fmt.nombre(Number(l.metrage_m2), 0)) },
     { champ: 'kg_prevu', entete: 'Prévu (kg)', numerique: true, rendu: (l) => kg(l.kg_prevu) },
     { champ: 'kg_reel', entete: 'Réel (kg)', numerique: true, rendu: (l) => kg(l.kg_reel) },
     {

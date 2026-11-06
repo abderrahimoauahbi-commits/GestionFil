@@ -241,7 +241,9 @@ pub struct NouvelOf {
     #[serde(default)]
     pub date_fin_prevue: Option<String>,
     pub code_qualite: String,
-    pub metrage_m2: f64,
+    /// Vide : métrage inconnu (06/11/2026), jamais zéro ; saisi, il est positif.
+    #[serde(default)]
+    pub metrage_m2: Option<f64>,
     #[serde(default)]
     pub notes: Option<String>,
 }
@@ -259,7 +261,7 @@ pub async fn creer(
     }
     let code_qualite = texte(Some(&n.code_qualite))
         .ok_or_else(|| AppError::Invalide("La qualité de l'OF est obligatoire.".into()))?;
-    let m2 = metrage(n.metrage_m2)?;
+    let m2 = n.metrage_m2.map(metrage).transpose()?;
     let date_of = jour(n.date_of.as_deref(), "Date de l'OF")?
         .unwrap_or_else(|| crate::db::jour_casablanca().format("%Y-%m-%d").to_string());
     let fin = jour(n.date_fin_prevue.as_deref(), "Fin prévue")?;

@@ -130,7 +130,7 @@ function ChampsEnTete({
         )}
       </div>
       <div>
-        <Etiq htmlFor="of-metrage" obligatoire>Métrage (m²)</Etiq>
+        <Etiq htmlFor="of-metrage">Métrage (m²)</Etiq>
         <Champ id="of-metrage" type="number" min={0} value={saisie.metrage_m2} disabled={!modifiable}
           onChange={(e) => definir({ metrage_m2: e.target.value })} />
       </div>
@@ -146,8 +146,9 @@ function ChampsEnTete({
 function valider(s: Saisie): string | null {
   if (!s.code_qualite) return 'Choisissez la qualité.'
   if (!s.date_of) return 'La date de l’OF est obligatoire.'
+  // Vide : métrage inconnu (06/11/2026). Saisi, il est positif.
   const m = Number(s.metrage_m2)
-  if (!s.metrage_m2 || !Number.isFinite(m) || m <= 0) return 'Le métrage doit être positif.'
+  if (s.metrage_m2.trim() && (!Number.isFinite(m) || m <= 0)) return 'Le métrage doit être positif, ou rester vide.'
   if (s.date_fin_prevue && s.date_fin_prevue < s.date_of) return 'La fin prévue précède la date de l’OF.'
   return null
 }
@@ -181,7 +182,7 @@ function NouvelOf() {
         date_of: saisie.date_of,
         date_fin_prevue: saisie.date_fin_prevue || null,
         code_qualite: saisie.code_qualite,
-        metrage_m2: Number(saisie.metrage_m2),
+        metrage_m2: saisie.metrage_m2.trim() ? Number(saisie.metrage_m2) : null,
         notes: saisie.notes.trim() || null,
       }),
     onSuccess: (r) => {
@@ -236,7 +237,7 @@ function versSaisie(o: EnTeteOf): Saisie {
     date_of: jourIso(o.date_of),
     date_fin_prevue: jourIso(o.date_fin_prevue),
     code_qualite: o.code_qualite,
-    metrage_m2: String(o.metrage_m2),
+    metrage_m2: o.metrage_m2 == null ? '' : String(o.metrage_m2),
     notes: o.notes ?? '',
   }
 }
@@ -280,7 +281,7 @@ function DocumentOf({ id }: { id: string }) {
         date_of: s.date_of,
         date_fin_prevue: s.date_fin_prevue,
         code_qualite: s.code_qualite,
-        metrage_m2: Number(s.metrage_m2),
+        metrage_m2: s.metrage_m2.trim() ? Number(s.metrage_m2) : undefined,
         notes: s.notes,
       })
     },
@@ -361,7 +362,7 @@ function DocumentOf({ id }: { id: string }) {
           <span className="inline-flex flex-wrap items-center gap-2">
             <StatutBadge entite="ordre_fabrication" code={of.statut} />
             <span>
-              {of.code_qualite} — {of.qualite_nom} · {fmt.nombre(Number(of.metrage_m2), 0)} m²
+              {of.code_qualite} — {of.qualite_nom} · {of.metrage_m2 == null ? 'métrage inconnu' : `${fmt.nombre(Number(of.metrage_m2), 0)} m²`}
             </span>
           </span>
         }

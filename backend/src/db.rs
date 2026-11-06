@@ -110,6 +110,13 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // L'OF au métrage vide (06/11/2026) : la création accepte un OF sans
+        // m², que la base refuserait sans cette migration.
+        "2026-11-06a_of_metrage_facultatif.sql",
+        "SELECT is_nullable = 'YES' FROM information_schema.columns
+          WHERE table_name = 'ordre_fabrication' AND column_name = 'metrage_m2'",
+    ),
+    (
         // Les paliers de rupture du stock projeté (31/10/2026) : leurs colonnes
         // déclarées, sinon l'écran les masquerait sans le dire.
         "2026-10-31b_paliers_rupture.sql",

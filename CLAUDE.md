@@ -122,8 +122,8 @@ par le motif (`machine_motif`). Seule la décision tête d'un étage se retire (
 annuler), par mouvements `ANNUL_*` liés ; les mouvements de fiche ne se contre-passent pas.
 Verrou : fiche puis étage en `FOR UPDATE NOWAIT`. Pas de fiche « Consommation ».
 
-**Toute transaction écrivante** commence par `db::poser_contexte` (`SET LOCAL app.id_utilisateur`,
-etc.), sinon le journal d'audit enregistre une action anonyme.
+**Toute transaction écrivante** commence par `db::poser_contexte` (`set_config('gestionfil.id_utilisateur', …, true)`,
+avec `gestionfil.adresse_ip` et `gestionfil.session_id`), sinon le journal d'audit enregistre une action anonyme.
 
 **Sécurité à deux niveaux** (`auth/rbac.rs`) : permission de module LIRE / ECRIRE / VALIDER par
 rôle (`VALIDER` ≠ `ECRIRE`, base de la ségrégation des tâches), et visibilité par champ

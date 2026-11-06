@@ -4260,7 +4260,9 @@ def scenario_migrations_rejouables(c, infra):
                 # v_of_bilan apres 27g (l'etalon fige), 06d accroche C70 a v_controles.
                 "2026-11-06a_of_metrage_facultatif.sql", "2026-11-06b_audit_parametres_droits.sql",
                 "2026-11-06c_of_etalon_verrou_densites.sql", "2026-11-06d_controle_titrage_famille.sql",
-                "2026-11-06e_reference_fin_de_vie.sql"):
+                "2026-11-06e_reference_fin_de_vie.sql",
+                # Le lot derive, phase 1 (06/11/2026) : la table, D1 par lot, le derive au grand livre.
+                "2026-11-06f_lot_derive.sql"):
         try:
             infra.psql(infra.base, "-q", "-f", str(dossier / nom))
         except RuntimeError as e:

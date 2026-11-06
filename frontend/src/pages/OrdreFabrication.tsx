@@ -45,7 +45,7 @@ interface LigneConso extends Record<string, unknown> {
   code_reference: string
   designation: string
   lots: string | null
-  kg_prevu: number
+  kg_prevu: number | null
   kg_conso_fil: number
   kg_sorti_hors_machine: number
   kg_rendu_hors_machine: number
@@ -55,7 +55,7 @@ interface LigneConso extends Record<string, unknown> {
   kg_perte: number
   kg_casse: number
   kg_autre_ecart: number
-  ecart_kg: number
+  ecart_kg: number | null
   ecart_pct: number | null
 }
 
@@ -69,7 +69,8 @@ interface Saisie {
 }
 
 const echec = (e: unknown) => toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.')
-const kg = (v: unknown) => fmt.nombre(Number(v ?? 0), 1)
+// Vide (prévu d'un OF sans métrage, 06/11/2026) : « — », jamais 0.
+const kg = (v: unknown) => (v == null ? '—' : fmt.nombre(Number(v), 1))
 const jourIso = (v: string | null | undefined) => (v ? v.slice(0, 10) : '')
 
 export function OrdreFabrication() {
@@ -327,7 +328,8 @@ function DocumentOf({ id }: { id: string }) {
       champ: 'ecart_kg',
       entete: 'Écart (kg)',
       numerique: true,
-      rendu: (l) => <Ecart kg={Number(l.ecart_kg)} pct={l.ecart_pct == null ? null : Number(l.ecart_pct)} />,
+      rendu: (l) =>
+        l.ecart_kg == null ? '—' : <Ecart kg={Number(l.ecart_kg)} pct={l.ecart_pct == null ? null : Number(l.ecart_pct)} />,
     },
     {
       champ: 'kg_dechet',
@@ -449,9 +451,16 @@ function DocumentOf({ id }: { id: string }) {
           </CarteEntete>
           <CarteCorps className="space-y-3">
             <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-              <Chiffre libelle="Prévu" valeur={`${kg(of.kg_prevu)} kg`} />
+              <Chiffre
+                libelle="Prévu"
+                valeur={of.kg_prevu == null ? 'inconnu' : `${kg(of.kg_prevu)} kg`}
+                detail={of.etalon_fige ? 'étalon figé au lancement' : 'recette du jour'}
+              />
               <Chiffre libelle="Réel" valeur={`${kg(of.kg_reel)} kg`} detail={`fil ${kg(of.kg_conso_fil)} · hors machine ${kg(of.kg_hors_machine)}`} />
-              <Chiffre libelle="Écart réel − prévu" valeur={<Ecart kg={Number(of.ecart_kg)} pct={of.ecart_pct == null ? null : Number(of.ecart_pct)} />} />
+              <Chiffre
+                libelle="Écart réel − prévu"
+                valeur={of.ecart_kg == null ? '—' : <Ecart kg={Number(of.ecart_kg)} pct={of.ecart_pct == null ? null : Number(of.ecart_pct)} />}
+              />
               <Chiffre libelle="Déchets · pertes · casses" valeur={`${kg(dpc)} kg`} detail={Number(of.kg_autre_ecart) ? `autres écarts ${kg(of.kg_autre_ecart)} kg` : undefined} />
             </div>
             {!of.a_recette && (
@@ -460,7 +469,8 @@ function DocumentOf({ id }: { id: string }) {
             <p className="text-xs text-attenue-texte">
               Réel fil : écarts à effet consommation des constats machine dont la période appartenait à cet OF (corrections
               exclues). Hors machine : consommations directes portant l’OF, retours au magasin déduits. Le prévu (métrage ×
-              recette, perte comprise) n’est qu’un étalon.
+              étalon : kg/m² et perte figés au lancement de l’OF, recette du jour tant qu’il est prévu) reste vide
+              tant que le métrage est inconnu.
             </p>
             <DataTable<LigneConso>
               exportable={`of-${of.numero}-consommation`}

@@ -152,6 +152,9 @@ struct Fiche {
     designation: Option<String>,
     classe_abc: Option<String>,
     actif: bool,
+    /// Fin de vie (06/11/2026) : on consomme le stock, on ne rachète plus —
+    /// aucune proposition, un signal si le fil manque avant la fin du plan.
+    fin_de_vie: bool,
     code_fournisseur: Option<String>,
     fournisseur_nom: Option<String>,
     delai_fournisseur: Option<i64>,
@@ -365,6 +368,7 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
     let mut fiches = BTreeMap::new();
     for l in sqlx::query(
         "SELECT r.code_reference, r.designation, r.classe_abc, COALESCE(r.actif, 1) = 1 AS actif,
+                COALESCE(r.fin_de_vie, 0) = 1 AS fin_de_vie,
                 r.code_fournisseur, f.nom AS fournisseur_nom,
                 f.delai_livraison_jours, f.couverture_commande_j,
                 r.moq_kg::float8 AS moq_kg, r.multiple_achat_kg::float8 AS multiple_achat_kg,
@@ -387,6 +391,7 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
                 designation: l.try_get("designation")?,
                 classe_abc: l.try_get("classe_abc")?,
                 actif: l.try_get("actif")?,
+                fin_de_vie: l.try_get("fin_de_vie")?,
                 code_fournisseur: l.try_get("code_fournisseur")?,
                 fournisseur_nom: l.try_get("fournisseur_nom")?,
                 delai_fournisseur: l.try_get("delai_livraison_jours")?,
@@ -816,7 +821,8 @@ fn analyser_avec<'a>(d: &'a Donnees, fiche: &'a Fiche, s: &Surcharges) -> Analys
         (None, None) => (None, None),
     };
     // Soumis au MRP : actif ET présent dans le besoin du plan en service (§ 15.9 bis-1).
-    let soumis_mrp = fiche.actif && d.besoin.contains_key(code);
+    // En fin de vie (06/11/2026), plus soumis : aucune proposition, on consomme le stock.
+    let soumis_mrp = fiche.actif && !fiche.fin_de_vie && d.besoin.contains_key(code);
     let reglages = Reglages {
         aujourdhui: auj,
         fin_horizon: fin,
@@ -979,6 +985,18 @@ fn analyser_avec<'a>(d: &'a Donnees, fiche: &'a Fiche, s: &Surcharges) -> Analys
     // Les données manquantes déjà connues (classe ABC absente…) : un signal aussi.
     if let Some(msg) = &defaut_donnees {
         resultat.signaux.push(Signal { code: signal::DEFAUT_DONNEES, date: None, message: msg.clone() });
+    }
+    // En fin de vie, plus de proposition : une rupture dans l'horizon se signale.
+    if fiche.fin_de_vie && fiche.actif {
+        if let Some(r) = resultat.premiere_rupture {
+            resultat.signaux.push(Signal {
+                code: signal::FIN_DE_VIE,
+                date: Some(r),
+                message: "référence en fin de vie : rupture dans l'horizon du plan, rien n'est proposé ; \
+                          la remplacer dans les recettes ou la racheter par décision"
+                    .into(),
+            });
+        }
     }
 
     Analyse {
@@ -1253,6 +1271,7 @@ fn projete_de(d: &Donnees, a: &Analyse, rattrapage: bool, restes: bool) -> proje
         multiple_kg: a.reglages.multiple_kg.filter(|_| o.min_multiple),
         kg_palette: a.reglages.kg_palette,
         soumis_mrp: a.reglages.soumis_mrp,
+        fin_de_vie: a.fiche.fin_de_vie,
         rattrapage,
         restes,
         seuils_rupture: d.parametres.seuils_rupture,
@@ -1271,6 +1290,9 @@ fn signaux_projete(p: &projete::Projete) -> Value {
                     }
                     projete::signal::HORIZON_COURT => {
                         "le plan s'arrête avant cible + couverture d'une commande : la quantité s'arrête à l'horizon"
+                    }
+                    projete::signal::FIN_DE_VIE => {
+                        "référence en fin de vie : le stock et les commandes ne couvrent pas le plan, et rien n'est proposé ; la remplacer dans les recettes ou la racheter par décision"
                     }
                     _ => "",
                 };
@@ -2896,6 +2918,7 @@ mod tests_simulation {
                 designation: Some("Fil d'essai".into()),
                 classe_abc: Some("A".into()),
                 actif: true,
+                fin_de_vie: false,
                 code_fournisseur: Some("FRS".into()),
                 fournisseur_nom: Some("Fournisseur".into()),
                 delai_fournisseur: Some(10),

@@ -421,7 +421,9 @@ pub const ENTITES: &[Entite] = &[
             // La couverture cible du MRP (2026-10-27l) ; la marge de securite
             // de l'article n'existe plus (celle de la qualite reste).
             "couverture_cible_mois", "moq_kg",
-            "multiple_achat_kg", "suivi_lot", "code_sh", "actif"],
+            "multiple_achat_kg", "suivi_lot", "code_sh", "actif",
+            // La fin de vie (06/11/2026) : on consomme, on ne rachète plus.
+            "fin_de_vie"],
         modification: &[
             "code_categorie", "code_fournisseur", "designation", "type_fil",
             "couleur", "origine", "titrage", "code_famille", "code_couleur_interne",
@@ -433,7 +435,7 @@ pub const ENTITES: &[Entite] = &[
             "description_commerciale",
             "code_devise_catalogue", "date_prix_catalogue", "stock_min_kg",
             "couverture_cible_mois", "moq_kg",
-            "multiple_achat_kg", "suivi_lot", "code_sh", "actif",
+            "multiple_achat_kg", "suivi_lot", "code_sh", "actif", "fin_de_vie",
         ],
         suppression: Suppression::Logique("actif"),
         // prix_kg_mad applique la MEME regle que le plan d'achat : le CMUP reel

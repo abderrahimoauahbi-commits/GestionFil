@@ -79,8 +79,8 @@ db/pg/
 ├── 010b_declencheurs_logique.sql solde, CMUP, capacité machine
 ├── 011_vues.sql                  vues de pilotage
 ├── 012_controles.sql             contrôles métier C01–C37 (sauf C05, C25, C27), C43, C44, C66
-│                                 (C38–C42, C45–C65 sauf C49, C67 : migrations ;
-│                                  C05, C25, C68, C69 : moteur — plage C01–C69)
+│                                 (C38–C42, C45–C65 sauf C49, C67, C70 : migrations ;
+│                                  C05, C25, C68, C69 : moteur — plage C01–C70)
 ├── 013_vues_cockpit.sql          le cockpit : Pareto, économies, devises, mono-source
 ├── 014_audit_operations.sql      journal d'audit des opérations
 ├── seed_*.sql                    référentiels, sécurité, qualités, comptes réels
@@ -237,6 +237,7 @@ Les migrations du 09/10/2026 (audit v5) et du 10/10 ajoutent, tous en **signal**
 | C67 | rapprochement machine, par référence : chargé (CHARGE_MACHINE − ANNUL) − déchargé au magasin (RETOUR_MACHINE − ANNUL) − variation de l'état machine (actuel − départ) ≠ faits machine du grand livre de la consommation (consommation, rebut, autres écarts), au-delà de 0,01 kg (seuil technique d'arrondi). Un signal | 27g |
 | C68 | stock minimum franchi dans [aujourd'hui, aujourd'hui + délai] (signal, vérifier le plan) — servi par le moteur de couverture en Rust, aucun SQL, hors `v_controles` | 27l (moteur v2) |
 | C69 | article soumis au MRP (actif, au besoin du plan en service) sans couverture cible : aucune proposition — servi par le moteur de couverture en Rust, aucun SQL, hors `v_controles` | 27l (moteur v2) |
+| C70 | titrage de la référence (valeur en tête du libellé, unité écrite ou non) différent de celui de sa famille — le titrage reste un libellé ; un signal, jamais un refus | 2026-11-06d |
 
 **Le 27/10/2026 (migration 27e, une seule source de vérité : le moteur de couverture).** **C05**
 (plan non couvert sur l'horizon, ex-« stock projeté négatif ») et **C25** (stock mobilisable face à

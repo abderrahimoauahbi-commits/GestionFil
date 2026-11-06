@@ -206,10 +206,7 @@ class Infra:
         self.journal = open(Path(self.vide) / "serveur.log", "w", encoding="utf-8")
         env = dict(self.env, DATABASE_URL=self.url(), JWT_SECRET=secrets.token_hex(32),
                    BIND_ADDR=f"127.0.0.1:{self.port}", FRONTEND_DIR=str(frontend or self.vide),
-                   RUST_LOG="warn",
-                   # Le banc echoue expres, depuis une seule adresse : la limite par
-                   # adresse se teste en Rust (auth::garde), pas ici.
-                   GESTIONFIL_ECHECS_PAR_ADRESSE="100000")
+                   RUST_LOG="warn")
         self.serveur = subprocess.Popen([str(self.binaire)], cwd=self.vide, env=env,
                                         stdout=self.journal, stderr=subprocess.STDOUT)
         for _ in range(60):

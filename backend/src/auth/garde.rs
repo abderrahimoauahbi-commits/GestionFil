@@ -14,8 +14,10 @@
 //!     et n'etait jamais bloque. Il fait maintenant le meme calcul, sur une
 //!     empreinte leurre, et compte ses echecs comme un vrai compte.
 //!
-//! Et une limite par adresse : au-dela de vingt echecs en quinze minutes, la
-//! machine qui essaie attend, quel que soit l'identifiant qu'elle tente.
+//! PAS DE LIMITE PAR ADRESSE (decision du 06/11/2026) : le reseau est servi
+//! par DHCP, des postes sont hors domaine ; une adresse n'est pas une
+//! identite. Seul le compte (ou l'identifiant tente) se bloque. La limite
+//! « vingt echecs en quinze minutes par adresse » du 13/10 est retiree.
 //!
 //! Tout est en memoire : un seul processus sert l'ERP, et un redemarrage qui
 //! remet ces compteurs a zero ne rouvre rien que la base ne garde (le blocage
@@ -26,17 +28,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// Echecs toleres par adresse dans la fenetre, avant de la faire attendre.
-/// Reglable (GESTIONFIL_ECHECS_PAR_ADRESSE) : le banc de tests echoue expres,
-/// depuis une seule adresse, bien plus souvent qu'un poste reel.
-const ECHECS_PAR_ADRESSE: u32 = 20;
+/// La fenetre au-dela de laquelle la serie d'un identifiant inconnu repart de zero.
 const FENETRE: Duration = Duration::from_secs(15 * 60);
 
 pub struct Garde {
-    seuil_adresse: u32,
     calcul: tokio::sync::Semaphore,
     par_login: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    par_adresse: Mutex<HashMap<String, (u32, Instant)>>,
     inconnus: Mutex<HashMap<String, (i64, Instant)>>,
     leurre: String,
 }
@@ -50,14 +47,8 @@ impl Default for Garde {
 impl Garde {
     pub fn new() -> Self {
         Self {
-            seuil_adresse: std::env::var("GESTIONFIL_ECHECS_PAR_ADRESSE")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .filter(|n| *n > 0)
-                .unwrap_or(ECHECS_PAR_ADRESSE),
             calcul: tokio::sync::Semaphore::new(4),
             par_login: Mutex::new(HashMap::new()),
-            par_adresse: Mutex::new(HashMap::new()),
             inconnus: Mutex::new(HashMap::new()),
             // Une empreinte reelle, d'un mot de passe que personne ne connait :
             // le calcul a le meme cout qu'un vrai.
@@ -88,26 +79,6 @@ impl Garde {
         carte.entry(login.to_lowercase()).or_default().clone()
     }
 
-    /// L'adresse a-t-elle trop echoue dans la fenetre ?
-    pub fn adresse_bloquee(&self, adresse: Option<&str>) -> bool {
-        let Some(a) = adresse else { return false };
-        let carte = self.par_adresse.lock().unwrap_or_else(|e| e.into_inner());
-        matches!(carte.get(a), Some((n, debut)) if *n >= self.seuil_adresse && debut.elapsed() < FENETRE)
-    }
-
-    pub fn noter_echec_adresse(&self, adresse: Option<&str>) {
-        let Some(a) = adresse else { return };
-        let mut carte = self.par_adresse.lock().unwrap_or_else(|e| e.into_inner());
-        if carte.len() > 10_000 {
-            carte.retain(|_, (_, debut)| debut.elapsed() < FENETRE);
-        }
-        let e = carte.entry(a.to_string()).or_insert((0, Instant::now()));
-        if e.1.elapsed() >= FENETRE {
-            *e = (0, Instant::now());
-        }
-        e.0 += 1;
-    }
-
     /// Un echec sur un identifiant inconnu : rend la serie, comme pour un vrai
     /// compte (le blocage s'affiche donc aussi pour lui).
     pub fn noter_echec_inconnu(&self, login: &str) -> i64 {
@@ -136,20 +107,6 @@ impl Garde {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn une_adresse_qui_echoue_trop_attend() {
-        let g = Garde::new();
-        let ip = Some("10.0.0.9");
-        for _ in 0..(g.seuil_adresse - 1) {
-            g.noter_echec_adresse(ip);
-        }
-        assert!(!g.adresse_bloquee(ip));
-        g.noter_echec_adresse(ip);
-        assert!(g.adresse_bloquee(ip));
-        assert!(!g.adresse_bloquee(Some("10.0.0.10")), "une autre adresse n'est pas touchee");
-        assert!(!g.adresse_bloquee(None));
-    }
 
     #[test]
     fn un_identifiant_inconnu_se_bloque_comme_un_vrai() {

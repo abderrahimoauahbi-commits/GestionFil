@@ -1580,6 +1580,8 @@ pub async fn references_commandables(
         "SELECT r.code_reference, r.designation, r.unite_catalogue, r.prix_catalogue,
                 r.version AS version_reference,
                 r.code_devise_catalogue, r.classe_abc, r.moq_kg, r.multiple_achat_kg,
+                -- La fin de vie (06/11/2026) : l'ecran le signale, rien ne refuse.
+                r.fin_de_vie,
                 -- LE CONDITIONNEMENT VOYAGE AVEC LA SUGGESTION.
                 --
                 -- L'ecran convertissait palettes et bobines en kilos grace au

@@ -61,6 +61,9 @@ pub mod palier {
 pub mod signal {
     pub const CIBLE_NON_DEFINIE: &str = "CIBLE_NON_DEFINIE";
     pub const HORIZON_COURT: &str = "HORIZON_COURT";
+    /// Référence en fin de vie (06/11/2026) dont le fil manque avant la fin du
+    /// plan : rien n'est proposé, à décider (remplacer, ou racheter).
+    pub const FIN_DE_VIE: &str = "FIN_DE_VIE";
 }
 
 /// Rang d'un état pour les tris : le plus grave d'abord.
@@ -95,6 +98,9 @@ pub struct Entrees {
     pub kg_palette: Option<f64>,
     /// Un article actif au plan en service : sans cible, c'est un signal.
     pub soumis_mrp: bool,
+    /// Fin de vie (06/11/2026) : on consomme le stock, on ne rachète plus —
+    /// aucune quantité ; un manque dans l'horizon est un signal.
+    pub fin_de_vie: bool,
     /// L'option de rattrapage (§ 16.1-4) : inclus par défaut.
     pub rattrapage: bool,
     /// L'option RESTES (31/10/2026) : les restes sont-ils dans `stock_kg` ? Le
@@ -345,7 +351,13 @@ pub fn calculer(x: &Entrees) -> Projete {
     if x.cible_j.is_none() && x.soumis_mrp {
         signaux.push(signal::CIBLE_NON_DEFINIE);
     }
-    if let (Some(c), Some(tj)) = (x.cible_j, couverture_j) {
+    if x.fin_de_vie {
+        // Rien à commander, jamais : un manque avant la fin du plan se signale.
+        motif = Some("référence en fin de vie : on consomme le stock, on ne rachète pas");
+        if couverture_j.is_some() {
+            signaux.push(signal::FIN_DE_VIE);
+        }
+    } else if let (Some(c), Some(tj)) = (x.cible_j, couverture_j) {
         if tj < c {
             let vise = c + x.couverture_j.max(0);
             if vise > (n as i64) - 1 {
@@ -556,10 +568,30 @@ mod tests {
             multiple_kg: None,
             kg_palette: None,
             soumis_mrp: true,
+            fin_de_vie: false,
             rattrapage,
             restes: true,
             seuils_rupture: [30, 60, 90],
         }
+    }
+
+    #[test]
+    fn fin_de_vie_aucune_quantite_un_signal_si_manque() {
+        // Stock pour 40 j, cible 60 j : un article vivant reçoit une quantité.
+        assert!(calculer(&entrees(1000.0, &[], true)).quantite.is_some());
+        // En fin de vie : aucune quantité, le manque se signale, l'état reste calculé.
+        let mut x = entrees(1000.0, &[], true);
+        x.fin_de_vie = true;
+        x.soumis_mrp = false;
+        let p = calculer(&x);
+        assert!(p.quantite.is_none());
+        assert!(p.signaux.contains(&signal::FIN_DE_VIE));
+        assert!(!p.signaux.contains(&signal::CIBLE_NON_DEFINIE));
+        assert_eq!(p.rupture_j, Some(40));
+        // Couvert sur tout le plan : pas de signal.
+        let mut x = entrees(25.0 * 500.0, &[], true);
+        x.fin_de_vie = true;
+        assert!(!calculer(&x).signaux.contains(&signal::FIN_DE_VIE));
     }
 
     #[test]

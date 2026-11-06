@@ -265,6 +265,16 @@ export function Catalogue() {
     },
     { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true, section: 'Général' },
     {
+      champ: 'fin_de_vie',
+      libelle: 'Fin de vie',
+      type: 'booleen',
+      aide:
+        'On consomme le stock, on ne rachète plus : le stock projeté et le plan d’achat ne proposent plus rien, ' +
+        'et un manque avant la fin du plan se signale. Un bon reste possible (l’écran le signale). ' +
+        'Différent de « Actif » : la référence reste dans les recettes et les mouvements.',
+      section: 'Général',
+    },
+    {
       champ: 'code_sh',
       libelle: 'Position tarifaire (SH)',
       type: 'liste',

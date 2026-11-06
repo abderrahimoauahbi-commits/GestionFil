@@ -318,6 +318,7 @@ export const STATUTS = {
     RETARD_CIBLE: d('Retard sur la cible', 'alerte'),
     HORIZON_COURT: d('Horizon court', 'neutre'),
     DEFAUT_DONNEES: d('Donnée manquante', 'neutre'),
+    FIN_DE_VIE: d('Fin de vie', 'alerte'),
   },
   /** alerte.gravite — le même vocabulaire que la criticité des contrôles (v_controles). */
   criticite: {

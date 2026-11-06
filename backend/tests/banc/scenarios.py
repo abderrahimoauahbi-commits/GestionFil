@@ -2196,7 +2196,8 @@ def scenario_controles_finaux(c, infra):
     # prolongation du plan) et sont retires.
     # Moteur v2 (27/10/2026, soir) : C68 (stock minimum franchi) et C69 (article au plan sans cible)
     # sont servis par le moteur, comme C05 (rupture inevitable) et C25.
-    dernier = 69
+    # C70 (06/11/2026) : le titrage de la reference contredit celui de sa famille (un signal).
+    dernier = 70
     moteur, retires = ("C05", "C25", "C68", "C69"), ("C27", "C49")
     hors_sql = "', '".join(moteur + retires)
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
@@ -4254,7 +4255,12 @@ def scenario_migrations_rejouables(c, infra):
                 # Les restes, comptés ou non (31/10/2026).
                 "2026-10-31c_projete_restes.sql",
                 # Les réglages du stock projeté (31/10/2026).
-                "2026-10-31d_reglages_projete.sql"):
+                "2026-10-31d_reglages_projete.sql",
+                # La revue des 22 domaines (06/11/2026) : 06c redefinit v_of_consommation et
+                # v_of_bilan apres 27g (l'etalon fige), 06d accroche C70 a v_controles.
+                "2026-11-06a_of_metrage_facultatif.sql", "2026-11-06b_audit_parametres_droits.sql",
+                "2026-11-06c_of_etalon_verrou_densites.sql", "2026-11-06d_controle_titrage_famille.sql",
+                "2026-11-06e_reference_fin_de_vie.sql"):
         try:
             infra.psql(infra.base, "-q", "-f", str(dossier / nom))
         except RuntimeError as e:

@@ -581,7 +581,7 @@ recompilation quand l'adresse change.
 | Droits par champ | appliqués **côté serveur**, en sortie et en entrée |
 | nginx | seul service exposé (80 → 443, TLS 1.2/1.3) ; en-têtes `nosniff`, `SAMEORIGIN`, `same-origin` ; délai de 310 s, au-delà de celui de l'application (300 s) |
 | Pare-feu | 22, 80 et 443 ouverts ; **8080 fermé** (l'application écoute sur 127.0.0.1) |
-| Échecs d'authentification | blocage progressif à la connexion, au déverrouillage de l'écran, au changement de mot de passe et au second facteur ; essais d'un même identifiant un par un, 20 échecs par adresse en 15 min, identifiant inconnu bloqué comme un vrai (13/10/2026) |
+| Échecs d'authentification | blocage progressif à la connexion, au déverrouillage de l'écran, au changement de mot de passe et au second facteur ; essais d'un même identifiant un par un, identifiant inconnu bloqué comme un vrai (13/10/2026) ; aucune limite par adresse : une adresse n'est pas une identité (06/11/2026) |
 | Sessions | tenues par le serveur (`session_ouverte`) : déconnexion = jeton révoqué ; verrou d'inactivité tenu même après F5 ; 8 h au plus |
 | Double authentification | facultative ; peut être rendue obligatoire par rôle (page Rôles et permissions) — aucun rôle par défaut |
 | Politique de contenu | CSP posée par l'application (aucun script hors du serveur) ; HSTS par nginx |

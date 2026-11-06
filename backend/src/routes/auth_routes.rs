@@ -169,14 +169,8 @@ pub async fn connexion(
         .and_then(|v| v.to_str().ok());
     let login = demande.login.trim().to_string();
 
-    // UNE MACHINE QUI ESSAIE TROP ATTEND (audit du 13/10/2026), quel que soit
-    // l'identifiant qu'elle tente.
-    if state.garde.adresse_bloquee(ip.as_deref()) {
-        journaliser(&state.db, &login, None, "ADRESSE_BLOQUEE", ip.as_deref(), agent).await;
-        return Err(AppError::TropDeTentatives(
-            "Trop de tentatives depuis ce poste. Réessayez dans quelques minutes.".into(),
-        ));
-    }
+    // Aucune limite par adresse (decision du 06/11/2026, auth::garde) : seul le
+    // compte, ou l'identifiant tente, se bloque.
     // LES ESSAIS SUR UN MEME IDENTIFIANT PASSENT UN PAR UN : une rafale lisait
     // sinon « pas bloque » cinq cents fois avant que le premier echec soit ecrit.
     let verrou = state.garde.verrou_login(&login);
@@ -204,7 +198,6 @@ pub async fn connexion(
             return Err(AppError::TropDeTentatives(format!("Trop de tentatives. Réessayez dans {}.", duree_lisible(reste))));
         }
         state.garde.leurrer(&demande.mot_de_passe).await;
-        state.garde.noter_echec_adresse(ip.as_deref());
         let n = state.garde.noter_echec_inconnu(&login);
         journaliser(&state.db, &login, None, "INCONNU", ip.as_deref(), agent).await;
         let attente = attente_secondes(n);
@@ -236,10 +229,8 @@ pub async fn connexion(
     // Un echec, quelle qu'en soit la cause, allonge l'attente et l'inscrit.
     let echouer = |raison: &'static str| {
         let db = state.db.clone();
-        let garde = state.garde.clone();
         let (id, login, ip2, agent2) = (id.clone(), login.clone(), ip.clone(), agent.map(String::from));
         async move {
-            garde.noter_echec_adresse(ip2.as_deref());
             noter_echec(&db, &id, &login, raison, ip2.as_deref(), agent2.as_deref()).await
         }
     };

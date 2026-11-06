@@ -89,6 +89,8 @@ export interface RefLigne extends Record<string, unknown> {
   /** L'état au moteur de couverture (27/10/2026) et la 1re rupture du plan. */
   premiere_rupture?: string | null
   statut_stock?: string | null
+  /** Fin de vie (06/11/2026) : on ne rachète plus — un avis, jamais un refus. */
+  fin_de_vie?: number | null
   qte_a_commander_kg?: number | null
   prix_suggere_devise?: number
   /**
@@ -1031,6 +1033,7 @@ function GrilleLignesBureau(props: ProprietesGrille) {
             ? 'alerte'
             : 'neutre',
       desactivee: prises.has(r.code_reference),
+      ...(Number(r.fin_de_vie) === 1 ? { mention: 'fin de vie : on ne rachète plus', ton: 'alerte' as const } : {}),
       ...(presentes.has(r.code_reference)
         ? { mention: 'déjà sur le bon : s’ajoute', ton: 'alerte' as const }
         : {}),

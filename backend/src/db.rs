@@ -117,6 +117,20 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
           WHERE table_name = 'ordre_fabrication' AND column_name = 'metrage_m2'",
     ),
     (
+        // La fin de vie d'une référence (06/11/2026) : le moteur de couverture
+        // et le stock projeté la lisent pour ne plus rien proposer.
+        "2026-11-06e_reference_fin_de_vie.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'reference' AND column_name = 'fin_de_vie')",
+    ),
+    (
+        // L'étalon de l'OF figé au lancement (Q15, 06/11/2026) : le lancement
+        // écrit `of_etalon`, que les vues de consommation lisent.
+        "2026-11-06c_of_etalon_verrou_densites.sql",
+        "SELECT to_regclass('public.of_etalon') IS NOT NULL
+            AND position('of_etalon' IN pg_get_viewdef('v_of_consommation'::regclass)) > 0",
+    ),
+    (
         // Les paliers de rupture du stock projeté (31/10/2026) : leurs colonnes
         // déclarées, sinon l'écran les masquerait sans le dire.
         "2026-10-31b_paliers_rupture.sql",

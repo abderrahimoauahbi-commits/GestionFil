@@ -44,15 +44,18 @@ export interface OfListe extends Record<string, unknown> {
   date_of: string
   date_fin_prevue: string | null
   metrage_m2: number | null
-  kg_prevu: number
+  /** Vide tant que le métrage est inconnu. */
+  kg_prevu: number | null
   kg_reel: number
   kg_conso_fil: number
   kg_hors_machine: number
   kg_dechet: number
   kg_perte: number
   kg_casse: number
-  ecart_kg: number
+  ecart_kg: number | null
   ecart_pct: number | null
+  /** Le prévu vient de l'étalon figé au lancement (Q15), sinon de la recette du jour. */
+  etalon_fige?: boolean
   cree_par: string | null
 }
 
@@ -92,7 +95,8 @@ export function Ecart({ kg, pct }: { kg: number; pct: number | null }) {
   )
 }
 
-const kg = (v: unknown) => fmt.nombre(Number(v ?? 0), 1)
+// Vide (prévu d'un OF sans métrage, 06/11/2026) : « — », jamais 0.
+const kg = (v: unknown) => (v == null ? '—' : fmt.nombre(Number(v), 1))
 
 const CHAMPS_OF: ChampFiltre<OfListe>[] = [
   { cle: 'periode', libelle: 'Période', type: 'periode', valeur: (l) => l.date_of },
@@ -166,7 +170,8 @@ function ListeOf() {
       champ: 'ecart_kg',
       entete: 'Écart (kg)',
       numerique: true,
-      rendu: (o) => <Ecart kg={Number(o.ecart_kg)} pct={o.ecart_pct == null ? null : Number(o.ecart_pct)} />,
+      rendu: (o) =>
+        o.ecart_kg == null ? '—' : <Ecart kg={Number(o.ecart_kg)} pct={o.ecart_pct == null ? null : Number(o.ecart_pct)} />,
     },
     { champ: 'date_fin_prevue', entete: 'Fin prévue', secondaire: true, rendu: (o) => fmt.date(o.date_fin_prevue) },
     {

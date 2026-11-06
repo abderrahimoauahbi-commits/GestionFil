@@ -81,6 +81,8 @@ pub mod signal {
     pub const HORIZON_COURT: &str = "HORIZON_COURT";
     /// Une donnée de la fiche manque (classe ABC…) : un réglage par défaut a servi.
     pub const DEFAUT_DONNEES: &str = "DEFAUT_DONNEES";
+    /// Référence en fin de vie (06/11/2026) qui rompt dans l'horizon : rien n'est proposé.
+    pub const FIN_DE_VIE: &str = "FIN_DE_VIE";
 }
 
 /// Un mois du plan pour une référence : les kilos de la photo `besoin_mrp`.

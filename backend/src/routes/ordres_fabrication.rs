@@ -139,6 +139,8 @@ pub async fn lire(
     let rows = sqlx::query(
         "SELECT b.*, o.notes, o.version::bigint AS version, o.date_creation,
                 u.login AS cree_par,
+                -- D'où vient le prévu : l'étalon figé au lancement (Q15), sinon la recette du jour.
+                EXISTS (SELECT 1 FROM of_etalon e WHERE e.id_of = o.id_of) AS etalon_fige,
                 EXISTS (SELECT 1 FROM v_recette_calculee rc
                          WHERE rc.code_qualite = o.code_qualite AND rc.kg_m2 IS NOT NULL) AS a_recette
            FROM v_of_bilan b
@@ -167,7 +169,7 @@ pub async fn consommation(
     user.exiger(&state.db, module::PLANS, Action::Lire).await?;
     let rows = sqlx::query(
         "SELECT * FROM v_of_consommation WHERE id_of = $1
-          ORDER BY kg_prevu DESC, kg_reel DESC, code_reference",
+          ORDER BY kg_prevu DESC NULLS LAST, kg_reel DESC, code_reference",
     )
     .bind(&id)
     .fetch_all(&state.db)
@@ -351,6 +353,21 @@ pub async fn modifier(
     }
     if let Some(q) = &qualite {
         qualite_existe(&mut tx, q).await?;
+        // L'étalon d'un OF lancé est figé pour SA qualité (Q15, 06/11/2026) :
+        // en changer réécrirait le prévu sur une composition qui n'a pas été lancée.
+        if statut == "LANCE" {
+            let actuelle: String = sqlx::query_scalar("SELECT code_qualite FROM ordre_fabrication WHERE id_of = $1")
+                .bind(&id)
+                .fetch_one(&mut *tx)
+                .await?;
+            if &actuelle != q {
+                return Err(AppError::RegleMetier(
+                    "Cet ordre de fabrication est lancé : son étalon est figé pour sa qualité, \
+                     qui ne se change plus. Annulez-le et créez un OF pour l'autre qualité."
+                        .into(),
+                ));
+            }
+        }
     }
     sqlx::query(
         "UPDATE ordre_fabrication SET
@@ -420,6 +437,27 @@ pub async fn changer_statut(
     .bind(maintenant())
     .execute(&mut *tx)
     .await?;
+    // AU LANCEMENT, L'ÉTALON SE FIGE (Q15, 06/11/2026) : kg/m² de la recette du
+    // jour et perte de la qualité, par référence. Le prévu restera métrage ×
+    // étalon : une recette corrigée après coup ne réécrit plus l'écart de l'OF.
+    if cible == "LANCE" {
+        sqlx::query(
+            "INSERT INTO of_etalon (id_of, code_reference, code_qualite, kg_m2, taux_perte_pct,
+                                    origine, id_utilisateur)
+             SELECT o.id_of, rc.code_reference, o.code_qualite, sum(rc.kg_m2), q.taux_perte_pct,
+                    'LANCEMENT', $2
+               FROM ordre_fabrication o
+               JOIN qualite q ON q.code_qualite = o.code_qualite
+               JOIN v_recette_calculee rc ON rc.code_qualite = o.code_qualite
+              WHERE o.id_of = $1 AND rc.kg_m2 IS NOT NULL
+              GROUP BY o.id_of, rc.code_reference, o.code_qualite, q.taux_perte_pct
+             ON CONFLICT (id_of, code_reference) DO NOTHING",
+        )
+        .bind(&id)
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
+    }
     let version = version_actuelle(&mut tx, "ordre_fabrication", "id_of", &id).await?;
     tx.commit().await?;
     Ok(Json(json!({ "id_of": id, "statut": cible, "version": version })))

@@ -28,7 +28,7 @@ pub(crate) async fn vers_kg(
     quantite: f64,
     unite: &str,
 ) -> AppResult<(f64, f64)> {
-    vers_kg_lot(db, code_reference, None, quantite, unite).await
+    vers_kg_lot(db, code_reference, None, None, quantite, unite).await
 }
 
 /// LA MEME CONVERSION POUR UN LOT (23/10/2026) : le poids d'une bobine et les
@@ -39,12 +39,14 @@ pub(crate) async fn vers_kg_lot(
     db: &Db,
     code_reference: &str,
     lot: Option<&str>,
+    derive: Option<&str>,
     quantite: f64,
     unite: &str,
 ) -> AppResult<(f64, f64)> {
     let u = Unite::depuis(unite)
         .ok_or_else(|| AppError::Invalide(format!("unite inconnue : {unite}")))?;
-    let facteurs = unites::charger_pour_lot(db, code_reference, lot).await?;
+    // Le dérivé (06/11/2026) : le fût de 600 kg et celui de 1000 kg d'un même lot.
+    let facteurs = unites::charger_pour_derive(db, code_reference, lot, derive).await?;
     let facteur = facteurs.facteur(u)?;
     Ok((arrondi_kg(quantite * facteur), facteur))
 }
@@ -68,6 +70,10 @@ pub struct LigneMouvement {
     pub nb_bobines: Option<i64>,
     pub nb_palettes: Option<f64>,
     pub lot_fournisseur: Option<String>,
+    /// Le dérivé du lot (06/11/2026) : obligatoire quand le lot en a plusieurs
+    /// (la base le refuse sinon) ; vide, le dérivé unique est posé d'office.
+    #[serde(default)]
+    pub code_derive: Option<String>,
     pub date_fabrication: Option<String>,
     pub date_peremption: Option<String>,
     pub code_motif_ligne: Option<String>,
@@ -261,6 +267,7 @@ pub async fn creer_mouvement(
             &state.db,
             &l.code_reference,
             l.lot_fournisseur.as_deref(),
+            l.code_derive.as_deref(),
             l.quantite_saisie,
             &l.unite_saisie,
         )
@@ -552,8 +559,9 @@ pub async fn creer_mouvement(
                   quantite_saisie, unite_saisie, facteur_conversion,
                   nb_bobines, nb_palettes,
                   lot_fournisseur, date_fabrication, date_peremption,
-                  code_motif_ligne, numero_of)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,fn_jour_casablanca($12),fn_jour_casablanca($13),$14,$15)",
+                  code_motif_ligne, numero_of, code_derive)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,fn_jour_casablanca($12),fn_jour_casablanca($13),$14,$15,
+                     NULLIF(btrim($16), ''))",
         )
         .bind(&id)
         .bind((i + 1) as i64)
@@ -576,6 +584,7 @@ pub async fn creer_mouvement(
             l.code_motif_ligne.clone()
         })
         .bind(l.numero_of.clone().or_else(|| numero_of.clone()))
+        .bind(&l.code_derive)
         .execute(&mut *tx)
         .await?;
     }
@@ -932,9 +941,9 @@ pub async fn contre_passer(
     // signe des nombres : une quantite negative dans le grand livre rendrait
     // toutes les sommes ambigues. Le lot suit, sinon la tracabilite se perdrait
     // sur la ligne qui corrige.
-    let lignes: Vec<(i64, String, f64, Option<String>, Option<i64>, Option<f64>)> = sqlx::query_as(
+    let lignes: Vec<(i64, String, f64, Option<String>, Option<i64>, Option<f64>, Option<String>)> = sqlx::query_as(
         "SELECT ligne_numero, code_reference, quantite_kg::float8, lot_fournisseur, nb_bobines,
-                prix_kg_mad::float8
+                prix_kg_mad::float8, code_derive
            FROM ligne_mouvement WHERE id_mouvement = $1 ORDER BY ligne_numero",
     )
     .bind(&id)
@@ -953,12 +962,13 @@ pub async fn contre_passer(
     // le motif du mouvement ; celui-ci n'est qu'une categorie.
     // Le nombre de bobines suit les kilos (06/10/2026) : sans lui, le stock
     // gardait des bobines sans poids.
-    for (numero_ligne, code_reference, kg, lot, bobines, _) in &lignes {
+    // Le dérivé suit aussi (06/11/2026) : l'inverse touche la même forme physique.
+    for (numero_ligne, code_reference, kg, lot, bobines, _, derive) in &lignes {
         sqlx::query(
             "INSERT INTO ligne_mouvement
                  (id_mouvement, ligne_numero, code_reference, quantite_kg,
-                  lot_fournisseur, nb_bobines, mode_pesee, code_motif_ligne)
-             VALUES ($1, $2, $3, $4, $5, $6, 'THEORIQUE', 'R5')",
+                  lot_fournisseur, nb_bobines, mode_pesee, code_motif_ligne, code_derive)
+             VALUES ($1, $2, $3, $4, $5, $6, 'THEORIQUE', 'R5', $7)",
         )
         .bind(&id_inverse)
         .bind(numero_ligne)
@@ -966,6 +976,7 @@ pub async fn contre_passer(
         .bind(kg)
         .bind(lot)
         .bind(bobines)
+        .bind(derive)
         .execute(&mut *tx)
         .await?;
     }
@@ -984,7 +995,7 @@ pub async fn contre_passer(
     .await?;
     if signe == 1 && impacte == 1 {
         let mut par_ref: Vec<(String, f64, f64)> = Vec::new();
-        for (_, code_reference, kg, _, _, prix) in &lignes {
+        for (_, code_reference, kg, _, _, prix, _) in &lignes {
             let Some(p) = prix else { continue };
             match par_ref.iter_mut().find(|(r, _, _)| r == code_reference) {
                 Some(x) => {

@@ -1283,24 +1283,36 @@ pub async fn lots(
     // distingue deux lots au metier : la couleur, les bobines, l'entree. Un lot
     // est une production du fournisseur ; deux lots d'une meme reference
     // peuvent differer de nuance, et cela se voit au tissage (01/10/2026).
+    // LE DERIVE (06/11/2026) : un lot a plusieurs formes physiques (futs de 600
+    // et de 1000 kg) rend une ligne par derive, avec son stock et son
+    // conditionnement ; un lot a derive unique garde sa ligne, avec son derive.
+    // L'ecran renvoie le `code_derive` de la ligne choisie.
     let rows = sqlx::query(
         "SELECT sl.code_reference, r.designation, r.poids_bobine_kg::float8 AS poids_bobine_kg,
                 sl.code_magasin, mg.nom AS magasin_nom, mg.type AS magasin_type,
-                sl.lot_fournisseur, sl.code_couleur, sl.quantite_kg, sl.nb_bobines,
-                sl.prix_entree_mad, sl.date_premiere_entree, sl.date_fabrication, sl.date_peremption,
-                -- LE CONDITIONNEMENT DU LOT (23/10/2026) : ce qui convertit ses
-                -- palettes, bobines et kilos ; a defaut, celui de la fiche article.
-                COALESCE(lo.poids_bobine_kg, r.poids_bobine_kg)::float8 AS poids_bobine_lot_kg,
-                COALESCE(lo.bobines_par_palette, r.bobines_par_palette)  AS bobines_par_palette_lot,
-                lo.origine_poids_bobine, lo.origine_bobines_palette
-           FROM stock_lot sl
+                sl.lot_fournisseur, s0.code_couleur, sl.quantite_kg, sl.nb_bobines,
+                s0.prix_entree_mad, s0.date_premiere_entree, s0.date_fabrication, s0.date_peremption,
+                -- LE CONDITIONNEMENT DU DERIVE, sinon du lot (23/10/2026) : ce qui
+                -- convertit ses palettes, bobines et kilos ; a defaut, la fiche article.
+                COALESCE(fn_derive_poids_unitaire(sl.code_reference, sl.lot_fournisseur, sl.code_derive),
+                         r.poids_bobine_kg)::float8 AS poids_bobine_lot_kg,
+                COALESCE(fn_derive_unites_palette(sl.code_reference, sl.lot_fournisseur, sl.code_derive),
+                         r.bobines_par_palette) AS bobines_par_palette_lot,
+                lo.origine_poids_bobine, lo.origine_bobines_palette,
+                sl.code_derive, sl.nb_derives,
+                COALESCE(d.code_conditionnement, r.code_conditionnement) AS conditionnement_derive
+           FROM v_stock_lot_derive sl
+           JOIN stock_lot s0 ON s0.code_reference = sl.code_reference AND s0.code_magasin = sl.code_magasin
+                            AND s0.lot_fournisseur = sl.lot_fournisseur
            JOIN magasin mg ON mg.code_magasin = sl.code_magasin
            JOIN reference r ON r.code_reference = sl.code_reference
            LEFT JOIN lot lo ON lo.code_reference = sl.code_reference AND lo.lot_fournisseur = sl.lot_fournisseur
+           LEFT JOIN lot_derive d ON d.code_reference = sl.code_reference AND d.lot_fournisseur = sl.lot_fournisseur
+                                 AND d.code_derive = sl.code_derive
           WHERE sl.quantite_kg > 0
             AND ($1::text IS NULL OR sl.code_reference = $1)
             AND ($3::text IS NULL OR sl.code_magasin = $3)
-          ORDER BY sl.code_reference, sl.code_magasin, sl.date_premiere_entree
+          ORDER BY sl.code_reference, sl.code_magasin, s0.date_premiere_entree, sl.code_derive
           LIMIT $2",
     )
     .bind(&f.code_reference)

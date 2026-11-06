@@ -33,6 +33,8 @@ import { ArrowLeft, ArrowRight, Save, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { ChampLot } from '../composants/ChampLot'
+import { ChoixDerive } from '../composants/ChampDerive'
+import { deriveDeExtra, extraAvecDerive, plusieursDerives, type LigneDerivee } from '../lib/derives'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import {
@@ -85,8 +87,11 @@ interface RefStock extends Record<string, unknown> {
   densite_kg_ml?: number | null
 }
 
-/** Un lot que le magasin source tient d'une reference. */
-interface LotMagasin {
+/**
+ * Un lot que le magasin source tient d'une reference — UNE LIGNE PAR DERIVE
+ * quand le lot en a plusieurs (06/11/2026).
+ */
+interface LotMagasin extends LigneDerivee {
   lot_fournisseur: string
   quantite_kg: number
   nb_bobines: number | null
@@ -103,6 +108,7 @@ interface DossierLigne extends Record<string, unknown> {
   nb_bobines: number | null
   nb_palettes: number | null
   lot_fournisseur: string | null
+  code_derive?: string | null
 }
 
 interface DossierEntete extends Record<string, unknown> {
@@ -181,7 +187,11 @@ function depuisLigneTransfert(l: DossierLigne, fiche: RefStock | undefined): Lig
     reference_fournisseur: '',
     couleur: '',
     code_couleur: '',
-    extra: { lot: l.lot_fournisseur ?? '' },
+    extra: {
+      lot: l.lot_fournisseur ?? '',
+      // Le derive enregistre revient avec son lot (06/11/2026).
+      ...(l.lot_fournisseur && l.code_derive ? { derive: l.code_derive, derive_lot: l.lot_fournisseur } : {}),
+    },
   }
 }
 
@@ -211,6 +221,8 @@ function corpsTransfert(l: LigneSaisie) {
     code_reference: l.code_reference,
     ...saisieExacte(kg, l.unite, f),
     lot_fournisseur: l.extra?.lot?.trim() || undefined,
+    // Le derive choisi, quand le lot en a plusieurs (06/11/2026).
+    code_derive: deriveDeExtra(l.extra) || undefined,
     nb_palettes: nombreColis(l.palettes, false),
     nb_bobines: nombreColis(l.bobines, true),
   }
@@ -396,8 +408,19 @@ export function TransfertNouveau() {
   })
   const lotsParRef = new Map<string, LotMagasin[]>()
   refsPosees.forEach((ref, i) => lotsParRef.set(ref, qLots[i]?.data ?? []))
-  const lotDe = (ref: string, lot: string) =>
-    lot ? lotsParRef.get(ref)?.find((x) => x.lot_fournisseur === lot) : undefined
+  /** Les lignes de stock d'un lot : une par derive quand il en a plusieurs. */
+  const lignesDuLot = (ref: string, lot: string) =>
+    lot ? (lotsParRef.get(ref) ?? []).filter((x) => x.lot_fournisseur === lot) : []
+  /** Le stock du lot choisi — de son derive s'il est dit, sinon tous ses derives ensemble. */
+  const lotDe = (ref: string, lot: string, derive = ''): LotMagasin | undefined => {
+    const ls = lignesDuLot(ref, lot).filter((x) => !derive || x.code_derive === derive)
+    if (ls.length <= 1) return ls[0]
+    return {
+      ...ls[0],
+      quantite_kg: ls.reduce((t, x) => t + Number(x.quantite_kg ?? 0), 0),
+      nb_bobines: ls.some((x) => x.nb_bobines != null) ? ls.reduce((t, x) => t + Number(x.nb_bobines ?? 0), 0) : null,
+    }
+  }
 
   const remplies = lignes.filter(estRemplie)
   const kgDeLigne = (l: LigneSaisie) => Number(l.qte) || 0
@@ -405,10 +428,15 @@ export function TransfertNouveau() {
   /** Ce que le document demande d'une reference, toutes lignes confondues. */
   const demandeRef = (ref: string) =>
     remplies.filter((l) => l.code_reference === ref).reduce((s, l) => s + kgDeLigne(l), 0)
-  /** Ce que le document demande d'un lot precis. */
-  const demandeLot = (ref: string, lot: string) =>
+  /** Ce que le document demande d'un lot precis (de son derive, s'il est dit). */
+  const demandeLot = (ref: string, lot: string, derive = '') =>
     remplies
-      .filter((l) => l.code_reference === ref && (l.extra?.lot ?? '').trim() === lot)
+      .filter(
+        (l) =>
+          l.code_reference === ref &&
+          (l.extra?.lot ?? '').trim() === lot &&
+          (!derive || deriveDeExtra(l.extra) === derive),
+      )
       .reduce((s, l) => s + kgDeLigne(l), 0)
 
   /** La ligne demande-t-elle plus que la source n'a — de la reference, ou du lot choisi ? */
@@ -416,8 +444,9 @@ export function TransfertNouveau() {
     if (!l.code_reference) return false
     if (demandeRef(l.code_reference) > dispoDe(l.code_reference) + 0.001) return true
     const lot = (l.extra?.lot ?? '').trim()
-    const s = lotDe(l.code_reference, lot)
-    return !!s && demandeLot(l.code_reference, lot) > s.quantite_kg + 0.001
+    const derive = deriveDeExtra(l.extra)
+    const s = lotDe(l.code_reference, lot, derive)
+    return !!s && demandeLot(l.code_reference, lot, derive) > s.quantite_kg + 0.001
   }
 
   const manqueLot = (l: LigneSaisie) =>
@@ -438,14 +467,31 @@ export function TransfertNouveau() {
         ) : (
           /* LE LOT SUIT LA MATIERE : on choisit parmi ceux du magasin SOURCE,
              le plus ancien d'abord. Obligatoire si la reference se suit par lot. */
-          <ChampLot
-            reference={l.code_reference}
-            magasin={entete.code_magasin_source}
-            valeur={l.extra?.lot ?? ''}
-            onChange={poser}
-            className="h-9 w-full rounded-[var(--radius-sm)] border border-bordure bg-fond px-1.5 text-[12.5px]"
-            invalide={manqueLot(l)}
-          />
+          <>
+            <ChampLot
+              reference={l.code_reference}
+              magasin={entete.code_magasin_source}
+              valeur={l.extra?.lot ?? ''}
+              onChange={poser}
+              className="h-9 w-full rounded-[var(--radius-sm)] border border-bordure bg-fond px-1.5 text-[12.5px]"
+              invalide={manqueLot(l)}
+            />
+            {/* LE DERIVE QUI PART, seulement si le lot en a plusieurs (06/11/2026) :
+                parmi les lignes de stock de la source. */}
+            <ChoixDerive
+              options={lignesDuLot(l.code_reference, (l.extra?.lot ?? '').trim()).map((x) => ({
+                code_derive: x.code_derive ?? '',
+                conditionnement: x.conditionnement_derive,
+                quantite_kg: x.quantite_kg,
+              }))}
+              plusieurs={lignesDuLot(l.code_reference, (l.extra?.lot ?? '').trim()).some(plusieursDerives)}
+              valeur={deriveDeExtra(l.extra)}
+              onChange={(d) =>
+                setLignes((ls) => ls.map((x) => (x.cle !== l.cle ? x : { ...x, extra: extraAvecDerive(x.extra, d) })))
+              }
+              className="mt-1 h-9 w-full rounded-[var(--radius-sm)] border border-bordure bg-fond px-1.5 text-[12.5px]"
+            />
+          </>
         ),
     },
     {
@@ -456,9 +502,10 @@ export function TransfertNouveau() {
       rendu: (l) => {
         if (!l.code_reference) return <span className="text-attenue-texte">—</span>
         const lot = (l.extra?.lot ?? '').trim()
-        const s = lotDe(l.code_reference, lot)
+        const derive = deriveDeExtra(l.extra)
+        const s = lotDe(l.code_reference, lot, derive)
         const dispo = s ? s.quantite_kg : dispoDe(l.code_reference)
-        const demande = s ? demandeLot(l.code_reference, lot) : demandeRef(l.code_reference)
+        const demande = s ? demandeLot(l.code_reference, lot, derive) : demandeRef(l.code_reference)
         const trop = demande > dispo + 0.001
         return (
           <div
@@ -472,7 +519,7 @@ export function TransfertNouveau() {
               {trop
                 ? 'dépassé'
                 : s
-                  ? `lot ${libelleLot(lot)}${s.nb_bobines != null ? ` · ${fmt.nombre(s.nb_bobines, 0)} bob.` : ''}`
+                  ? `lot ${libelleLot(lot)}${derive && plusieursDerives(s) ? ` · ${derive}` : ''}${s.nb_bobines != null ? ` · ${fmt.nombre(s.nb_bobines, 0)} bob.` : ''}`
                   : lot
                     ? 'lot absent de la source'
                     : 'toute la référence'}

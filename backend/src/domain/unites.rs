@@ -162,20 +162,40 @@ pub async fn charger(db: &Db, code_reference: &str) -> AppResult<FacteursReferen
 /// Les facteurs d'une reference POUR UN LOT : ceux du lot, sinon ceux de la
 /// fiche article (23/10/2026). Sans lot, la fiche article seule.
 pub async fn charger_pour_lot(db: &Db, code_reference: &str, lot: Option<&str>) -> AppResult<FacteursReference> {
+    charger_pour_derive(db, code_reference, lot, None).await
+}
+
+/// LE CONDITIONNEMENT DU DÉRIVÉ (06/11/2026) : la forme physique choisie dans le
+/// lot (fût de 600 kg ou de 1000 kg du même lot). Sans dérivé : D1, celui
+/// d'origine, qui suit le lot tant qu'il est seul. Une valeur absente du dérivé
+/// reprend celle du lot, puis de la fiche article — jamais un facteur 1.
+pub async fn charger_pour_derive(
+    db: &Db,
+    code_reference: &str,
+    lot: Option<&str>,
+    derive: Option<&str>,
+) -> AppResult<FacteursReference> {
     let facteurs = charger(db, code_reference).await?;
     let Some(lot) = lot.map(str::trim).filter(|l| !l.is_empty()) else {
         return Ok(facteurs);
     };
-    let du_lot: Option<(Option<f64>, Option<i64>)> = sqlx::query_as(
-        "SELECT poids_bobine_kg::float8, bobines_par_palette FROM lot
-          WHERE code_reference = $1 AND lot_fournisseur = $2",
+    let derive = derive.map(str::trim).filter(|d| !d.is_empty());
+    let du_lot: Option<(Option<f64>, Option<i64>, Option<f64>, Option<i64>)> = sqlx::query_as(
+        "SELECT l.poids_bobine_kg::float8, l.bobines_par_palette,
+                d.poids_unitaire_kg::float8, d.unites_par_palette
+           FROM lot l
+           LEFT JOIN lot_derive d ON d.code_reference = l.code_reference
+                                 AND d.lot_fournisseur = l.lot_fournisseur
+                                 AND d.code_derive = $3
+          WHERE l.code_reference = $1 AND l.lot_fournisseur = $2",
     )
     .bind(code_reference)
     .bind(lot)
+    .bind(derive)
     .fetch_optional(db)
     .await?;
     Ok(match du_lot {
-        Some((p, n)) => facteurs.avec_lot(p, n),
+        Some((p, n, dp, dn)) => facteurs.avec_lot(dp.or(p), dn.or(n)),
         None => facteurs,
     })
 }

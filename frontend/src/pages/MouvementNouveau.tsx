@@ -31,6 +31,8 @@ import { ArrowLeft, Save } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { api, ErreurApi } from '../api/client'
 import { ChampLot } from '../composants/ChampLot'
+import { ChampDerive } from '../composants/ChampDerive'
+import { deriveDeExtra, extraAvecDerive } from '../lib/derives'
 import { ChampScan, type EtiquetteLue } from '../composants/ChampScan'
 import { EnTetePage } from '../components/Layout'
 import { chercherCatalogue as chercherAuCatalogue } from '../composants/ChampReference'
@@ -197,6 +199,8 @@ function corpsMouvement(l: LigneSaisie) {
     nb_palettes: compte(l.palettes, false),
     nb_bobines: compte(l.bobines, true),
     lot_fournisseur: e.lot?.trim() || null,
+    // Le derive choisi, quand le lot en a plusieurs (06/11/2026) ; sinon le serveur pose le seul.
+    code_derive: deriveDeExtra(e) || null,
     code_motif_ligne: e.motif_ligne || null,
   }
 }
@@ -470,15 +474,28 @@ export function MouvementNouveau() {
           /* LE LOT SE CHOISIT dans ce que le magasin tient, le plus ancien
              d'abord ; « Autre lot… » pour une entree. Obligatoire : la base
              refuse un mouvement de reference suivie sans lot. */
-          <ChampLot
-            reference={l.code_reference}
-            magasin={entete.code_magasin}
-            valeur={l.extra?.lot ?? ''}
-            onChange={poser}
-            className={champCellule}
-            invalide={!(l.extra?.lot ?? '').trim()}
-            proposerPlusAncien={sortie}
-          />
+          <>
+            <ChampLot
+              reference={l.code_reference}
+              magasin={entete.code_magasin}
+              valeur={l.extra?.lot ?? ''}
+              onChange={poser}
+              className={champCellule}
+              invalide={!(l.extra?.lot ?? '').trim()}
+              proposerPlusAncien={sortie}
+            />
+            {/* LE DERIVE, seulement si le lot en a plusieurs (06/11/2026). */}
+            <ChampDerive
+              reference={l.code_reference}
+              lot={l.extra?.lot ?? ''}
+              magasin={entete.code_magasin}
+              valeur={deriveDeExtra(l.extra)}
+              onChange={(d) =>
+                majLignes((ls) => ls.map((x) => (x.cle !== l.cle ? x : { ...x, extra: extraAvecDerive(x.extra, d) })))
+              }
+              className={cn(champCellule, 'mt-1')}
+            />
+          </>
         ) : (
           <span
             className="block pt-2 text-[11px] text-attenue-texte"
@@ -602,6 +619,8 @@ export function MouvementNouveau() {
     prix: prixGrille ? l.prix : '',
     extra: {
       lot: suiviDe(l.code_reference) === 1 ? (l.extra?.lot ?? '') : '',
+      derive: l.extra?.derive ?? '',
+      derive_lot: l.extra?.derive_lot ?? '',
       motif_ligne: exigeMotif ? (l.extra?.motif_ligne ?? '') : '',
       prix: prixOption ? (l.extra?.prix ?? '') : '',
     },

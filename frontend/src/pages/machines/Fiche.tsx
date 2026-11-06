@@ -26,6 +26,8 @@ import { useOuvrirVue } from '../../lib/navigation'
 import { cn } from '../../lib/utils'
 import { classeNiveauEcart, couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
 import { ChampLot } from '../../composants/ChampLot'
+import { ChampDerive, ChoixDerive } from '../../composants/ChampDerive'
+import { plusieursDerives } from '../../lib/derives'
 import { ChampScan } from '../../composants/ChampScan'
 import { AvisInventaireOuvert } from '../../composants/AvisInventaireOuvert'
 import { SaisieNombre } from '../../composants/ui/base'
@@ -1101,6 +1103,32 @@ function LigneBureau({
                 placeholder="Lot fournisseur"
                 className={cn(CHAMP, 'max-w-[14rem] border-bordure font-mono')}
               />
+            )}
+            {/* LE DERIVE COTE MAGASIN, seulement si le lot en a plusieurs (06/11/2026) :
+                celui qu'on charge (parmi le stock du magasin), celui ou l'on decharge. */}
+            {ouverte && f.entete.magasin && l.lot_fournisseur && l.lot_fournisseur !== SANS_LOT && (
+              type === 'CHARGE' && (l.avant_bobines === 0 || l.mouvementees > 0) ? (
+                <ChoixDerive
+                  options={f.lignesDuLot(l.code_reference, l.lot_fournisseur).map((x) => ({
+                    code_derive: x.code_derive ?? '',
+                    conditionnement: x.conditionnement_derive,
+                    quantite_kg: x.quantite_kg,
+                  }))}
+                  plusieurs={f.lignesDuLot(l.code_reference, l.lot_fournisseur).some(plusieursDerives)}
+                  valeur={l.code_derive ?? ''}
+                  onChange={(d) => maj('code_derive', d)}
+                  className={cn(CHAMP, 'mt-0.5 max-w-[14rem] border-bordure')}
+                />
+              ) : type === 'DECHARGE' && l.mouvementees > 0 && (l.destination || (destinations.length === 1 ? destinations[0] : '')) === 'MAGASIN' ? (
+                <ChampDerive
+                  reference={l.code_reference}
+                  lot={l.lot_fournisseur}
+                  magasin={f.entete.magasin}
+                  valeur={l.code_derive ?? ''}
+                  onChange={(d) => maj('code_derive', d)}
+                  className={cn(CHAMP, 'mt-0.5 max-w-[14rem] border-bordure')}
+                />
+              ) : null
             )}
           </div>
         </td>

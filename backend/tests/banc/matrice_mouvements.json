@@ -120,7 +120,7 @@
     },
     "FUSION_SORTIE": {
       "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 1,
-      "origine": "Fusion de lots : le lot absorbé sort",
+      "origine": "Fusion de lots : le lot absorbé sort ; ou reconditionnement (06/11/2026) : le dérivé de départ sort, dans le même lot (motif RECONDITIONNEMENT)",
       "cmup": "Inchangé (même magasin, même référence)",
       "cout": "Sans prix",
       "validation": "Droit ECRIRE des lots ; fusion autorisée par la référence",
@@ -129,7 +129,7 @@
     },
     "FUSION_ENTREE": {
       "signe": 1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 1,
-      "origine": "Fusion de lots : le lot résultant entre",
+      "origine": "Fusion de lots : le lot résultant entre ; ou reconditionnement (06/11/2026) : le dérivé d'arrivée entre, dans le même lot (motif RECONDITIONNEMENT)",
       "cmup": "Inchangé",
       "cout": "Sans prix",
       "validation": "Droit ECRIRE des lots",

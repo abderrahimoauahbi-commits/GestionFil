@@ -54,6 +54,8 @@ struct LigneTransfert {
     prix_kg_mad: Option<f64>,
     /// Les bobines transferees : elles font le poids theorique du lot.
     nb_bobines: Option<i64>,
+    /// Le derive qui voyage (06/11/2026) : celui qui part est celui qui arrive.
+    code_derive: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -103,7 +105,7 @@ async fn dossier(
         "SELECT ligne_numero, code_reference, quantite_kg::float8 AS quantite_kg,
                 quantite_saisie::float8 AS quantite_saisie, unite_saisie,
                 facteur_conversion::float8 AS facteur_conversion, lot_fournisseur,
-                prix_kg_mad::float8 AS prix_kg_mad, nb_bobines::bigint AS nb_bobines
+                prix_kg_mad::float8 AS prix_kg_mad, nb_bobines::bigint AS nb_bobines, code_derive
            FROM ligne_transfert WHERE id_transfert = $1 ORDER BY ligne_numero",
     )
     .bind(id_transfert)
@@ -222,11 +224,13 @@ pub async fn expedier(
             .await?;
 
         // Sortie sans prix : une sortie ne touche jamais au CMUP (R04).
-        sqlx::query(
+        let derive: Option<String> = sqlx::query_scalar(
             "INSERT INTO ligne_mouvement
                  (id_mouvement, ligne_numero, code_reference, quantite_kg,
-                  quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur, nb_bobines)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                  quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur, nb_bobines,
+                  code_derive)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             RETURNING code_derive",
         )
         .bind(&id_sortie)
         .bind(l.ligne_numero)
@@ -237,8 +241,19 @@ pub async fn expedier(
         .bind(l.facteur_conversion)
         .bind(&l.lot_fournisseur)
         .bind(l.nb_bobines.filter(|b| *b > 0))
-        .execute(&mut *tx)
+        .bind(&l.code_derive)
+        .fetch_one(&mut *tx)
         .await?;
+        // Le derive pose par la base (le seul du lot) s'inscrit sur la ligne du
+        // transfert : l'arrivee touchera le meme, meme si un autre nait entre-temps.
+        if l.code_derive.is_none() && derive.is_some() {
+            sqlx::query("UPDATE ligne_transfert SET code_derive = $3 WHERE id_transfert = $1 AND ligne_numero = $2")
+                .bind(id_transfert)
+                .bind(l.ligne_numero)
+                .bind(&derive)
+                .execute(&mut *tx)
+                .await?;
+        }
 
         total += l.quantite_kg;
         valeur += l.quantite_kg * prix.unwrap_or(0.0);
@@ -312,8 +327,9 @@ pub async fn receptionner(
         sqlx::query(
             "INSERT INTO ligne_mouvement
                  (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
-                  quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur, nb_bobines)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                  quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur, nb_bobines,
+                  code_derive)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(&id_entree)
         .bind(l.ligne_numero)
@@ -325,6 +341,7 @@ pub async fn receptionner(
         .bind(l.facteur_conversion)
         .bind(&l.lot_fournisseur)
         .bind(l.nb_bobines.filter(|b| *b > 0))
+        .bind(&l.code_derive)
         .execute(&mut *tx)
         .await?;
 

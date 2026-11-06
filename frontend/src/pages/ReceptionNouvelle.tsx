@@ -157,6 +157,9 @@ interface Ligne {
    */
   lie: boolean
   lot: string
+  /** Le derive du lot qui entre, et la confirmation d'un nouveau derive (06/11/2026). */
+  codeDerive?: string
+  deriveNouveau?: boolean
   fabrication: string
   peremption: string
   magasin: string
@@ -618,6 +621,9 @@ export function ReceptionNouvelle() {
           nb_bobines: Number(l.bobines) > 0 ? Math.round(Number(l.bobines)) : undefined,
           code_magasin_dest: l.magasin,
           lot_fournisseur: l.lot || undefined,
+          // Le derive (06/11/2026) : celui choisi, ou un nouveau confirme.
+          code_derive: !l.deriveNouveau && l.codeDerive ? l.codeDerive : undefined,
+          derive_nouveau: l.deriveNouveau ? true : undefined,
           date_fabrication: l.fabrication || undefined,
           date_peremption: l.peremption || undefined,
           statut_qualite: l.qualite,
@@ -664,6 +670,11 @@ export function ReceptionNouvelle() {
     if (champ === 'qte') return majColis(cle, 'quantite', String(v))
     if (champ === 'palettes' || champ === 'bobines') return majColis(cle, champ, String(v))
     if (champ === 'unite') return majUnite(cle, String(v))
+    // Un autre lot : le derive choisi ne vaut plus (06/11/2026).
+    if (champ === 'lot') {
+      setLignes((ls) => ls.map((x) => (x.cle === cle ? { ...x, lot: String(v), codeDerive: '', deriveNouveau: false } : x)))
+      return
+    }
     maj(cle, champ, v)
   }
   const vues: VueLigneRec[] = lignes.map((l) => ({
@@ -689,6 +700,8 @@ export function ReceptionNouvelle() {
     // SUIVIE AU LOT, LA BOBINE SE COMPTE (regle 13) : pas de liaison offerte.
     liaisonOfferte: l.suivi_lot !== 1,
     lot: l.lot,
+    codeDerive: l.codeDerive,
+    deriveNouveau: l.deriveNouveau,
     magasin: l.magasin,
     qualite: l.qualite,
     derogation: l.derogation,

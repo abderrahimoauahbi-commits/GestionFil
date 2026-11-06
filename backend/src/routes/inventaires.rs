@@ -381,8 +381,11 @@ pub async fn lignes_inventaire(
         // fiche (`conditionnementDuLot`) — comme le serveur au comptage.
         "SELECT li.*, r.designation, r.unite_catalogue,
                 r.poids_bobine_kg, r.bobines_par_palette,
-                lo.poids_bobine_kg::float8 AS poids_bobine_lot_kg,
-                lo.bobines_par_palette AS bobines_par_palette_lot,
+                -- Le conditionnement DU DERIVE de la ligne (06/11/2026), sinon du lot.
+                COALESCE(fn_derive_poids_unitaire(li.code_reference, li.lot_fournisseur, li.code_derive),
+                         lo.poids_bobine_kg)::float8 AS poids_bobine_lot_kg,
+                COALESCE(fn_derive_unites_palette(li.code_reference, li.lot_fournisseur, li.code_derive),
+                         lo.bobines_par_palette) AS bobines_par_palette_lot,
                 r.code_categorie, cat.libelle AS categorie_libelle,
                 r.code_famille, r.reference_fournisseur,
                 f.nom AS fournisseur_nom
@@ -417,6 +420,10 @@ pub struct Comptage {
     /// Obligatoire pour une reference sous suivi de lot : c'est le lot qu'on
     /// compte, pas la reference.
     pub lot_fournisseur: Option<String>,
+    /// Le derive compte (06/11/2026) : obligatoire quand le lot en a plusieurs
+    /// (une ligne par derive) ; vide, le derive unique du lot.
+    #[serde(default)]
+    pub code_derive: Option<String>,
     pub motif_ecart: Option<String>,
     /// LE COMPTAGE EN COLIS (02/10/2026) : bobines et palettes comptees, pour
     /// lire l'ecart de poids par bobine au moment meme du comptage.
@@ -459,6 +466,27 @@ pub async fn saisir_comptage(
     let horodatage = maintenant();
     let mut n = 0usize;
     for c in &lot.comptages {
+        // LE DERIVE COMPTE (06/11/2026) : un lot a plusieurs formes physiques a
+        // une ligne par derive ; sans derive, le comptage viserait toutes.
+        let derive = c.code_derive.as_deref().map(str::trim).filter(|d| !d.is_empty()).map(str::to_string);
+        if derive.is_none() {
+            if let Some(lot_c) = c.lot_fournisseur.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+                let n_derives: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM lot_derive WHERE code_reference = $1 AND lot_fournisseur = $2",
+                )
+                .bind(&c.code_reference)
+                .bind(lot_c)
+                .fetch_one(&mut *tx)
+                .await?;
+                if n_derives > 1 {
+                    return Err(AppError::RegleMetier(format!(
+                        "DERIVE-REQUIS : le lot {lot_c} de {} a plusieurs conditionnements (dérivés) : \
+                         dites lequel vous comptez.",
+                        c.code_reference
+                    )));
+                }
+            }
+        }
         // LES KILOS, PESES OU DEDUITS DES BOBINES AU POIDS DU LOT (2026-10-24a).
         // On compte des bobines ; sans pesee, le poids d'une bobine du lot de la
         // ligne (sinon de la fiche article) les convertit. Aucun poids connu : on
@@ -515,17 +543,18 @@ pub async fn saisir_comptage(
                     nb_bobines_comptees = $9, nb_palettes_comptees = $10,
                     -- Le poids d'une bobine DU LOT, a l'heure du comptage
                     -- (2026-10-24a) : celui qui a converti les bobines.
-                    poids_unitaire_theorique_kg = fn_lot_poids_bobine(li.code_reference, li.lot_fournisseur),
+                    poids_unitaire_theorique_kg = fn_derive_poids_unitaire(li.code_reference, li.lot_fournisseur, li.code_derive),
                     quantite_theorique_kg = CASE
                         WHEN li.lot_fournisseur IS NULL THEN
                             COALESCE((SELECT sm.quantite_kg FROM stock_magasin sm
                                        WHERE sm.code_reference = li.code_reference
                                          AND sm.code_magasin = li.code_magasin), 0)
                         ELSE
-                            COALESCE((SELECT sl.quantite_kg FROM stock_lot sl
+                            COALESCE((SELECT sl.quantite_kg FROM v_stock_lot_derive sl
                                        WHERE sl.code_reference = li.code_reference
                                          AND sl.code_magasin = li.code_magasin
-                                         AND sl.lot_fournisseur = li.lot_fournisseur), 0)
+                                         AND sl.lot_fournisseur = li.lot_fournisseur
+                                         AND COALESCE(sl.code_derive, 'D1') = COALESCE(li.code_derive, 'D1')), 0)
                         END,
                     nb_bobines_theorique = CASE
                         WHEN li.lot_fournisseur IS NULL THEN
@@ -533,15 +562,18 @@ pub async fn saisir_comptage(
                               WHERE sm.code_reference = li.code_reference
                                 AND sm.code_magasin = li.code_magasin)
                         ELSE
-                            (SELECT sl.nb_bobines FROM stock_lot sl
+                            (SELECT sl.nb_bobines FROM v_stock_lot_derive sl
                               WHERE sl.code_reference = li.code_reference
                                 AND sl.code_magasin = li.code_magasin
-                                AND sl.lot_fournisseur = li.lot_fournisseur)
+                                AND sl.lot_fournisseur = li.lot_fournisseur
+                                AND COALESCE(sl.code_derive, 'D1') = COALESCE(li.code_derive, 'D1'))
                         END
               WHERE id_inventaire = $1 AND code_reference = $2 AND code_magasin = $7
                 -- `IS $8` etait du SQLite : PostgreSQL le refuse, et chaque saisie
                 -- de comptage tombait en erreur interne.
-                AND lot_fournisseur IS NOT DISTINCT FROM $8",
+                AND lot_fournisseur IS NOT DISTINCT FROM $8
+                -- Le derive compte (06/11/2026) ; vide, le seul du lot (garde plus haut).
+                AND ($11::text IS NULL OR COALESCE(li.code_derive, 'D1') = $11)",
         )
         .bind(&id)
         .bind(&c.code_reference)
@@ -553,6 +585,7 @@ pub async fn saisir_comptage(
         .bind(&c.lot_fournisseur)
         .bind(c.nb_bobines)
         .bind(c.nb_palettes)
+        .bind(&derive)
         .execute(&mut *tx)
         .await?;
 
@@ -602,17 +635,20 @@ pub async fn saisir_comptage(
                              (id_ligne_inv, id_inventaire, code_reference, code_magasin, lot_fournisseur,
                               quantite_theorique_kg, quantite_comptee_kg, motif_ecart, statut_ligne,
                               id_utilisateur_comptage, date_comptage, nb_bobines_theorique,
-                              nb_bobines_comptees, nb_palettes_comptees, poids_unitaire_theorique_kg)
+                              nb_bobines_comptees, nb_palettes_comptees, poids_unitaire_theorique_kg,
+                              code_derive)
                          VALUES ($1, $2, $3, $4, $5,
-                                 COALESCE((SELECT sl.quantite_kg FROM stock_lot sl
+                                 COALESCE((SELECT sl.quantite_kg FROM v_stock_lot_derive sl
                                             WHERE sl.code_reference = $3 AND sl.code_magasin = $4
-                                              AND sl.lot_fournisseur = $5), 0),
+                                              AND sl.lot_fournisseur = $5
+                                              AND COALESCE(sl.code_derive, 'D1') = COALESCE($12, 'D1')), 0),
                                  $6, $7, 'COMPTE', $8, fn_instant($9),
-                                 COALESCE((SELECT sl.nb_bobines FROM stock_lot sl
+                                 COALESCE((SELECT sl.nb_bobines FROM v_stock_lot_derive sl
                                             WHERE sl.code_reference = $3 AND sl.code_magasin = $4
-                                              AND sl.lot_fournisseur = $5), 0),
+                                              AND sl.lot_fournisseur = $5
+                                              AND COALESCE(sl.code_derive, 'D1') = COALESCE($12, 'D1')), 0),
                                  $10, $11,
-                                 fn_lot_poids_bobine($3, $5))",
+                                 fn_derive_poids_unitaire($3, $5, $12), $12)",
                     )
                     .bind(uuid::Uuid::new_v4().to_string())
                     .bind(&id)
@@ -625,6 +661,7 @@ pub async fn saisir_comptage(
                     .bind(&horodatage)
                     .bind(c.nb_bobines)
                     .bind(c.nb_palettes)
+                    .bind(&derive)
                     .execute(&mut *tx)
                     .await?;
                     n += 1;

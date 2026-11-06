@@ -8,6 +8,7 @@ Comptes (seed_110) : Assistante (ASSISTANTE), Choukri, Mohamed et Tarik (DIRECTI
 Magasinie (MAGASIN), admin (ADMIN). Fournisseur FRS-011 (MAD), references
 PLA 100 CHE et PLA 50 CHE (sans suivi de lot), magasins Morocco et Polyfashions.
 """
+import json
 import time
 import urllib.parse
 import urllib.request
@@ -4262,7 +4263,11 @@ def scenario_migrations_rejouables(c, infra):
                 "2026-11-06c_of_etalon_verrou_densites.sql", "2026-11-06d_controle_titrage_famille.sql",
                 "2026-11-06e_reference_fin_de_vie.sql",
                 # Le lot derive, phase 1 (06/11/2026) : la table, D1 par lot, le derive au grand livre.
-                "2026-11-06f_lot_derive.sql"):
+                "2026-11-06f_lot_derive.sql",
+                # Phase 2 : les documents portent le derive, une ligne d'inventaire par derive.
+                "2026-11-06g_lot_derive_lignes.sql",
+                # Phase 3 : le derive nait a la reception (seuil, ligne par derive, mesure de D1).
+                "2026-11-06h_derive_reception.sql"):
         try:
             infra.psql(infra.base, "-q", "-f", str(dossier / nom))
         except RuntimeError as e:
@@ -6401,6 +6406,116 @@ def scenario_couverture_cible(c, infra):
                   f"WHERE code_reference = '{ref}'")
 
 
+def scenario_lot_derive(c, infra):
+    """Le lot derive (06/11/2026) : une forme physique dans le MEME lot. Un lot recu a son D1 ; un
+    reconditionnement fait naitre D2 (meme lot, meme magasin, sans toucher au CMUP ni au stock du
+    magasin) ; des lors, une sortie doit dire son derive (DERIVE-REQUIS), elle debite ce derive, ne
+    depasse pas son solde sans confirmation (R02-DERIVE), et un derive bloque ne s'emploie plus."""
+    ref, lot, M = "PP-1500 Dtex-L.Beige 44377-Hs", "LOT-DERIVE-BANC", MAG
+    q = urllib.parse.quote
+    taux_usd_du_jour(infra)
+    id_bc, lignes = bon_envoye(c, [(ref, 300, 2.0)], frs="FRS-001")
+    reception_validee(c, id_bc, lignes, [300], lot_fournisseur=lot, nb_bobines=100)
+    derives = c.ok("Choukri", "GET", f"/api/lots/derives?code_reference={q(ref)}&lot_fournisseur={q(lot)}")
+    verifier([d["code_derive"] for d in derives] == ["D1"], f"un lot recu n'a pas son seul D1 : {derives}")
+
+    def stock_magasin():
+        return infra.valeur(f"SELECT round(quantite_kg, 4)::text || '/' || round(cmup_mad, 4)::text FROM stock_magasin "
+                            f"WHERE code_reference = '{ref}' AND code_magasin = '{M}'")
+
+    def solde(derive):
+        return float(infra.valeur(f"SELECT COALESCE(sum(quantite_kg), 0) FROM v_stock_derive WHERE code_reference = '{ref}' "
+                                  f"AND lot_fournisseur = '{lot}' AND code_derive = '{derive}' AND code_magasin = '{M}'"))
+
+    avant = stock_magasin()
+    r = c.ok("Magasinie", "POST", "/api/lots/derives/reconditionner", {
+        "code_reference": ref, "lot_fournisseur": lot, "code_magasin": M,
+        "nouveau": {"poids_unitaire_kg": 4.5}, "quantite_kg": 90, "motif": "Bobines rebobinees (banc)"})
+    verifier(r["vers"] == "D2" and len(r["mouvements"]) == 2, f"le reconditionnement n'a pas fait naitre D2 : {r}")
+    verifier(abs(solde("D1") - 210) < 0.001 and abs(solde("D2") - 90) < 0.001,
+             f"soldes par derive faux apres reconditionnement : D1 {solde('D1')}, D2 {solde('D2')}")
+    verifier(stock_magasin() == avant, f"le reconditionnement a touche le stock ou le CMUP du magasin : {avant} -> {stock_magasin()}")
+
+    # La liste des lots du magasin : une ligne par derive.
+    lots = [x for x in c.ok("Choukri", "GET", f"/api/stock/lots?code_reference={q(ref)}&code_magasin={q(M)}")
+            if x["lot_fournisseur"] == lot]
+    verifier(sorted(x["code_derive"] for x in lots) == ["D1", "D2"]
+             and abs(next(x for x in lots if x["code_derive"] == "D2")["poids_bobine_lot_kg"] - 4.5) < 0.0001,
+             f"/api/stock/lots ne rend pas une ligne par derive, a son poids : {lots}")
+
+    def sortie(kg, derive=None, login="Choukri"):
+        ligne = {"code_reference": ref, "quantite_saisie": kg, "unite_saisie": "kg", "lot_fournisseur": lot,
+                 "code_motif_ligne": "HM_ECHANTILLON"}
+        if derive:
+            ligne["code_derive"] = derive
+        return c.appel(login, "POST", "/api/mouvements", {
+            "code_type_mvt": "SORTIE_HORS_MACHINE", "code_magasin": M, "code_motif": "HORS_MACHINE", "lignes": [ligne]})
+
+    code, rep = sortie(5)
+    verifier(code == 422 and "DERIVE-REQUIS" in json.dumps(rep, ensure_ascii=False),
+             f"une sortie sans derive sur un lot a deux derives passe : {code} {rep}")
+    code, rep = sortie(5, "D2")
+    verifier(code == 200, f"la sortie du derive D2 est refusee : {rep}")
+    verifier(abs(solde("D2") - 85) < 0.001 and abs(solde("D1") - 210) < 0.001,
+             f"la sortie n'a pas debite le bon derive : D1 {solde('D1')}, D2 {solde('D2')}")
+    code, rep = sortie(100, "D2")
+    verifier(code == 422 and "R02-DERIVE" in json.dumps(rep, ensure_ascii=False),
+             f"une sortie au-dela du solde du derive passe : {code} {rep}")
+
+    # Un derive seul se bloque (droit VALIDER des lots, motif) ; l'autre reste libre.
+    c.refus("Choukri", "POST", "/api/lots/derives/statut",
+            {"code_reference": ref, "lot_fournisseur": lot, "code_derive": "D2", "statut": "BLOQUE"},
+            codes=(400, 422), contient="motif")
+    c.ok("Choukri", "POST", "/api/lots/derives/statut",
+         {"code_reference": ref, "lot_fournisseur": lot, "code_derive": "D2", "statut": "BLOQUE", "motif": "Humidite (banc)"})
+    code, rep = sortie(5, "D2")
+    verifier(code == 422 and "DERIVE-BLOQUE" in json.dumps(rep, ensure_ascii=False),
+             f"un derive bloque s'emploie encore : {code} {rep}")
+    code, rep = sortie(5, "D1")
+    verifier(code == 200, f"le derive libre du meme lot est refuse : {rep}")
+    c.ok("Choukri", "POST", "/api/lots/derives/statut",
+         {"code_reference": ref, "lot_fournisseur": lot, "code_derive": "D2", "statut": "LIBRE"})
+    code, rep = sortie(5, "D2")
+    verifier(code == 200, f"le derive libere reste refuse : {rep}")
+
+
+def scenario_derive_reception(c, infra):
+    """Le derive nait a la reception (06/11/2026), comme le latex de gestion-mp-pro (2 futs de 600 kg et
+    90 de 1000 kg d'un meme lot) : ici un fil dont la fiche dit 3 kg par bobine arrive en 100 bobines de
+    3,0 kg et 100 de 3,5 kg (+16,7 %, au-dela des 5 %). La seconde ligne, confirmee « nouveau derive »,
+    fait naitre D2 a son poids mesure ; D1 garde le sien (la mesure du lot ne lit plus que D1) ; deux
+    formes du meme lot font deux lignes (une ligne par lot ET par derive). Le garde-fou des 50 % reste :
+    une mesure a plus de 50 % de la fiche n'est pas appliquee au lot."""
+    ref, lot, M = "PP-1500 Dtex-L.Beige 44377-Hs", "LOT-FUTS-BANC", MAG
+    q = urllib.parse.quote
+    taux_usd_du_jour(infra)
+    verifier(infra.valeur("SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_SeuilDerivePoidsPct'") == "5",
+             "le seuil du nouveau derive n'est pas de 5 %")
+    id_bc, lignes = bon_envoye(c, [(ref, 650, 2.0)], frs="FRS-001")
+    lb = lignes[0]
+    base = {"code_reference": ref, "id_ligne_bc": lb["id_ligne_bc"], "unite_saisie": "kg",
+            "code_magasin_dest": M, "lot_fournisseur": lot}
+    r = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-FUTS", "lignes": [
+        dict(base, quantite_pesee_unite=300, nb_bobines=100),
+        dict(base, quantite_pesee_unite=350, nb_bobines=100, derive_nouveau=True)]})
+    rid = r["id_reception"]
+    n = infra.valeur(f"SELECT count(*) FROM ligne_reception WHERE id_reception = '{rid}'")
+    verifier(n == "2", f"les deux formes du meme lot n'ont pas fait deux lignes : {n}")
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+    c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
+    derives = {d["code_derive"]: d for d in
+               c.ok("Choukri", "GET", f"/api/lots/derives?code_reference={q(ref)}&lot_fournisseur={q(lot)}")}
+    verifier(sorted(derives) == ["D1", "D2"], f"la reception n'a pas fait naitre D2 : {list(derives)}")
+    verifier(abs((derives["D1"]["poids_unitaire_kg"] or 0) - 3.0) < 0.001
+             and abs((derives["D2"]["poids_unitaire_kg"] or 0) - 3.5) < 0.001,
+             f"poids d'unite faux : D1 {derives['D1']['poids_unitaire_kg']}, D2 {derives['D2']['poids_unitaire_kg']}")
+    verifier(abs(derives["D1"]["quantite_kg"] - 300) < 0.001 and abs(derives["D2"]["quantite_kg"] - 350) < 0.001,
+             f"stock par derive faux : D1 {derives['D1']['quantite_kg']}, D2 {derives['D2']['quantite_kg']}")
+    poids_lot = infra.valeur(f"SELECT round(poids_bobine_kg, 4)::text FROM lot WHERE code_reference = '{ref}' "
+                             f"AND lot_fournisseur = '{lot}'")
+    verifier(poids_lot == "3.0000", f"le lot (son D1) a fondu les deux formes dans sa mesure : {poids_lot}")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_bon_demande_prix,
@@ -6490,5 +6605,7 @@ SCENARIOS = [
     scenario_import_taux_dossier_facultatif,
     scenario_couverture_cible_colonnes,
     scenario_couverture_cible,
+    scenario_lot_derive,
+    scenario_derive_reception,
     scenario_controles_finaux,
 ]

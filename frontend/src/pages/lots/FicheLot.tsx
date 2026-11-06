@@ -27,6 +27,7 @@ import { classeNiveauEcart, couleurEcart, libelleLot, useTolerancesLot } from '.
 import { cn, fmt } from '../../lib/utils'
 import { ActionsLot, BadgeCategorie, BadgeStatut, LienLot } from './commun'
 import { ConditionnementLot, type MesureConditionnement } from './ConditionnementLot'
+import { DerivesLot } from './DerivesLot'
 import {
   EVENEMENTS,
   MODULE,
@@ -346,6 +347,9 @@ export function FicheLot() {
         {/* ---- Son conditionnement (23/10/2026) ------------------------------ */}
         {!auKilo && <ConditionnementLot lot={lot} historique={q.data.conditionnement ?? []} />}
 
+        {/* ---- Ses dérivés : formes physiques du même lot (06/11/2026) ------- */}
+        {lot.statut !== 'SOLDE' && <DerivesLot lot={lot} magasins={magasins} />}
+
         {/* ---- Ou est le lot ------------------------------------------------- */}
         <div className="grid gap-3 lg:grid-cols-2">
           <Carte>
@@ -635,7 +639,14 @@ function Fusion({ lot, magasins }: { lot: Lot; magasins: LieuMagasin[] }) {
 
   const candidats = useMemo(() => {
     const registre = new Map((qLots.data ?? []).map((l) => [l.lot_fournisseur, l]))
-    return (qStock.data ?? [])
+    // Un lot à plusieurs dérivés arrive en une ligne par dérivé (06/11/2026) : la
+    // fusion verse le LOT entier, ses dérivés réunis.
+    const parLot = new Map<string, StockLot>()
+    for (const s of qStock.data ?? []) {
+      const deja = parLot.get(s.lot_fournisseur)
+      parLot.set(s.lot_fournisseur, deja ? { ...deja, quantite_kg: (deja.quantite_kg ?? 0) + (s.quantite_kg ?? 0) } : s)
+    }
+    return [...parLot.values()]
       .filter((s) => s.lot_fournisseur !== lot.lot_fournisseur && (s.quantite_kg ?? 0) > 0)
       .map((s) => {
         const fiche = registre.get(s.lot_fournisseur)

@@ -834,10 +834,10 @@ pub async fn creer_reception(
                   date_peremption, statut_qualite, code_magasin_dest, notes,
                   substitution_acceptee, motif_substitution,
                   derogation_ecart, id_utilisateur_derogation, motif_derogation,
-                  nb_palettes_saisi, nb_bobines_saisi)
+                  nb_palettes_saisi, nb_bobines_saisi, code_derive, derive_nouveau)
              SELECT $1, $2, $3, $4, $5, r.designation, $6, $7, $8, $9, $10, $11, $12, $13,
                     $14, $15, $16, $17, fn_jour_casablanca($18), fn_jour_casablanca($19), $20, $21, $22, $23, $24,
-                    $25, $26, $27, $28, $29
+                    $25, $26, $27, $28, $29, NULLIF(btrim($30), ''), $31
                FROM reference r WHERE r.code_reference = $5",
         )
         // LA DEROGATION ET LE COLISAGE PARTENT AUSSI A LA CREATION. Cette
@@ -873,6 +873,8 @@ pub async fn creer_reception(
         .bind(&l.motif_derogation)
         .bind(l.nb_palettes)
         .bind(l.nb_bobines)
+        .bind(&l.code_derive)
+        .bind(i64::from(l.derive_nouveau.unwrap_or(false)))
         .execute(&mut *tx)
         .await?;
         posees += 1;
@@ -976,6 +978,14 @@ pub struct LigneReception {
     pub prix_kg_devise: Option<f64>,
     pub code_magasin_dest: String,
     pub lot_fournisseur: Option<String>,
+    /// Le derive du lot qui entre (06/11/2026) : vide, le derive unique du lot.
+    #[serde(default)]
+    pub code_derive: Option<String>,
+    /// NOUVEAU DERIVE confirme par la personne (06/11/2026) : une autre forme
+    /// physique du meme lot (poids d'unite a plus de P_SeuilDerivePoidsPct, ou
+    /// autre contenant). Il nait a la validation, au poids mesure.
+    #[serde(default)]
+    pub derive_nouveau: Option<bool>,
     pub date_fabrication: Option<String>,
     pub date_peremption: Option<String>,
     pub statut_qualite: Option<String>,
@@ -1010,17 +1020,25 @@ async fn fusionner_ligne_reception(
     id_utilisateur: &str,
 ) -> AppResult<Option<(String, i64)>> {
     let lot = l.lot_fournisseur.as_deref().map(str::trim).unwrap_or("");
+    // Une autre forme physique du lot (nouveau derive) fait sa propre ligne.
+    if l.derive_nouveau.unwrap_or(false) {
+        return Ok(None);
+    }
+    let derive = l.code_derive.as_deref().map(str::trim).filter(|d| !d.is_empty());
     let existante: Option<(String, i64, String, String)> = sqlx::query_as(
         "SELECT id_ligne_reception, ligne_numero, code_magasin_dest, statut_qualite
            FROM ligne_reception
           WHERE id_reception = $1 AND id_ligne_bc IS NOT DISTINCT FROM $2
             AND code_reference = $3 AND COALESCE(btrim(lot_fournisseur), '') = $4
+            -- Le meme derive (06/11/2026) : deux formes du lot font deux lignes.
+            AND code_derive IS NOT DISTINCT FROM $5 AND derive_nouveau = 0
           ORDER BY ligne_numero LIMIT 1 FOR UPDATE",
     )
     .bind(id_reception)
     .bind(id_ligne_bc)
     .bind(&l.code_reference)
     .bind(lot)
+    .bind(derive)
     .fetch_optional(&mut *tx)
     .await?;
     let Some((id_ligne, numero, magasin, qualite)) = existante else {
@@ -1221,9 +1239,10 @@ pub async fn ajouter_ligne_reception(
               code_magasin_dest, derogation_ecart, id_utilisateur_derogation, motif_derogation,
               quantite_bl_kg, nb_colis_ligne, notes,
               substitution_acceptee, motif_substitution,
-              nb_palettes_saisi, nb_bobines_saisi)
+              nb_palettes_saisi, nb_bobines_saisi, code_derive, derive_nouveau)
          SELECT $1, $2, $3, $4, $5, r.designation, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                $15, fn_jour_casablanca($16), fn_jour_casablanca($17), $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29
+                $15, fn_jour_casablanca($16), fn_jour_casablanca($17), $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29,
+                NULLIF(btrim($30), ''), $31
            FROM reference r WHERE r.code_reference = $5",
     )
     .bind(&id_ligne)
@@ -1255,6 +1274,8 @@ pub async fn ajouter_ligne_reception(
     .bind(&l.motif_substitution)
     .bind(l.nb_palettes)
     .bind(l.nb_bobines)
+    .bind(&l.code_derive)
+    .bind(i64::from(l.derive_nouveau.unwrap_or(false)))
     .execute(&mut *tx)
     .await?;
 

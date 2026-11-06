@@ -68,6 +68,12 @@ struct LigneReception {
     code_magasin_dest: String,
     /// Les bobines comptees au quai : elles font le poids theorique du lot.
     nb_bobines_saisi: Option<i64>,
+    /// Le derive du lot qui entre (06/11/2026) : vide, le derive unique du lot.
+    code_derive: Option<String>,
+    /// 1 : la personne a confirme un NOUVEAU derive (forme physique a part,
+    /// poids a plus de P_SeuilDerivePoidsPct) ; il nait a la validation.
+    derive_nouveau: i64,
+    nb_palettes_saisi: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -232,7 +238,8 @@ pub async fn valider(
                 prix_kg_devise::float8 AS prix_kg_devise, code_devise,
                 taux_change::float8 AS taux_change, prix_kg_mad::float8 AS prix_kg_mad,
                 lot_fournisseur, date_fabrication, date_peremption,
-                statut_qualite, code_magasin_dest, nb_bobines_saisi
+                statut_qualite, code_magasin_dest, nb_bobines_saisi, code_derive,
+                derive_nouveau, nb_palettes_saisi::float8 AS nb_palettes_saisi
            FROM ligne_reception
           WHERE id_reception = $1
           ORDER BY ligne_numero",
@@ -329,15 +336,22 @@ pub async fn valider(
         .execute(&mut *tx)
         .await?;
 
-        for (i, l) in lignes_magasin.iter().enumerate() {
+        // LES NOUVEAUX DERIVES APRES LES AUTRES (06/11/2026) : un lot recu pour
+        // la premiere fois nait avec la ligne de sa forme d'origine (D1) ; la
+        // ligne confirmee « nouveau derive » fait ensuite naitre D2, D3…
+        let mut ordonnees: Vec<&&LigneReception> = lignes_magasin.iter().collect();
+        ordonnees.sort_by_key(|l| l.derive_nouveau);
+        for (i, l) in ordonnees.into_iter().enumerate() {
+            let derive = derive_de_la_ligne(&mut tx, user, l).await?;
             // (1/3) Mouvement de stock — declenche l'application du solde et le
             // recalcul du CMUP par le trigger `trg_lmvt_appliquer`.
             sqlx::query(
                 "INSERT INTO ligne_mouvement
                      (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
                       quantite_saisie, unite_saisie, facteur_conversion,
-                      lot_fournisseur, date_fabrication, date_peremption, statut_qualite, nb_bobines)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, fn_jour_casablanca($10), fn_jour_casablanca($11), $12, $13)",
+                      lot_fournisseur, date_fabrication, date_peremption, statut_qualite, nb_bobines,
+                      code_derive)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, fn_jour_casablanca($10), fn_jour_casablanca($11), $12, $13, $14)",
             )
             .bind(&id_mouvement)
             .bind((i + 1) as i64)
@@ -352,6 +366,7 @@ pub async fn valider(
             .bind(&l.date_peremption)
             .bind(&l.statut_qualite)
             .bind(l.nb_bobines_saisi.filter(|b| *b > 0))
+            .bind(&derive)
             .execute(&mut *tx)
             .await?;
 
@@ -831,6 +846,67 @@ fn jours_entre(depuis: &str, jusqu_a: &str) -> i64 {
         (Some(a), Some(b)) => (b - a).num_days(),
         _ => 0,
     }
+}
+
+
+/// LE DERIVE D'UNE LIGNE DE RECEPTION (06/11/2026). Celui que la ligne porte ;
+/// sinon, si la personne a confirme un nouveau derive et que le lot existe deja,
+/// le derive suivant du lot nait ici, a son poids mesure (kilos / unites
+/// comptees) et ses unites par palette observees. Un lot qui nait avec cette
+/// ligne n'a pas d'autre forme : elle sera son D1.
+async fn derive_de_la_ligne(
+    tx: &mut sqlx::PgConnection,
+    user: &Utilisateur,
+    l: &LigneReception,
+) -> AppResult<Option<String>> {
+    let Some(lot) = l.lot_fournisseur.as_deref().map(str::trim).filter(|x| !x.is_empty()) else {
+        return Ok(None);
+    };
+    if l.derive_nouveau != 1 {
+        return Ok(l.code_derive.clone());
+    }
+    let existants: Vec<String> = sqlx::query_scalar(
+        "SELECT code_derive FROM lot_derive WHERE code_reference = $1 AND lot_fournisseur = $2",
+    )
+    .bind(&l.code_reference)
+    .bind(lot)
+    .fetch_all(&mut *tx)
+    .await?;
+    if existants.is_empty() {
+        return Ok(None);
+    }
+    let suivant = existants
+        .iter()
+        .filter_map(|d| d.trim_start_matches('D').parse::<i64>().ok())
+        .max()
+        .unwrap_or(0)
+        + 1;
+    let code = format!("D{suivant}");
+    let bobines = l.nb_bobines_saisi.filter(|b| *b > 0);
+    let poids = bobines.map(|b| arrondi_kg(l.quantite_stock_kg / b as f64));
+    let par_palette = match (bobines, l.nb_palettes_saisi) {
+        (Some(b), Some(p)) if p > 0.0 && p.fract() == 0.0 => Some((b as f64 / p).round() as i64).filter(|n| *n > 0),
+        _ => None,
+    };
+    sqlx::query(
+        "INSERT INTO lot_derive (code_reference, lot_fournisseur, code_derive, poids_unitaire_kg,
+                                 unites_par_palette, id_utilisateur)
+         VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(&l.code_reference)
+    .bind(lot)
+    .bind(&code)
+    .bind(poids)
+    .bind(par_palette)
+    .bind(&user.id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE ligne_reception SET code_derive = $2 WHERE id_ligne_reception = $1")
+        .bind(&l.id_ligne_reception)
+        .bind(&code)
+        .execute(&mut *tx)
+        .await?;
+    Ok(Some(code))
 }
 
 #[cfg(test)]

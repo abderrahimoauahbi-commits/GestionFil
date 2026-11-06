@@ -164,18 +164,35 @@ pub async fn lire(
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
     // Une douchette ajoute parfois un espace, ou tape en minuscules.
     let code = code.trim().to_uppercase();
+    // LE DERIVE DE L'ETIQUETTE (06/11/2026) : celui de sa ligne de reception ;
+    // a defaut, le seul du lot. Un lot a plusieurs derives et une etiquette
+    // sans le sien (imprimee avant) : aucun, l'ecran demande lequel.
     let ligne = sqlx::query(
-        "SELECT code, nature, rang, nombre, poids_kg::float8 AS poids_kg,
-                code_reference, designation, lot_fournisseur, code_magasin_dest,
-                numero_reception, statut_reception, date_reception,
-                -- LE CONDITIONNEMENT DU LOT DE L'ETIQUETTE (23/10/2026) : une palette
+        "SELECT v.code, v.nature, v.rang, v.nombre, v.poids_kg::float8 AS poids_kg,
+                v.code_reference, v.designation, v.lot_fournisseur, v.code_magasin_dest,
+                v.numero_reception, v.statut_reception, v.date_reception,
+                d.code_derive, d.nb_derives,
+                -- LE CONDITIONNEMENT DU DERIVE, sinon du lot (23/10/2026) : une palette
                 -- scannee compte les bobines de SON lot ; a defaut, la fiche article.
-                unite_catalogue,
-                COALESCE(fn_lot_poids_bobine(code_reference, lot_fournisseur), poids_bobine_kg)::float8 AS poids_bobine_kg,
-                COALESCE(fn_lot_bobines_palette(code_reference, lot_fournisseur), bobines_par_palette)::float8 AS bobines_par_palette,
-                bobines_par_lot::float8 AS bobines_par_lot,
-                densite_kg_ml::float8 AS densite_kg_ml, suivi_lot
-           FROM v_etiquette_lot WHERE code = $1",
+                v.unite_catalogue,
+                COALESCE(fn_derive_poids_unitaire(v.code_reference, v.lot_fournisseur, d.code_derive),
+                         v.poids_bobine_kg)::float8 AS poids_bobine_kg,
+                COALESCE(fn_derive_unites_palette(v.code_reference, v.lot_fournisseur, d.code_derive),
+                         v.bobines_par_palette)::float8 AS bobines_par_palette,
+                v.bobines_par_lot::float8 AS bobines_par_lot,
+                v.densite_kg_ml::float8 AS densite_kg_ml, v.suivi_lot
+           FROM v_etiquette_lot v
+           LEFT JOIN LATERAL (
+                SELECT COALESCE(lr.code_derive,
+                                CASE WHEN n.nb = 1 THEN n.seul END) AS code_derive,
+                       n.nb AS nb_derives
+                  FROM etiquette_lot e
+                  JOIN ligne_reception lr ON lr.id_ligne_reception = e.id_ligne_reception
+                 CROSS JOIN LATERAL (
+                       SELECT count(*) AS nb, min(x.code_derive) AS seul FROM lot_derive x
+                        WHERE x.code_reference = v.code_reference AND x.lot_fournisseur = v.lot_fournisseur) n
+                 WHERE e.code = v.code) d ON true
+          WHERE v.code = $1",
     )
     .bind(&code)
     .fetch_optional(&state.db)

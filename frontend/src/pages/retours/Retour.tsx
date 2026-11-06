@@ -25,11 +25,14 @@ import { cn, fmt } from '../../lib/utils'
 import { LIBELLE_STATUT_RETOUR, MODULE_RETOURS } from './commun'
 import { nouvelIdentifiant } from '../../lib/identifiant'
 import { ChoixRecherche } from '../../composants/ChoixRecherche'
+import { ChoixDerive } from '../../composants/ChampDerive'
+import { plusieursDerives, type LigneDerivee } from '../../lib/derives'
 
 /** Le lot « sans lot » de la liste (la part du stock que les lots ne portent pas). */
 const SANS = '__sans_lot__'
 
-interface Disponible {
+/** Une ligne du stock retournable : UNE PAR DERIVE quand le lot en a plusieurs (06/11/2026). */
+interface Disponible extends LigneDerivee {
   code_reference: string
   designation: string | null
   code_magasin: string
@@ -62,6 +65,7 @@ interface RetourDoc {
     designation: string | null
     code_magasin: string
     lot_fournisseur: string | null
+    code_derive?: string | null
     quantite_kg: number
     prix_kg_mad?: number | null
     montant_ligne_mad?: number | null
@@ -80,6 +84,8 @@ interface LigneSaisie {
   code_magasin: string
   code_reference: string
   lot: string
+  /** Le derive qui repart, seulement quand le lot en a plusieurs (06/11/2026). */
+  derive: string
   kg: string
   prix: string
   bobines: string
@@ -129,7 +135,7 @@ export function Retour() {
 
 let compteur = 0
 const ligneVide = (magasin = ''): LigneSaisie => ({
-  cle: ++compteur, code_magasin: magasin, code_reference: '', lot: '', kg: '', prix: '', bobines: '', motif: '',
+  cle: ++compteur, code_magasin: magasin, code_reference: '', lot: '', derive: '', kg: '', prix: '', bobines: '', motif: '',
 })
 
 function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
@@ -153,6 +159,7 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
           code_magasin: l.code_magasin,
           code_reference: l.code_reference,
           lot: l.lot_fournisseur ?? '',
+          derive: l.code_derive ?? '',
           kg: String(l.quantite_kg),
           prix: l.prix_kg_mad === null || l.prix_kg_mad === undefined ? '' : String(l.prix_kg_mad),
           bobines: l.nb_bobines === null ? '' : String(l.nb_bobines),
@@ -171,7 +178,14 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
   const dispo = useMemo(() => qDispo.data ?? [], [qDispo.data])
   const magasins = useMemo(() => [...new Set(dispo.map((d) => d.code_magasin))].sort(), [dispo])
   const dispoDe = (l: LigneSaisie) => dispo.filter((d) => d.code_magasin === l.code_magasin && d.code_reference === l.code_reference)
-  const ligneStock = (l: LigneSaisie) => dispoDe(l).find((d) => (d.lot_fournisseur ?? '') === l.lot)
+  /** Les lignes de stock du lot de la ligne : une par derive quand il en a plusieurs. */
+  const lignesDuLot = (l: LigneSaisie) => dispoDe(l).filter((d) => (d.lot_fournisseur ?? '') === l.lot)
+  /** Le stock du lot choisi — de son derive s'il est dit, sinon tous ses derives ensemble. */
+  const ligneStock = (l: LigneSaisie): Disponible | undefined => {
+    const ls = lignesDuLot(l).filter((d) => !l.derive || d.code_derive === l.derive)
+    if (ls.length <= 1) return ls[0]
+    return { ...ls[0], quantite_kg: ls.reduce((t, d) => t + Number(d.quantite_kg ?? 0), 0) }
+  }
 
   const maj = (cle: number, v: Partial<LigneSaisie>) => setLignes((x) => x.map((l) => (l.cle === cle ? { ...l, ...v } : l)))
   // Choisir la reference propose le premier lot que le magasin porte, et le
@@ -181,6 +195,7 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
     maj(l.cle, {
       code_reference: code,
       lot: premier?.lot_fournisseur ?? '',
+      derive: plusieursDerives(premier) ? (premier?.code_derive ?? '') : '',
       prix: premier?.cmup_mad === null || premier?.cmup_mad === undefined ? '' : String(premier.cmup_mad),
     })
   }
@@ -204,6 +219,8 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
       code_reference: l.code_reference,
       code_magasin: l.code_magasin,
       lot_fournisseur: l.lot || null,
+      // Le derive choisi, quand le lot en a plusieurs (06/11/2026).
+      code_derive: (l.lot && l.derive) || null,
       quantite_kg: nombre(l.kg),
       prix_kg_mad: l.prix.trim() === '' ? null : nombre(l.prix),
       nb_bobines: l.bobines.trim() === '' ? null : Math.round(nombre(l.bobines)),
@@ -400,7 +417,7 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                       <div>
                         {i === 0 && <Etiq htmlFor={`rfo-mag-${l.cle}`}>Magasin</Etiq>}
                         <Selecteur id={`rfo-mag-${l.cle}`} className="h-8 w-full" aria-label="Magasin" value={l.code_magasin}
-                          onChange={(e) => maj(l.cle, { code_magasin: e.target.value, code_reference: '', lot: '', prix: '' })}>
+                          onChange={(e) => maj(l.cle, { code_magasin: e.target.value, code_reference: '', lot: '', derive: '', prix: '' })}>
                           <option value="">Magasin…</option>
                           {magasins.map((m) => <option key={m} value={m}>{m}</option>)}
                         </Selecteur>
@@ -429,13 +446,28 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                           className="w-full"
                           valeur={l.code_reference ? (l.lot || SANS) : ''}
                           libelle={!l.code_reference ? undefined : l.lot
-                            ? `${l.lot}${stock ? ` (${fmt.nombre(stock.quantite_kg, 2)} kg)` : ''}`
+                            ? `${l.lot}${l.derive && plusieursDerives(stock) ? ` · ${l.derive}` : ''}${stock ? ` (${fmt.nombre(stock.quantite_kg, 2)} kg)` : ''}`
                             : `Sans lot${sansLot ? ` (${fmt.nombre(sansLot.quantite_kg, 2)} kg)` : ''}`}
                           filtres={{ code_reference: l.code_reference, code_magasin: l.code_magasin }}
                           supplements={sansLot ? [{ valeur: SANS, libelle: 'Sans lot',
                             info: `${fmt.nombre(sansLot.quantite_kg, 2)} kg hors lot` }] : []}
                           desactive={lots.length === 0}
-                          onChange={(v) => maj(l.cle, { lot: v === SANS ? '' : v })}
+                          onChange={(v) => {
+                            const lot = v === SANS ? '' : v
+                            if (lot !== l.lot) maj(l.cle, { lot, derive: '' })
+                          }}
+                        />
+                        {/* LE DERIVE QUI REPART, seulement si le lot en a plusieurs (06/11/2026). */}
+                        <ChoixDerive
+                          options={lignesDuLot(l).map((d) => ({
+                            code_derive: d.code_derive ?? '',
+                            conditionnement: d.conditionnement_derive,
+                            quantite_kg: d.quantite_kg,
+                          }))}
+                          plusieurs={lignesDuLot(l).some(plusieursDerives)}
+                          valeur={l.derive}
+                          onChange={(d) => maj(l.cle, { derive: d })}
+                          className="champ-saisie mt-1 h-8 w-full rounded-[var(--radius)] border border-champ bg-surface px-2 text-[13px]"
                         />
                       </div>
                       <div>

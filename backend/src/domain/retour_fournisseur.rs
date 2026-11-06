@@ -32,6 +32,9 @@ pub struct LigneRetourSaisie {
     pub code_reference: String,
     pub code_magasin: String,
     pub lot_fournisseur: Option<String>,
+    /// Le derive du lot qui repart (06/11/2026) : obligatoire si le lot en a plusieurs.
+    #[serde(default)]
+    pub code_derive: Option<String>,
     pub quantite_kg: f64,
     /// Absent (champ masque a qui saisit) : le CMUP du magasin.
     pub prix_kg_mad: Option<f64>,
@@ -163,8 +166,9 @@ async fn poser_lignes(c: &mut PgConnection, id_retour: &str, s: &RetourSaisie) -
         sqlx::query(
             "INSERT INTO ligne_retour_fournisseur
                     (id_retour, ligne_numero, code_reference, code_magasin, lot_fournisseur,
-                     quantite_kg, prix_kg_mad, nb_bobines, code_motif_ligne)
-             VALUES ($1, $2, $3, $4, $5, round($6::numeric, 4), round($7::numeric, 4), $8, $9)",
+                     quantite_kg, prix_kg_mad, nb_bobines, code_motif_ligne, code_derive)
+             VALUES ($1, $2, $3, $4, $5, round($6::numeric, 4), round($7::numeric, 4), $8, $9,
+                     NULLIF(btrim($10), ''))",
         )
         .bind(id_retour)
         .bind((i + 1) as i32)
@@ -175,6 +179,7 @@ async fn poser_lignes(c: &mut PgConnection, id_retour: &str, s: &RetourSaisie) -
         .bind(prix)
         .bind(l.nb_bobines)
         .bind(&l.code_motif_ligne)
+        .bind(&l.code_derive)
         .execute(&mut *c)
         .await?;
     }
@@ -270,10 +275,10 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
             "Celui qui a saisi le retour {numero} ne peut pas le valider : un autre compte le contrôle."
         )));
     }
-    type Ligne = (String, String, String, Option<String>, f64, f64, Option<i64>, String);
+    type Ligne = (String, String, String, Option<String>, f64, f64, Option<i64>, String, Option<String>);
     let lignes: Vec<Ligne> = sqlx::query_as(
         "SELECT id_ligne_retour, code_reference, code_magasin, lot_fournisseur, quantite_kg::float8,
-                prix_kg_mad::float8, nb_bobines, code_motif_ligne
+                prix_kg_mad::float8, nb_bobines, code_motif_ligne, code_derive
            FROM ligne_retour_fournisseur WHERE id_retour = $1 ORDER BY ligne_numero",
     )
     .bind(id)
@@ -293,6 +298,7 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
                 code_reference: l.1.clone(),
                 code_magasin: l.2.clone(),
                 lot_fournisseur: l.3.clone(),
+                code_derive: l.8.clone(),
                 quantite_kg: l.4,
                 prix_kg_mad: Some(l.5),
                 nb_bobines: l.6,
@@ -328,7 +334,7 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
         .execute(&mut *c)
         .await?;
         for (i, l) in groupe.iter().enumerate() {
-            let (id_ligne, reference, _, lot, kg, prix, bobines, motif_ligne) = l;
+            let (id_ligne, reference, _, lot, kg, prix, bobines, motif_ligne, derive) = l;
             // L'etat du magasin AVANT la sortie, sous verrou.
             let (stock_avant, cmup_avant): (f64, Option<f64>) = sqlx::query_as(
                 "SELECT quantite_kg::float8, cmup_mad::float8 FROM stock_magasin
@@ -344,8 +350,8 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
                 "INSERT INTO ligne_mouvement
                      (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
                       quantite_saisie, unite_saisie, facteur_conversion, nb_bobines,
-                      lot_fournisseur, code_motif_ligne)
-                 VALUES ($1, $2, $3, $4, $5, $4, 'kg', 1, $6, $7, $8)",
+                      lot_fournisseur, code_motif_ligne, code_derive)
+                 VALUES ($1, $2, $3, $4, $5, $4, 'kg', 1, $6, $7, $8, $9)",
             )
             .bind(&id_mvt)
             .bind((i + 1) as i64)
@@ -355,6 +361,7 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
             .bind(*bobines)
             .bind(lot)
             .bind(motif_ligne)
+            .bind(derive)
             .execute(&mut *c)
             .await?;
             // Puis le prix du retour : la difference au stock restant.

@@ -11,6 +11,7 @@ import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo } f
 import { useQueries } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { appliquerConditionnementLot, type ConditionnementLot, type LigneColisLot } from '../lib/conditionnement'
+import { conditionnementDuDerive, deriveDeExtra, useDerivesLots } from '../lib/derives'
 
 export interface LotConditionne extends ConditionnementLot {
   code_reference: string
@@ -52,15 +53,24 @@ export function useConditionnementsLots(references: string[]) {
  * LA GRILLE SUIT LE CONDITIONNEMENT DU LOT DE CHAQUE LIGNE : une ligne dont le
  * lot (dans `extra.lot`) change prend ses facteurs ; le champ tapé en dernier
  * garde sa valeur, les deux autres se recalculent (`appliquerConditionnementLot`).
+ * LE DÉRIVÉ CHOISI (06/11/2026, `extra.derive`) prime sur le lot : le fût de
+ * 600 kg et celui de 1000 kg d'un même lot ne se convertissent pas pareil.
  */
 export function useLotsSurGrille<T extends LigneColisLot>(lignes: T[], setLignes: Dispatch<SetStateAction<T[]>>) {
   const { condLot } = useConditionnementsLots(
     lignes.filter((l) => (l.extra?.lot ?? '').trim()).map((l) => l.code_reference),
   )
+  const { deriveDe } = useDerivesLots(
+    lignes.filter((l) => deriveDeExtra(l.extra)).map((l) => ({ reference: l.code_reference, lot: l.extra?.lot ?? '' })),
+  )
   useEffect(() => {
-    const suivre = (l: T) =>
-      l.code_reference ? appliquerConditionnementLot(l, l.extra?.lot ?? '', condLot(l.code_reference, l.extra?.lot ?? '')) : l
+    const suivre = (l: T) => {
+      if (!l.code_reference) return l
+      const lot = l.extra?.lot ?? ''
+      const cond = conditionnementDuDerive(condLot(l.code_reference, lot), deriveDe(l.code_reference, lot, deriveDeExtra(l.extra)))
+      return appliquerConditionnementLot(l, lot, cond)
+    }
     if (lignes.every((l) => suivre(l) === l)) return
     setLignes((ls) => ls.map(suivre))
-  }, [lignes, setLignes, condLot])
+  }, [lignes, setLignes, condLot, deriveDe])
 }

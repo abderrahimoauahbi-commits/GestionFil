@@ -19,6 +19,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { SANS_LOT } from '../../lib/lots'
+import { plusieursDerives, type LigneDerivee } from '../../lib/derives'
 import type { EtiquetteLue } from '../../composants/ChampScan'
 import { phraseGel, useGelInventaire } from '../../lib/inventairesOuverts'
 import { useOfOuverts } from '../../composants/ChoixOF'
@@ -100,6 +101,7 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
             avant_kg: 0, avant_date: null,
           } as LigneSaisie),
           mouvementees: Number(l.nb_bobines_mouvementees ?? 0),
+          code_derive: l.code_derive ?? '',
           // Le constat ne change pas le nombre de bobines : celui de l'etat (24/10/2026).
           presentes: i >= 0 ? base[i].presentes : 0,
           poids_retenu: Number(l.poids_retenu_kg ?? nominal),
@@ -137,20 +139,25 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
   const qLots = useQuery({
     queryKey: ['stock-lots-magasin', entete.magasin],
     queryFn: () =>
-      api.get<{ code_reference: string; lot_fournisseur: string; date_premiere_entree: string
-                poids_bobine_lot_kg?: number | null }[]>(
+      api.get<({ code_reference: string; lot_fournisseur: string; date_premiere_entree: string
+                 poids_bobine_lot_kg?: number | null; quantite_kg?: number | null } & LigneDerivee)[]>(
         `/api/stock/lots?code_magasin=${encodeURIComponent(entete.magasin)}&limite=5000`,
       ),
     enabled: type === 'CHARGE' && !!entete.magasin,
   })
-  const poidsDuLot = (reference: string, lot: string): number | null => {
-    const p = (qLots.data ?? []).find((x) => x.code_reference === reference && x.lot_fournisseur === lot)?.poids_bobine_lot_kg
+  /* UNE LIGNE PAR DERIVE quand le lot en a plusieurs (06/11/2026) : le poids est
+     celui du derive choisi ; sans derive, celui de la ligne du lot. */
+  const lignesDuLot = (reference: string, lot: string) =>
+    (qLots.data ?? []).filter((x) => x.code_reference === reference && x.lot_fournisseur === lot)
+  const poidsDuLot = (reference: string, lot: string, derive = ''): number | null => {
+    const ls = lignesDuLot(reference, lot)
+    const p = (derive ? ls.find((x) => x.code_derive === derive) : ls[0])?.poids_bobine_lot_kg
     return p != null && p > 0 ? Number(p) : null
   }
   /** Une ligne NEUVE au chargement prend le poids d'une bobine de son lot (le nominal propose). */
   const auPoidsDuLot = (n: LigneSaisie): LigneSaisie => {
     if (type !== 'CHARGE' || n.avant_bobines > 0) return n
-    const p = poidsDuLot(n.code_reference, n.lot_fournisseur)
+    const p = poidsDuLot(n.code_reference, n.lot_fournisseur, n.code_derive ?? '')
     return p === null ? n : { ...n, poids_retenu: p, poids_unitaire: p }
   }
   /* LES LOTS LUS APRES LE CHOIX DU LOT : une ligne neuve dont le poids n'a pas ete
@@ -209,7 +216,9 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
       ls.map((l) => {
         if (l.cle !== cleLigne) return l
         let n: LigneSaisie = { ...l, [champ]: v }
-        if (champ === 'lot_fournisseur') n = auPoidsDuLot(n)
+        // Changer de lot efface le derive : il etait celui de l'ancien lot (06/11/2026).
+        if (champ === 'lot_fournisseur' && v !== l.lot_fournisseur) n.code_derive = ''
+        if (champ === 'lot_fournisseur' || champ === 'code_derive') n = auPoidsDuLot(n)
         if (champ === 'pourcentage') n.pourcentage_saisi = true
         // UN MOTIF QUI N'ADMET QU'UNE DESTINATION LA POSE ; changer de motif
         // efface un effet devenu sans objet.
@@ -220,7 +229,7 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
         }
         // AU CHARGEMENT, le % de la ligne apres est PROPOSE : le % theorique,
         // tant que l'operateur ne l'a pas saisi lui-meme.
-        if (type === 'CHARGE' && !n.pourcentage_saisi && (champ === 'mouvementees' || champ === 'poids_retenu' || champ === 'lot_fournisseur')) {
+        if (type === 'CHARGE' && !n.pourcentage_saisi && (champ === 'mouvementees' || champ === 'poids_retenu' || champ === 'lot_fournisseur' || champ === 'code_derive')) {
           const t = estimer('CHARGE', n).theorique
           if (t != null) n.pourcentage = arrondi2(t)
         }
@@ -370,6 +379,10 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
     for (const l of envoyees) {
       const qui = l.designation || l.code_reference
       if (!l.lot_fournisseur.trim()) return `Indiquez le lot de ${qui}.`
+      /* LE DERIVE, quand le lot en a plusieurs au magasin (06/11/2026) : la base
+         refuse le chargement sans lui (DERIVE-REQUIS). */
+      if (type === 'CHARGE' && !l.code_derive && lignesDuLot(l.code_reference, l.lot_fournisseur).some(plusieursDerives))
+        return `Indiquez le dérivé du lot ${l.lot_fournisseur} de ${qui} : le lot a plusieurs conditionnements.`
       if (!l.code_motif) return `Choisissez le motif de ${qui}.`
       const m = motifDe(l.code_motif)
       if (m && !m.effet_defaut && !l.effet_ecart) return `Dites comment compte l’écart de ${qui} (${m.libelle}).`
@@ -431,7 +444,7 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
     zone, changerZone, motifs, motifDe,
     stockCourt, avertissements,
     etat: qEtat, entete, setEntete, lignes, setLignes, envoyees,
-    majLigne, choisirOf, retirer, ajouter, scanner, totaux,
+    majLigne, choisirOf, retirer, ajouter, scanner, totaux, lignesDuLot,
     calculer, apercu: apercuAJour ? apercu!.resultat : null, apercuPerime: !!apercu && !apercuAJour,
     envoi, pret, peutValider, manque, gel,
     reamorcer: () => setAmorcee(null),

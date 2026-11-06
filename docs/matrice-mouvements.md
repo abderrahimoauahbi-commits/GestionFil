@@ -178,7 +178,7 @@ des besoins, pour son magasin de destination.
 
 ### `FUSION_SORTIE`
 
-- **Origine** : Fusion de lots : le lot absorbé sort
+- **Origine** : Fusion de lots : le lot absorbé sort ; ou reconditionnement (06/11/2026) : le dérivé de départ sort, dans le même lot (motif RECONDITIONNEMENT)
 - **Sens** : sortie (−) dans le magasin du mouvement ; le stock du lot suit
 - **CMUP** : Inchangé (même magasin, même référence)
 - **Coût de la ligne** : Sans prix
@@ -188,7 +188,7 @@ des besoins, pour son magasin de destination.
 
 ### `FUSION_ENTREE`
 
-- **Origine** : Fusion de lots : le lot résultant entre
+- **Origine** : Fusion de lots : le lot résultant entre ; ou reconditionnement (06/11/2026) : le dérivé d'arrivée entre, dans le même lot (motif RECONDITIONNEMENT)
 - **Sens** : entrée (+) dans le magasin du mouvement ; le stock du lot suit
 - **CMUP** : Inchangé
 - **Coût de la ligne** : Sans prix

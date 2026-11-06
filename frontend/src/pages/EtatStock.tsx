@@ -29,6 +29,7 @@ import { Alerte, Badge, Chargement } from '../composants/ui/base'
 import { TableauImprimable } from '../composants/Etat'
 import { cn, fmt } from '../lib/utils'
 import { SANS_LOT } from '../lib/lots'
+import { cleLotDerive, suffixeDerive, type LigneDerivee } from '../lib/derives'
 import { StatutBadge } from '../composants/StatutBadge'
 import { libelleStatut } from '../lib/statuts'
 
@@ -848,7 +849,8 @@ function exporter(lignes: LigneStock[], magasins: { code: string; nom: string }[
   URL.revokeObjectURL(url)
 }
 
-interface LotStock {
+/** Une ligne par derive quand le lot en a plusieurs (06/11/2026). */
+interface LotStock extends LigneDerivee {
   code_reference: string
   code_magasin: string
   magasin_nom: string
@@ -917,9 +919,9 @@ function LotsReference({ ligne, magasins }: { ligne: LigneStock; magasins: { cod
             </thead>
             <tbody>
               {duMagasin.map((x, i) => (
-                <tr key={x.lot_fournisseur} className="border-t border-bordure/60">
+                <tr key={cleLotDerive(x.lot_fournisseur, x.code_derive)} className="border-t border-bordure/60">
                   <td className="py-1 font-medium">
-                    {x.lot_fournisseur === SANS_LOT ? <em className="font-normal">Sans lot</em> : `Lot ${x.lot_fournisseur}`}
+                    {x.lot_fournisseur === SANS_LOT ? <em className="font-normal">Sans lot</em> : `Lot ${x.lot_fournisseur}${suffixeDerive(x)}`}
                     {i === 0 && duMagasin.length > 1 && (
                       <Badge ton="info" className="ml-1.5">à sortir d’abord</Badge>
                     )}

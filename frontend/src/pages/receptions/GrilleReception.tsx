@@ -32,7 +32,7 @@
  * Sous 768 px, chaque ligne devient une carte ou tous les champs s'empilent :
  * aucun tableau a faire defiler lateralement.
  */
-import { Fragment, useState, type MouseEvent, type ReactNode } from 'react'
+import { Fragment, useEffect, useState, type MouseEvent, type ReactNode } from 'react'
 import { Check, ChevronRight, Link2, Pencil, Trash2, Unlink2 } from 'lucide-react'
 import { Badge, Bouton, Champ, Selecteur } from '../../composants/ui/base'
 import { AvisColisage } from '../../composants/AvisColisage'
@@ -42,6 +42,8 @@ import { useEstMobile } from '../../lib/mediaQuery'
 import { repartirCases, useLargeurConteneur } from '../../lib/rangeeAdaptative'
 import { codesStatut, libelleStatut } from '../../lib/statuts'
 import { cn, fmt } from '../../lib/utils'
+import { useDerivesLot, type DeriveLot } from '../../lib/derives'
+import { useParametreNombre } from '../../lib/parametres'
 
 /** Ce que l'ecran montre et laisse saisir d'une ligne de reception. */
 export interface VueLigneRec {
@@ -74,6 +76,10 @@ export interface VueLigneRec {
   /** Le bouton lier / detacher est-il offert (une reference suivie au lot se compte) ? */
   liaisonOfferte: boolean
   lot: string
+  /** Le derive du lot qui entre (06/11/2026) : vide, le seul du lot. */
+  codeDerive?: string
+  /** Un NOUVEAU derive, confirme par la personne : il nait a la validation. */
+  deriveNouveau?: boolean
   magasin: string
   qualite: string
   derogation: boolean
@@ -109,6 +115,8 @@ export type ChampRec =
   | 'unite'
   | 'lie'
   | 'lot'
+  | 'codeDerive'
+  | 'deriveNouveau'
   | 'magasin'
   | 'qualite'
   | 'derogation'
@@ -492,7 +500,92 @@ function Conditionnels({
       )}
       <AvisColisage className="max-w-[22rem]" kg={kg} bobines={l.bobines} palettes={l.palettes} cond={l.cond} />
       {l.suivi_lot && <AvisDerive className="max-w-[22rem]" kg={kg} bobines={l.bobines} cond={l.cond} />}
+      {l.suivi_lot && l.lot.trim() !== '' && <PropositionDerive l={l} kg={kg} poser={poser} />}
     </>
+  )
+}
+
+/**
+ * LE DERIVE D'UNE LIGNE DE RECEPTION (06/11/2026). Pour un lot DEJA CONNU :
+ * quand il a plusieurs derives, la personne dit lequel entre (le plus proche du
+ * poids mesure est propose) ; quand le poids d'une unite mesure s'ecarte de plus
+ * de P_SeuilDerivePoidsPct de tous ses derives, l'ecran PROPOSE un nouveau
+ * derive — meme lot, autre forme physique —, que la personne confirme. Rien
+ * d'automatique. Un lot qui nait avec cette reception n'a rien a choisir.
+ */
+function PropositionDerive({
+  l,
+  kg,
+  poser,
+}: {
+  l: VueLigneRec
+  kg: number | null
+  poser: ProprietesGrilleRec['poser']
+}) {
+  const q = useDerivesLot(l.code_recu, l.lot)
+  const seuil = useParametreNombre('P_SeuilDerivePoidsPct', 5)
+  const derives = q.data ?? []
+  const bobines = Number(l.bobines)
+  const unitaire = kg != null && kg > 0 && bobines > 0 ? kg / bobines : null
+  const ecart = (d: DeriveLot) =>
+    unitaire != null && Number(d.poids_unitaire_kg) > 0
+      ? Math.abs(unitaire / Number(d.poids_unitaire_kg) - 1) * 100
+      : null
+  const proches = derives
+    .map((d) => ({ d, e: ecart(d) }))
+    .filter((x) => x.e != null && x.e <= seuil)
+    .sort((a, b) => (a.e as number) - (b.e as number))
+  const aucunProche = unitaire != null && proches.length === 0 && derives.some((d) => Number(d.poids_unitaire_kg) > 0)
+  const propose = derives.length > 1 ? (proches[0]?.d.code_derive ?? '') : ''
+  const choisi = l.codeDerive || propose
+  // Ce que l'ecran propose est ce qui part : la proposition entre dans la ligne.
+  useEffect(() => {
+    if (!l.codeDerive && !l.deriveNouveau && propose) poser(l.cle, 'codeDerive', propose)
+  }, [l.cle, l.codeDerive, l.deriveNouveau, propose, poser])
+  if (derives.length === 0) return null
+  return (
+    <div className="flex max-w-[30rem] flex-col gap-1">
+      {derives.length > 1 && !l.deriveNouveau && (
+        <label className="flex items-center gap-1.5 text-[12px]">
+          <span className="text-attenue-texte">Dérivé du lot</span>
+          <select
+            className={cn('h-7 rounded-[var(--radius)] border bg-surface px-1 text-[12px]', !choisi ? 'border-danger' : 'border-bordure')}
+            value={choisi}
+            onChange={(e) => poser(l.cle, 'codeDerive', e.target.value)}
+            aria-label="Dérivé du lot qui entre"
+          >
+            <option value="">Choisir…</option>
+            {derives.map((d) => (
+              <option key={d.code_derive} value={d.code_derive}>
+                {d.code_derive}
+                {d.poids_unitaire_kg ? ` — ${fmt.nombre(Number(d.poids_unitaire_kg), 3)} kg` : ''}
+                {d.conditionnement_libelle ? ` (${d.conditionnement_libelle})` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {(aucunProche || l.deriveNouveau) && (
+        <label className="flex items-start gap-1.5 rounded-[var(--radius)] border border-alerte/40 bg-alerte/5 px-2 py-1 text-[12px]">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={!!l.deriveNouveau}
+            onChange={(e) => poser(l.cle, 'deriveNouveau', e.target.checked)}
+          />
+          <span>
+            {unitaire != null && (
+              <>
+                {fmt.nombre(unitaire, 3)} kg par unité : à plus de {fmt.nombre(seuil, 1)} % des dérivés du lot (
+                {derives.map((d) => `${d.code_derive} ${d.poids_unitaire_kg ? fmt.nombre(Number(d.poids_unitaire_kg), 3) : '—'} kg`).join(', ')}
+                ).{' '}
+              </>
+            )}
+            Créer un nouveau dérivé de ce lot (même lot, autre forme physique) à ce poids ?
+          </span>
+        </label>
+      )}
+    </div>
   )
 }
 

@@ -37,6 +37,8 @@ import { api, ErreurApi } from '../api/client'
 import { EnTetePage } from '../composants/Coquille'
 import { Alerte, Bouton, SaisieNombre } from '../composants/ui/base'
 import { ChampLot } from '../composants/ChampLot'
+import { ChampDerive } from '../composants/ChampDerive'
+import { conditionnementDuDerive, useDerivesLots } from '../lib/derives'
 import { ChoixOF, ChoixQualite, qualiteDeLOf, useOfOuverts } from '../composants/ChoixOF'
 import { useConditionnementsLots } from '../hooks/useConditionnementLots'
 import {
@@ -55,6 +57,8 @@ interface Ligne {
   sens: Sens
   code_reference: string
   lot: string
+  /** Le derive du lot (06/11/2026), choisi seulement quand le lot en a plusieurs. */
+  derive: string
   /** La case tapee (kilos, palettes ou bobines) et sa valeur : les deux autres s'en deduisent. */
   saisiePar: ChampColis
   valeur: string
@@ -87,7 +91,7 @@ interface BilanOf {
 const aujourdhui = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Africa/Casablanca' })
 let compteur = 0
 const ligneVide = (sens: Sens = 'SORTIE'): Ligne => ({
-  cle: `h${++compteur}`, sens, code_reference: '', lot: '', saisiePar: 'quantite', valeur: '',
+  cle: `h${++compteur}`, sens, code_reference: '', lot: '', derive: '', saisiePar: 'quantite', valeur: '',
 })
 
 const LIBELLE_SENS: Record<Sens, string> = { SORTIE: 'Sortie (consommée)', RETOUR: 'Retour au magasin' }
@@ -142,13 +146,17 @@ export function FicheHorsMachine() {
   const article = (code: string) => articles.find((a) => a.code_reference === code)
   const bilan = (code: string) => (qBilan.data ?? []).find((b) => b.code_reference === code)
 
-  /* LE CONDITIONNEMENT DE LA LIGNE : celui de son lot, sinon de la fiche article. */
+  /* LE CONDITIONNEMENT DE LA LIGNE : celui de son derive (06/11/2026), sinon de
+     son lot, sinon de la fiche article. */
   const { condLot } = useConditionnementsLots(lignes.filter((l) => l.lot.trim()).map((l) => l.code_reference))
+  const { deriveDe } = useDerivesLots(
+    lignes.filter((l) => l.derive).map((l) => ({ reference: l.code_reference, lot: l.lot })),
+  )
   const condDe = (l: Ligne): Conditionnement => {
     const a = article(l.code_reference)
     return conditionnementDuLot(
       { poids_bobine_kg: a?.poids_bobine_kg ?? null, bobines_par_palette: a?.bobines_par_palette ?? null },
-      condLot(l.code_reference, l.lot),
+      conditionnementDuDerive(condLot(l.code_reference, l.lot), deriveDe(l.code_reference, l.lot, l.derive)),
     )
   }
   /** Les trois cases de la ligne : celle tapee telle quelle, les deux autres deduites. */
@@ -231,6 +239,8 @@ export function FicheHorsMachine() {
               nb_bobines: colis.bobines != null && colis.bobines > 0 ? colis.bobines : null,
               nb_palettes: colis.palettes != null && colis.palettes > 0 ? colis.palettes : null,
               lot_fournisseur: l.lot.trim() || null,
+              // Le derive choisi, quand le lot en a plusieurs (06/11/2026).
+              code_derive: (l.lot.trim() && l.derive) || null,
             }
           }),
         })
@@ -316,7 +326,7 @@ export function FicheHorsMachine() {
                 <option value="RETOUR">{LIBELLE_SENS.RETOUR}</option>
               </select>
               <div className="flex flex-col gap-0.5">
-                <select value={l.code_reference} onChange={(e) => maj(l.cle, { code_reference: e.target.value, lot: '' })}
+                <select value={l.code_reference} onChange={(e) => maj(l.cle, { code_reference: e.target.value, lot: '', derive: '' })}
                         aria-label="Référence" disabled={!entete.magasin} className={champ}>
                   <option value="">{entete.magasin ? 'Référence (mode DIRECTE)…' : 'Choisissez d’abord le magasin'}</option>
                   {articles.map((x) => (
@@ -331,9 +341,15 @@ export function FicheHorsMachine() {
                 )}
               </div>
               {l.code_reference && entete.magasin ? (
-                <ChampLot reference={l.code_reference} magasin={entete.magasin} valeur={l.lot}
-                          onChange={(v) => maj(l.cle, { lot: v })} invalide={a?.suivi_lot === 1 && !l.lot.trim()}
-                          proposerPlusAncien={l.sens === 'SORTIE'} className={cn(champ, 'w-full font-mono text-[12px]')} />
+                <div className="flex min-w-0 flex-col gap-1">
+                  <ChampLot reference={l.code_reference} magasin={entete.magasin} valeur={l.lot}
+                            onChange={(v) => maj(l.cle, { lot: v, derive: v === l.lot ? l.derive : '' })}
+                            invalide={a?.suivi_lot === 1 && !l.lot.trim()}
+                            proposerPlusAncien={l.sens === 'SORTIE'} className={cn(champ, 'w-full font-mono text-[12px]')} />
+                  {/* LE DERIVE, seulement si le lot en a plusieurs (06/11/2026). */}
+                  <ChampDerive reference={l.code_reference} lot={l.lot} magasin={entete.magasin} valeur={l.derive}
+                               onChange={(d) => maj(l.cle, { derive: d })} className={cn(champ, 'w-full text-[12px]')} />
+                </div>
               ) : (
                 <span className="min-h-[34px] py-2 text-[12px] text-attenue-texte">lot</span>
               )}

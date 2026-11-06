@@ -62,11 +62,14 @@ pub async fn disponible(State(state): State<AppState>, user: Utilisateur) -> App
     user.exiger(&state.db, module::RECEPTIONS, Action::Lire).await?;
     let lignes = sqlx::query(
         "SELECT * FROM (
+         -- Une ligne par derive quand le lot en a plusieurs (06/11/2026) : le
+         -- retour dit quelle forme physique repart.
          WITH lots AS (
-             SELECT code_reference, code_magasin, lot_fournisseur, quantite_kg
-               FROM stock_lot WHERE quantite_kg > 0
+             SELECT code_reference, code_magasin, lot_fournisseur, code_derive, nb_derives, quantite_kg
+               FROM v_stock_lot_derive WHERE quantite_kg > 0
          )
          SELECT sm.code_reference, ref.designation, sm.code_magasin, l.lot_fournisseur,
+                l.code_derive, l.nb_derives,
                 COALESCE(l.quantite_kg, sm.quantite_kg - COALESCE(
                     (SELECT sum(x.quantite_kg) FROM lots x
                       WHERE x.code_reference = sm.code_reference AND x.code_magasin = sm.code_magasin), 0))::float8
@@ -75,14 +78,14 @@ pub async fn disponible(State(state): State<AppState>, user: Utilisateur) -> App
            FROM stock_magasin sm
            JOIN reference ref ON ref.code_reference = sm.code_reference
            LEFT JOIN LATERAL (
-                SELECT lot_fournisseur, quantite_kg FROM lots x
+                SELECT lot_fournisseur, code_derive, nb_derives, quantite_kg FROM lots x
                  WHERE x.code_reference = sm.code_reference AND x.code_magasin = sm.code_magasin
-                UNION ALL SELECT NULL, NULL) l ON true
+                UNION ALL SELECT NULL, NULL, NULL, NULL) l ON true
           WHERE sm.quantite_kg > 0
          ) x
           -- La part sans lot n'est gardee que si elle reste positive.
           WHERE x.quantite_kg > 0.0005
-          ORDER BY x.code_reference, x.code_magasin, x.lot_fournisseur NULLS LAST",
+          ORDER BY x.code_reference, x.code_magasin, x.lot_fournisseur NULLS LAST, x.code_derive",
     )
     .fetch_all(&state.db)
     .await?;
@@ -115,6 +118,7 @@ pub async fn lire(State(state): State<AppState>, user: Utilisateur, Path(id): Pa
     }
     let lignes = sqlx::query(
         "SELECT l.ligne_numero, l.code_reference, ref.designation, l.code_magasin, l.lot_fournisseur,
+                l.code_derive,
                 l.quantite_kg, l.prix_kg_mad, round(l.quantite_kg * l.prix_kg_mad, 2) AS montant_ligne_mad,
                 l.nb_bobines, l.code_motif_ligne, ml.libelle AS motif_libelle,
                 mv.numero_mouvement, l.cmup_avant, l.cmup_apres, l.ecart_mad

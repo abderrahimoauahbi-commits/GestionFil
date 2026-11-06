@@ -76,6 +76,10 @@ impl TypeFiche {
 pub struct LigneFiche {
     pub code_reference: String,
     pub lot_fournisseur: String,
+    /// Le derive du lot cote magasin (06/11/2026) : d'ou l'on charge, ou l'on
+    /// decharge. Vide : le derive unique du lot.
+    #[serde(default)]
+    pub code_derive: Option<String>,
     /// Ce qui monte sur la machine ou en descend. NE SERT QU'A DEBITER OU
     /// CREDITER LE MAGASIN — jamais a faire l'etat.
     #[serde(default)]
@@ -822,11 +826,13 @@ async fn charger_decision(
     type LigneLue = (
         String, String, Option<i64>, Option<f64>, Option<f64>, Option<String>, Option<f64>, i64,
         Option<String>, Option<String>, Option<String>, Option<String>, Option<f64>, Option<String>,
+        Option<String>,
     );
     let lignes: Vec<LigneLue> = sqlx::query_as(
         "SELECT code_reference, lot_fournisseur, nb_bobines_mouvementees, poids_retenu_kg::float8,
                 pct_retirees::float8, destination, pourcentage::float8, nb_bobines_presentes,
-                code_motif, motif_texte, effet_ecart, id_of, largeur_voie_m::float8, code_qualite
+                code_motif, motif_texte, effet_ecart, id_of, largeur_voie_m::float8, code_qualite,
+                code_derive
            FROM machine_fiche_ligne WHERE id_fiche = $1 ORDER BY ligne_numero",
     )
     .bind(id)
@@ -853,6 +859,7 @@ async fn charger_decision(
             largeur_voie_m: t.12,
             // LA QUALITE DE LA LIGNE, A DEFAUT CELLE DE LA FICHE (23/10/2026).
             code_qualite: t.13.or_else(|| qualite_fiche.clone()),
+            derive: t.14,
         })
         .collect();
     let f = dm::FicheDecision {
@@ -1387,8 +1394,9 @@ async fn ecrire_lignes(
                   nb_bobines_presentes, poids_unitaire_kg, pourcentage, total_kg,
                   mode_constat, notes, lot_force, motif_lot_force,
                   poids_retenu_kg, pct_retirees, destination, code_motif, motif_texte, effet_ecart,
-                  id_of, largeur_voie_m, code_qualite)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)",
+                  id_of, largeur_voie_m, code_qualite, code_derive)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,
+                     NULLIF(btrim($25), ''))",
         )
         .bind(id)
         .bind(i as i64 + 1)
@@ -1419,6 +1427,7 @@ async fn ecrire_lignes(
         .bind(l.id_of.as_deref().filter(|o| !o.is_empty()))
         .bind(l.largeur_voie_m.filter(|v| *v > 0.0))
         .bind(qualite_saisie(&l.code_qualite))
+        .bind(&l.code_derive)
         .execute(&mut *tx)
         .await?;
     }

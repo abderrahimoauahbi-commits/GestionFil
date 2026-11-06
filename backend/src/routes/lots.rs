@@ -531,6 +531,7 @@ pub async fn decider_dormant(
         .fetch_all(&mut *tx)
         .await?;
         for (magasin, kg, bobines) in soldes {
+            let parts = parts_par_derive(&mut tx, &d.code_reference, &d.lot_fournisseur, &magasin, kg, bobines).await?;
             let numero = numeroter(&mut tx, "mouvement", "numero_mouvement", "MVT").await?;
             let id = uuid::Uuid::new_v4().to_string();
             sqlx::query(
@@ -547,19 +548,23 @@ pub async fn decider_dormant(
             .bind(&user.id)
             .execute(&mut *tx)
             .await?;
-            sqlx::query(
-                "INSERT INTO ligne_mouvement (id_mouvement, ligne_numero, code_reference, quantite_kg,
-                                              lot_fournisseur, nb_bobines, code_motif_ligne)
-                 VALUES ($1, 1, $2, $3, $4, NULLIF($5, 0), $6)",
-            )
-            .bind(&id)
-            .bind(&d.code_reference)
-            .bind(arrondi_kg(kg))
-            .bind(&d.lot_fournisseur)
-            .bind(bobines)
-            .bind(if d.decision == "DETRUIRE" { "R4" } else { "R6" })
-            .execute(&mut *tx)
-            .await?;
+            for (i, (derive, kg, bobines)) in parts.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO ligne_mouvement (id_mouvement, ligne_numero, code_reference, quantite_kg,
+                                                  lot_fournisseur, nb_bobines, code_motif_ligne, code_derive)
+                     VALUES ($1, $2, $3, $4, $5, NULLIF($6, 0), $7, $8)",
+                )
+                .bind(&id)
+                .bind(i as i64 + 1)
+                .bind(&d.code_reference)
+                .bind(arrondi_kg(*kg))
+                .bind(&d.lot_fournisseur)
+                .bind(*bobines)
+                .bind(if d.decision == "DETRUIRE" { "R4" } else { "R6" })
+                .bind(derive)
+                .execute(&mut *tx)
+                .await?;
+            }
             mouvements.push(numero);
         }
         sqlx::query("UPDATE lot SET statut = 'SOLDE' WHERE code_reference = $1 AND lot_fournisseur = $2")
@@ -630,7 +635,7 @@ pub async fn fusionner(
     .flatten();
 
     // Les sorties d'abord, en un mouvement ; l'entree ensuite, en un autre.
-    let mut sorties: Vec<(String, f64, i64)> = Vec::new();
+    let mut sorties: Vec<(String, f64, i64, Option<String>)> = Vec::new();
     for source in &d.lots_sources {
         let (st, _, frs) = lire_lot(&mut tx, &d.code_reference, source).await?;
         if st != "LIBRE" {
@@ -653,7 +658,9 @@ pub async fn fusionner(
             return Err(AppError::RegleMetier(format!("Le lot {source} n'a pas la meme couleur : la fusion est refusee.")));
         }
         if kg > 0.0 {
-            sorties.push((source.clone(), kg, bobines));
+            for (derive, kg, bobines) in parts_par_derive(&mut tx, &d.code_reference, source, &d.code_magasin, kg, bobines).await? {
+                sorties.push((source.clone(), kg, bobines, derive));
+            }
         }
     }
     if sorties.is_empty() {
@@ -663,10 +670,10 @@ pub async fn fusionner(
     let reference_doc = format!("FUSION {}", d.lot_cible);
     let numeros = deplacer_entre_lots(
         &mut tx, &user, &d.code_reference, &d.code_magasin, &sorties, &d.lot_cible,
-        &couleur_cible, "FUSION", &reference_doc, &motif,
+        &couleur_cible, "FUSION", &reference_doc, &motif, None,
     )
     .await?;
-    for (source, kg, _) in &sorties {
+    for (source, kg, _, _) in &sorties {
         let reste: f64 = sqlx::query_scalar(
             "SELECT COALESCE(sum(quantite_kg), 0)::float8 FROM stock_lot WHERE code_reference = $1 AND lot_fournisseur = $2",
         )
@@ -698,6 +705,41 @@ pub async fn fusionner(
     Ok(Json(json!({ "lot": d.lot_cible, "mouvements": numeros, "lots_fusionnes": sorties.len() })))
 }
 
+/// LE SOLDE D'UN LOT DANS UN MAGASIN, DERIVE PAR DERIVE (06/11/2026). Un lot a
+/// derive unique rend son solde tel quel (sans derive : la base pose le sien) ;
+/// un lot a plusieurs derives rend une part par derive en stock, lue du grand
+/// livre (`v_stock_derive`) — la base refuserait une ligne sans derive.
+async fn parts_par_derive(
+    tx: &mut sqlx::PgConnection,
+    reference: &str,
+    lot: &str,
+    magasin: &str,
+    kg: f64,
+    bobines: i64,
+) -> AppResult<Vec<(Option<String>, f64, i64)>> {
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lot_derive WHERE code_reference = $1 AND lot_fournisseur = $2",
+    )
+    .bind(reference)
+    .bind(lot)
+    .fetch_one(&mut *tx)
+    .await?;
+    if n <= 1 {
+        return Ok(vec![(None, kg, bobines)]);
+    }
+    let parts: Vec<(String, f64)> = sqlx::query_as(
+        "SELECT code_derive, quantite_kg::float8 FROM v_stock_derive
+          WHERE code_reference = $1 AND lot_fournisseur = $2 AND code_magasin = $3 AND quantite_kg > 0
+          ORDER BY code_derive",
+    )
+    .bind(reference)
+    .bind(lot)
+    .bind(magasin)
+    .fetch_all(&mut *tx)
+    .await?;
+    Ok(parts.into_iter().map(|(d, kg)| (Some(d), kg, 0)).collect())
+}
+
 /// DEPLACER DU STOCK D'UN LOT A L'AUTRE, DANS UN MAGASIN : une sortie des lots
 /// sources, puis une entree dans le lot cible, en deux mouvements INTERNES (sans
 /// effet sur le cout moyen ni sur les statistiques). C'est la meme ecriture
@@ -708,15 +750,30 @@ async fn deplacer_entre_lots(
     user: &Utilisateur,
     reference: &str,
     magasin: &str,
-    sorties: &[(String, f64, i64)],
+    sorties: &[(String, f64, i64, Option<String>)],
     cible: &str,
     couleur: &Option<String>,
     code_motif: &str,
     reference_doc: &str,
     observations: &str,
+    // Le derive d'arrivee impose (reconditionnement) ; sinon D1 si la cible en a plusieurs.
+    derive_impose: Option<&str>,
 ) -> AppResult<Vec<String>> {
     let jour = crate::db::aujourdhui();
     let mut numeros = Vec::new();
+    // L'entree va au derive d'origine (D1) de la cible quand elle en a plusieurs :
+    // des restes reunis n'ont plus la forme physique de leur fut ou de leur palette.
+    let derive_cible: Option<String> = match derive_impose {
+        Some(d) => Some(d.to_string()),
+        None => sqlx::query_scalar(
+            "SELECT 'D1' FROM lot_derive WHERE code_reference = $1 AND lot_fournisseur = $2
+              GROUP BY code_reference, lot_fournisseur HAVING count(*) > 1",
+        )
+        .bind(reference)
+        .bind(cible)
+        .fetch_optional(&mut *tx)
+        .await?,
+    };
     for (type_mvt, entree) in [("FUSION_SORTIE", false), ("FUSION_ENTREE", true)] {
         let numero = numeroter(&mut *tx, "mouvement", "numero_mouvement", "MVT").await?;
         let id = uuid::Uuid::new_v4().to_string();
@@ -736,11 +793,11 @@ async fn deplacer_entre_lots(
         .bind(&user.id)
         .execute(&mut *tx)
         .await?;
-        for (i, (source, kg, bobines)) in sorties.iter().enumerate() {
+        for (i, (source, kg, bobines, derive)) in sorties.iter().enumerate() {
             sqlx::query(
                 "INSERT INTO ligne_mouvement (id_mouvement, ligne_numero, code_reference, quantite_kg,
-                                              lot_fournisseur, nb_bobines, code_couleur)
-                 VALUES ($1, $2, $3, $4, $5, NULLIF($6, 0), $7)",
+                                              lot_fournisseur, nb_bobines, code_couleur, code_derive)
+                 VALUES ($1, $2, $3, $4, $5, NULLIF($6, 0), $7, $8)",
             )
             .bind(&id)
             .bind(i as i64 + 1)
@@ -749,6 +806,7 @@ async fn deplacer_entre_lots(
             .bind(if entree { cible } else { source.as_str() })
             .bind(*bobines)
             .bind(couleur)
+            .bind(if entree { &derive_cible } else { derive })
             .execute(&mut *tx)
             .await?;
         }
@@ -829,10 +887,15 @@ pub async fn identifier(
     let mut mouvements = Vec::new();
     let mut total = 0.0;
     for (magasin, kg, bobines, couleur) in &stocks {
-        let sorties = vec![(source.clone(), *kg, *bobines)];
+        let sorties: Vec<(String, f64, i64, Option<String>)> =
+            parts_par_derive(&mut tx, &d.code_reference, &source, magasin, *kg, *bobines)
+                .await?
+                .into_iter()
+                .map(|(derive, kg, bobines)| (source.clone(), kg, bobines, derive))
+                .collect();
         mouvements.extend(
             deplacer_entre_lots(&mut tx, &user, &d.code_reference, magasin, &sorties, &cible,
-                couleur, "IDENTIFICATION", &reference_doc, &motif).await?,
+                couleur, "IDENTIFICATION", &reference_doc, &motif, None).await?,
         );
         total += kg;
     }
@@ -1118,4 +1181,245 @@ pub async fn cockpit(State(state): State<AppState>, user: Utilisateur) -> AppRes
     user.exiger(&state.db, module::LOTS, Action::Lire).await?;
     let r = sqlx::query("SELECT * FROM v_cockpit_lots").fetch_all(&state.db).await?;
     Ok(Json(lignes_en_json(&r).get(0).cloned().unwrap_or(Value::Null)))
+}
+
+// ============================================================================
+// LE LOT DERIVE (06/11/2026) : les formes physiques d'un meme lot
+// ============================================================================
+
+#[derive(Debug, Deserialize)]
+pub struct FiltreDerives {
+    pub code_reference: String,
+    pub lot_fournisseur: String,
+}
+
+/// `GET /api/lots/derives?code_reference=&lot_fournisseur=` — les derives d'un
+/// lot (D1, D2…), leur conditionnement, leur statut et leur stock par magasin.
+pub async fn derives(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(f): Query<FiltreDerives>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    let rows = sqlx::query(
+        "SELECT d.code_reference, d.lot_fournisseur, d.code_derive,
+                COALESCE(d.code_conditionnement, r.code_conditionnement) AS code_conditionnement,
+                c.libelle AS conditionnement_libelle, c.unite_singulier, c.unite_pluriel,
+                d.poids_unitaire_kg::float8 AS poids_unitaire_kg, d.unites_par_palette,
+                d.statut, d.motif_statut, d.date_creation,
+                COALESCE((SELECT round(sum(v.quantite_kg), 4) FROM v_stock_derive v
+                           WHERE v.code_reference = d.code_reference AND v.lot_fournisseur = d.lot_fournisseur
+                             AND v.code_derive = d.code_derive), 0)::float8 AS quantite_kg,
+                COALESCE((SELECT jsonb_agg(jsonb_build_object('code_magasin', v.code_magasin,
+                                                               'quantite_kg', v.quantite_kg) ORDER BY v.code_magasin)
+                            FROM v_stock_derive v
+                           WHERE v.code_reference = d.code_reference AND v.lot_fournisseur = d.lot_fournisseur
+                             AND v.code_derive = d.code_derive AND v.quantite_kg <> 0), '[]'::jsonb) AS par_magasin
+           FROM lot_derive d
+           JOIN reference r ON r.code_reference = d.code_reference
+           LEFT JOIN conditionnement c ON c.code_conditionnement = COALESCE(d.code_conditionnement, r.code_conditionnement)
+          WHERE d.code_reference = $1 AND d.lot_fournisseur = $2
+          ORDER BY length(d.code_derive), d.code_derive",
+    )
+    .bind(f.code_reference.trim())
+    .bind(f.lot_fournisseur.trim())
+    .fetch_all(&state.db)
+    .await?;
+    let mut valeur = lignes_en_json(&rows);
+    user.masquer(&state.db, module::STOCK, &mut valeur).await?;
+    Ok(Json(valeur))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NouveauDerive {
+    pub code_conditionnement: Option<String>,
+    pub poids_unitaire_kg: Option<f64>,
+    pub unites_par_palette: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Reconditionnement {
+    pub code_reference: String,
+    pub lot_fournisseur: String,
+    pub code_magasin: String,
+    /// Le derive d'ou part la matiere ; vide : le derive unique du lot.
+    pub depuis: Option<String>,
+    /// Le derive ou elle arrive, s'il existe deja…
+    pub vers: Option<String>,
+    /// … sinon la forme physique du derive qui nait.
+    pub nouveau: Option<NouveauDerive>,
+    pub quantite_kg: f64,
+    pub motif: Option<String>,
+}
+
+/// `POST /api/lots/derives/reconditionner` — LE RECONDITIONNEMENT (06/11/2026) :
+/// transvaser, defaire une palette, changer de contenant. La matiere quitte un
+/// derive et entre dans un autre DU MEME LOT, au meme magasin : deux mouvements
+/// internes (FUSION_SORTIE / FUSION_ENTREE, motif RECONDITIONNEMENT), sans
+/// effet sur le cout moyen ni sur les statistiques. Le derive d'arrivee peut
+/// naitre ici (D2, D3…) : c'est ainsi qu'un lot recoit une seconde forme.
+pub async fn reconditionner(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Json(r): Json<Reconditionnement>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
+    let reference = texte_requis(&r.code_reference, "La reference")?;
+    let lot = texte_requis(&r.lot_fournisseur, "Le lot")?;
+    let magasin = texte_requis(&r.code_magasin, "Le magasin")?;
+    if !(r.quantite_kg.is_finite() && r.quantite_kg > 0.0) {
+        return Err(AppError::Invalide("La quantite a reconditionner doit etre positive (kg).".into()));
+    }
+    let motif = r
+        .motif
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(String::from)
+        .unwrap_or_else(|| "Reconditionnement".into());
+
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    lire_lot(&mut tx, &reference, &lot).await?;
+    let existants: Vec<String> = sqlx::query_scalar(
+        "SELECT code_derive FROM lot_derive WHERE code_reference = $1 AND lot_fournisseur = $2
+          ORDER BY length(code_derive), code_derive",
+    )
+    .bind(&reference)
+    .bind(&lot)
+    .fetch_all(&mut *tx)
+    .await?;
+    let depuis = match r.depuis.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+        Some(d) if existants.iter().any(|x| x == d) => d.to_string(),
+        Some(d) => return Err(AppError::Invalide(format!("Le lot {lot} n'a pas de derive {d}."))),
+        None if existants.len() == 1 => existants[0].clone(),
+        None => {
+            return Err(AppError::RegleMetier(format!(
+                "DERIVE-REQUIS : le lot {lot} a plusieurs derives : dites d'ou part la matiere."
+            )))
+        }
+    };
+    let vers = match (r.vers.as_deref().map(str::trim).filter(|d| !d.is_empty()), &r.nouveau) {
+        (Some(v), _) if v == depuis => {
+            return Err(AppError::Invalide("Le derive d'arrivee doit differer de celui de depart.".into()))
+        }
+        (Some(v), _) if existants.iter().any(|x| x == v) => v.to_string(),
+        (Some(v), _) => return Err(AppError::Invalide(format!("Le lot {lot} n'a pas de derive {v}."))),
+        (None, Some(n)) => {
+            if n.poids_unitaire_kg.is_some_and(|p| !(p.is_finite() && p > 0.0)) {
+                return Err(AppError::Invalide("Le poids d'une unite du nouveau derive doit etre positif.".into()));
+            }
+            if n.unites_par_palette.is_some_and(|u| u <= 0) {
+                return Err(AppError::Invalide("Les unites par palette du nouveau derive doivent etre positives.".into()));
+            }
+            let suivant = existants
+                .iter()
+                .filter_map(|d| d.trim_start_matches('D').parse::<i64>().ok())
+                .max()
+                .unwrap_or(0)
+                + 1;
+            let code = format!("D{suivant}");
+            sqlx::query(
+                "INSERT INTO lot_derive (code_reference, lot_fournisseur, code_derive, code_conditionnement,
+                                         poids_unitaire_kg, unites_par_palette, id_utilisateur)
+                 VALUES ($1, $2, $3, NULLIF(btrim($4), ''), $5, $6, $7)",
+            )
+            .bind(&reference)
+            .bind(&lot)
+            .bind(&code)
+            .bind(&n.code_conditionnement)
+            .bind(n.poids_unitaire_kg)
+            .bind(n.unites_par_palette)
+            .bind(&user.id)
+            .execute(&mut *tx)
+            .await?;
+            code
+        }
+        (None, None) => {
+            return Err(AppError::Invalide(
+                "Dites ou va la matiere : un derive existant, ou la forme du nouveau derive.".into(),
+            ))
+        }
+    };
+
+    // Le solde du derive de depart, dit avant la base (qui le garde aussi : R02-DERIVE).
+    let solde: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(sum(quantite_kg), 0)::float8 FROM v_stock_derive
+          WHERE code_reference = $1 AND lot_fournisseur = $2 AND code_derive = $3 AND code_magasin = $4",
+    )
+    .bind(&reference)
+    .bind(&lot)
+    .bind(&depuis)
+    .bind(&magasin)
+    .fetch_one(&mut *tx)
+    .await?;
+    let kg = arrondi_kg(r.quantite_kg);
+    if kg > solde + 0.0001 {
+        return Err(AppError::RegleMetier(format!(
+            "Le derive {depuis} du lot {lot} ne porte que {} kg au magasin {magasin}.",
+            arrondi_kg(solde)
+        )));
+    }
+    let sorties = vec![(lot.clone(), kg, 0_i64, Some(depuis.clone()))];
+    let reference_doc = format!("RECONDITIONNEMENT {lot} {depuis}>{vers}");
+    let numeros = deplacer_entre_lots(
+        &mut tx, &user, &reference, &magasin, &sorties, &lot, &None, "RECONDITIONNEMENT",
+        &reference_doc, &motif, Some(vers.as_str()),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({ "depuis": depuis, "vers": vers, "quantite_kg": kg, "mouvements": numeros })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StatutDerive {
+    pub code_reference: String,
+    pub lot_fournisseur: String,
+    pub code_derive: String,
+    /// LIBRE ou BLOQUE.
+    pub statut: String,
+    pub motif: Option<String>,
+}
+
+/// `POST /api/lots/derives/statut` — BLOQUER OU LIBERER UN DERIVE SEUL (06/11/2026),
+/// comme le lot entier : meme autorite (droit VALIDER des lots), motif obligatoire
+/// pour bloquer. Un derive bloque ne part ni en production ni sur machine (la base
+/// le garde : DERIVE-BLOQUE) ; il peut etre isole.
+pub async fn statut_derive(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Json(s): Json<StatutDerive>,
+) -> AppResult<Json<Value>> {
+    exiger_decision_lot(&state, &user).await?;
+    let statut = s.statut.trim().to_uppercase();
+    if !matches!(statut.as_str(), "LIBRE" | "BLOQUE") {
+        return Err(AppError::Invalide(format!("Statut de derive inconnu : {}.", s.statut)));
+    }
+    let motif = s.motif.as_deref().map(str::trim).filter(|m| !m.is_empty()).map(String::from);
+    if statut == "BLOQUE" && motif.is_none() {
+        return Err(AppError::Invalide("Bloquer un derive demande un motif.".into()));
+    }
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let n = sqlx::query(
+        "UPDATE lot_derive SET statut = $4, motif_statut = $5
+          WHERE code_reference = $1 AND lot_fournisseur = $2 AND code_derive = $3",
+    )
+    .bind(s.code_reference.trim())
+    .bind(s.lot_fournisseur.trim())
+    .bind(s.code_derive.trim())
+    .bind(&statut)
+    .bind(&motif)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if n == 0 {
+        return Err(AppError::Introuvable(format!(
+            "derive {} du lot {}",
+            s.code_derive.trim(),
+            s.lot_fournisseur.trim()
+        )));
+    }
+    tx.commit().await?;
+    Ok(Json(json!({ "code_derive": s.code_derive.trim(), "statut": statut })))
 }

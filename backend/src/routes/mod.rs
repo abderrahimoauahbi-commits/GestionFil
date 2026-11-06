@@ -518,6 +518,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/lots/dormant", post(lots::decider_dormant))
         .route("/api/lots/fusion", post(lots::fusionner))
         .route("/api/lots/identifier", post(lots::identifier))
+        // Le lot derive (06/11/2026) : formes physiques d'un meme lot.
+        .route("/api/lots/derives", get(lots::derives))
+        .route("/api/lots/derives/reconditionner", post(lots::reconditionner))
+        .route("/api/lots/derives/statut", post(lots::statut_derive))
         // Chaque lot a son conditionnement (23/10/2026) : lu par les ecrans de
         // saisie, corrige sur la fiche du lot.
         .route("/api/lots/conditionnement", get(lots::conditionnements).post(lots::corriger_conditionnement))

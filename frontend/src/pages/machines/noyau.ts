@@ -250,6 +250,8 @@ export interface FicheDetail {
 export interface LigneEnvoi {
   code_reference: string
   lot_fournisseur: string
+  /** Le derive du lot cote magasin (06/11/2026) ; vide : le seul du lot. */
+  code_derive?: string | null
   nb_bobines_mouvementees?: number | null
   poids_retenu_kg?: number | null
   pct_retirees?: number | null
@@ -276,6 +278,9 @@ export interface LigneSaisie {
   code_reference: string
   designation: string
   lot_fournisseur: string
+  /** Le derive du lot cote magasin (06/11/2026) : d'ou l'on charge, ou l'on
+      decharge. Vide : le derive unique du lot, pose par le serveur. */
+  code_derive?: string
   /** Chargement : a charger. Dechargement : a retirer. */
   mouvementees: number
   /** Constat : le nombre present. */
@@ -565,6 +570,8 @@ export function corpsFiche(
     lignes: lignesAEnvoyer(type, lignes).map((l): LigneEnvoi => ({
       code_reference: l.code_reference,
       lot_fournisseur: l.lot_fournisseur,
+      /* LE DERIVE ne sert qu'a debiter ou crediter le magasin (06/11/2026). */
+      code_derive: type === 'MAJ' ? null : l.code_derive || null,
       nb_bobines_mouvementees: type === 'MAJ' ? null : l.mouvementees,
       poids_retenu_kg: type === 'CHARGE' ? l.poids_retenu || null : null,
       pct_retirees: type === 'DECHARGE' ? l.pct_retirees : null,

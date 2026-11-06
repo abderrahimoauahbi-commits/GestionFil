@@ -117,6 +117,21 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
           WHERE table_name = 'ordre_fabrication' AND column_name = 'metrage_m2'",
     ),
     (
+        // Le lot dérivé à la réception (06/11/2026) : la ligne « nouveau dérivé »
+        // et la règle d'une ligne par lot ET par dérivé.
+        "2026-11-06h_derive_reception.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'ligne_reception' AND column_name = 'derive_nouveau')",
+    ),
+    (
+        // Le lot dérivé au grand livre et sur les documents (06/11/2026) : les
+        // routes de mouvement écrivent `code_derive`.
+        "2026-11-06g_lot_derive_lignes.sql",
+        "SELECT to_regclass('public.v_stock_lot_derive') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'ligne_mouvement' AND column_name = 'code_derive')",
+    ),
+    (
         // La fin de vie d'une référence (06/11/2026) : le moteur de couverture
         // et le stock projeté la lisent pour ne plus rien proposer.
         "2026-11-06e_reference_fin_de_vie.sql",

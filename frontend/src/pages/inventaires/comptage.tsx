@@ -23,6 +23,10 @@ export interface LigneInv extends Record<string, unknown> {
   designation: string | null
   code_magasin: string
   lot_fournisseur: string | null
+  /** Le derive compte (06/11/2026) : une ligne par derive quand le lot en a plusieurs. */
+  code_derive?: string | null
+  /** Pose par l'ecran (`marquerPlusieursDerives`) : une autre ligne du lot porte un autre derive. */
+  plusieurs_derives?: boolean
   quantite_theorique_kg: number
   quantite_comptee_kg: number | null
   ecart_kg: number | null
@@ -103,7 +107,12 @@ function conditionnementLigne(l: LigneInv): Conditionnement {
   return conditionnementDuLot(
     { poids_bobine_kg: positif(l.poids_bobine_kg), bobines_par_palette: positif(l.bobines_par_palette) },
     l.lot_fournisseur
-      ? { poids_bobine_kg: l.poids_bobine_lot_kg, bobines_par_palette: l.bobines_par_palette_lot }
+      ? {
+          // UN LOT EN PLUSIEURS DERIVES (06/11/2026) : le poids d'une unite DU
+          // DERIVE de la ligne, que le serveur y a pose (`fn_derive_poids_unitaire`).
+          poids_bobine_kg: (l.plusieurs_derives && positif(l.poids_unitaire_theorique_kg)) || l.poids_bobine_lot_kg,
+          bobines_par_palette: l.bobines_par_palette_lot,
+        }
       : null,
   )
 }
@@ -162,7 +171,9 @@ export function analyser(l: LigneInv, s: Saisie, tolMotif: number, enSaisie = fa
   const theoriqueKg = nombre(l.quantite_theorique_kg) ?? 0
   const vivant = positif(conditionnementLigne(l).poids_bobine_kg)
   const poidsTheorique = (enSaisie ? vivant : null) ?? positif(l.poids_unitaire_theorique_kg) ?? vivant
-  const poidsLot = l.lot_fournisseur ? positif(l.poids_bobine_lot_kg) : null
+  const poidsLot = l.lot_fournisseur
+    ? ((l.plusieurs_derives && positif(l.poids_unitaire_theorique_kg)) || positif(l.poids_bobine_lot_kg))
+    : null
   const poidsSource: Analyse['poidsSource'] =
     poidsTheorique === null ? null : poidsLot !== null && poidsLot === poidsTheorique ? 'lot' : 'fiche'
 
@@ -443,7 +454,9 @@ export function TableComptage({
                               l.lot_fournisseur === SANS_LOT ? 'italic' : 'bg-attenue font-mono',
                             )}
                           >
-                            {l.lot_fournisseur === SANS_LOT ? 'Sans lot' : `lot ${l.lot_fournisseur}`}
+                            {l.lot_fournisseur === SANS_LOT
+                              ? 'Sans lot'
+                              : `lot ${l.lot_fournisseur}${l.plusieurs_derives && l.code_derive ? ` · ${l.code_derive}` : ''}`}
                           </span>
                         )}
                         {l.designation && <span className="truncate">{l.designation}</span>}

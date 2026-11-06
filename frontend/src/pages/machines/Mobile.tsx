@@ -36,6 +36,8 @@ import { DemandesDerogation } from './Derogation'
 import { ChoixOF, useOfOuverts } from '../../composants/ChoixOF'
 import { chercherCatalogue } from '../../composants/ChampReference'
 import { QualiteLigne } from './qualiteLigne'
+import { ChampDerive, ChoixDerive } from '../../composants/ChampDerive'
+import { plusieursDerives, suffixeDerive, type LigneDerivee } from '../../lib/derives'
 
 interface Magasin {
   code_magasin: string
@@ -52,8 +54,11 @@ interface StockMagasin {
   poids_bobine_kg: number | null
 }
 
-/** Un lot en stock dans un magasin — ce qu'on peut monter sur la machine. */
-interface LotDispo {
+/**
+ * Un lot en stock dans un magasin — ce qu'on peut monter sur la machine. UNE
+ * LIGNE PAR DERIVE quand le lot en a plusieurs (06/11/2026).
+ */
+interface LotDispo extends LigneDerivee {
   code_reference: string
   designation: string
   poids_bobine_kg: number | null
@@ -63,6 +68,10 @@ interface LotDispo {
   nb_bobines: number
   date_premiere_entree: string
 }
+
+/** La valeur d'un choix de lot : le lot, et son derive s'il en a plusieurs (06/11/2026). */
+const SEP_DERIVE = '\u0001'
+const valeurLot = (lot: string, derive: string) => (derive ? `${lot}${SEP_DERIVE}${derive}` : lot)
 
 export function MachinesMobile() {
   const [machine, setMachine] = useState<Machine | null>(null)
@@ -404,8 +413,11 @@ export function FicheMobile({
     enabled: type === 'CHARGE' && !!f.entete.magasin,
   })
   const lotsDe = (code: string) => (qLots.data ?? []).filter((x) => x.code_reference === code)
-  const ajouterLot = (code: string, designation: string, poids: number | null, lot: string) => {
-    f.ajouter({ ...ligneNeuve(code, designation, poids ?? 0, poids), lot_fournisseur: lot })
+  /* UNE LIGNE DE LOT = LE LOT ET SON DERIVE (06/11/2026) ; le derive ne se dit
+     que si le lot en a plusieurs. */
+  const deriveDuChoix = (x: LotDispo) => (plusieursDerives(x) ? (x.code_derive ?? '') : '')
+  const ajouterLot = (code: string, designation: string, poids: number | null, lot: string, derive = '') => {
+    f.ajouter({ ...ligneNeuve(code, designation, poids ?? 0, poids), lot_fournisseur: lot, code_derive: derive })
     setActive(f.lignes.length)
     setChoix(false)
   }
@@ -438,7 +450,7 @@ export function FicheMobile({
         lots={qLots.data ?? []}
         stock={(qStock.data ?? []).filter((x) => x.quantite_kg > 0)}
         chargement={qLots.isLoading || qStock.isLoading}
-        dejaPris={new Set(f.lignes.map((x) => `${x.code_reference}|${x.lot_fournisseur}`))}
+        dejaPris={new Set(f.lignes.map((x) => `${x.code_reference}|${valeurLot(x.lot_fournisseur, x.code_derive ?? '')}`))}
         choisir={ajouterLot}
         fermer={() => setChoix(false)}
       />
@@ -529,7 +541,7 @@ export function FicheMobile({
               <span>{x.designation.slice(0, 14)}</span>
               {/* LE LOT DISTINGUE deux lignes d'une meme reference (24/10/2026). */}
               <span className={cn('font-mono text-[10px] font-normal', i === active ? 'opacity-90' : 'text-attenue-texte')}>
-                {libelleLot(x.lot_fournisseur)}
+                {libelleLot(x.lot_fournisseur)}{x.code_derive ? ` · ${x.code_derive}` : ''}
               </span>
             </button>
           ))}
@@ -541,7 +553,7 @@ export function FicheMobile({
           {/* --- L'ETAT AVANT ET L'ESTIMATION, AU-DESSUS DU CLAVIER ----------- */}
           <div className="rounded-[var(--radius-sm)] border-y-2 border-primaire bg-attenue px-3 py-2">
             <div className="mb-1 truncate text-[13px] font-medium text-texte">
-              {l.designation} <span className="font-mono text-[11px] font-normal text-attenue-texte">· {libelleLot(l.lot_fournisseur)}</span>
+              {l.designation} <span className="font-mono text-[11px] font-normal text-attenue-texte">· {libelleLot(l.lot_fournisseur)}{l.code_derive ? ` · ${l.code_derive}` : ''}</span>
             </div>
             <R t="Avant" v={`${l.avant_bobines} bob · ${l.avant_pourcentage != null ? nb(l.avant_pourcentage, 1) + ' %' : '—'} · ${nb(l.avant_kg, 1)} kg`} />
             {l.avant_date && <R t="Dernier état le" v={fmtDate(l.avant_date)} />}
@@ -555,19 +567,32 @@ export function FicheMobile({
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-attenue-texte">Lot (le plus ancien d’abord)</span>
               <select
-                value={l.lot_fournisseur}
-                onChange={(ev) => f.majLigne(l.cle, 'lot_fournisseur', ev.target.value)}
-                className="min-h-[48px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[14px]"
+                value={valeurLot(l.lot_fournisseur, l.code_derive ?? '')}
+                onChange={(ev) => {
+                  const [lot, derive = ''] = ev.target.value.split(SEP_DERIVE)
+                  f.majLigne(l.cle, 'lot_fournisseur', lot)
+                  f.majLigne(l.cle, 'code_derive', derive)
+                }}
+                className={cn(
+                  'min-h-[48px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[14px]',
+                  !l.code_derive &&
+                    lotsDe(l.code_reference).some((x) => x.lot_fournisseur === l.lot_fournisseur && plusieursDerives(x)) &&
+                    'border-danger',
+                )}
               >
-                {!lotsDe(l.code_reference).some((x) => x.lot_fournisseur === l.lot_fournisseur) &&
+                {!lotsDe(l.code_reference).some(
+                  (x) => valeurLot(x.lot_fournisseur, deriveDuChoix(x)) === valeurLot(l.lot_fournisseur, l.code_derive ?? ''),
+                ) &&
                   l.lot_fournisseur !== SANS_LOT && (
-                    <option value={l.lot_fournisseur}>{l.lot_fournisseur || '—'}</option>
+                    <option value={valeurLot(l.lot_fournisseur, l.code_derive ?? '')}>
+                      {l.lot_fournisseur || '—'}{l.code_derive ? ` · ${l.code_derive}` : ''}
+                    </option>
                   )}
                 {lotsDe(l.code_reference)
                   .filter((x) => x.lot_fournisseur !== SANS_LOT)
                   .map((x) => (
-                    <option key={x.lot_fournisseur} value={x.lot_fournisseur}>
-                      {x.lot_fournisseur} · {nb(x.quantite_kg, 0)} kg · {fmtDate(x.date_premiere_entree)}
+                    <option key={valeurLot(x.lot_fournisseur, deriveDuChoix(x))} value={valeurLot(x.lot_fournisseur, deriveDuChoix(x))}>
+                      {x.lot_fournisseur}{suffixeDerive(x)} · {nb(x.quantite_kg, 0)} kg · {fmtDate(x.date_premiere_entree)}
                     </option>
                   ))}
                 <option value={SANS_LOT}>Sans lot</option>
@@ -578,6 +603,31 @@ export function FicheMobile({
               <span className="text-[12px] text-attenue-texte">Lot</span>
               <span className="font-mono text-[13px]">{libelleLot(l.lot_fournisseur)}</span>
             </div>
+          )}
+          {/* LE DERIVE COTE MAGASIN d'une ligne deja sur l'etage, ou du dechargement
+              vers le magasin — seulement si le lot en a plusieurs (06/11/2026). */}
+          {l.lot_fournisseur && l.lot_fournisseur !== SANS_LOT && f.entete.magasin && (
+            type === 'CHARGE' && l.avant_bobines > 0 && l.mouvementees > 0 ? (
+              <ChoixDerive
+                options={lotsDe(l.code_reference)
+                  .filter((x) => x.lot_fournisseur === l.lot_fournisseur)
+                  .map((x) => ({ code_derive: x.code_derive ?? '', conditionnement: x.conditionnement_derive, quantite_kg: x.quantite_kg }))}
+                plusieurs={lotsDe(l.code_reference).some((x) => x.lot_fournisseur === l.lot_fournisseur && plusieursDerives(x))}
+                valeur={l.code_derive ?? ''}
+                onChange={(d) => f.majLigne(l.cle, 'code_derive', d)}
+                className="min-h-[48px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[14px]"
+              />
+            ) : type === 'DECHARGE' && l.mouvementees > 0 &&
+              (l.destination || (destinations.length === 1 ? destinations[0] : '')) === 'MAGASIN' ? (
+              <ChampDerive
+                reference={l.code_reference}
+                lot={l.lot_fournisseur}
+                magasin={f.entete.magasin}
+                valeur={l.code_derive ?? ''}
+                onChange={(d) => f.majLigne(l.cle, 'code_derive', d)}
+                className="min-h-[48px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[14px]"
+              />
+            ) : null
           )}
 
           {type === 'CHARGE' && (
@@ -920,7 +970,7 @@ function ChoixLot({
   stock: StockMagasin[]
   chargement: boolean
   dejaPris: Set<string>
-  choisir: (code: string, designation: string, poids: number | null, lot: string) => void
+  choisir: (code: string, designation: string, poids: number | null, lot: string, derive?: string) => void
   fermer: () => void
 }) {
   const [motif, setMotif] = useState('')
@@ -952,20 +1002,22 @@ function ChoixLot({
     (c) => !stock.some((x) => x.code_reference === c.code_reference) && correspond(`${c.code_reference} ${c.designation}`),
   )
 
-  const Choix = ({ code, designation, poids, lot, kg, detail, ancien }: {
-    code: string; designation: string; poids: number | null; lot: string; kg?: number; detail?: string; ancien?: boolean
+  const Choix = ({ code, designation, poids, lot, derive = '', suffixe = '', kg, detail, ancien }: {
+    code: string; designation: string; poids: number | null; lot: string; derive?: string; suffixe?: string
+    kg?: number; detail?: string; ancien?: boolean
   }) => {
-    const pris = dejaPris.has(`${code}|${lot}`)
+    // Le lot ET son derive : deux derives d'un meme lot sont deux choix (06/11/2026).
+    const pris = dejaPris.has(`${code}|${valeurLot(lot, derive)}`)
     return (
       <button
         type="button"
         disabled={pris}
-        onClick={() => choisir(code, designation, poids, lot)}
+        onClick={() => choisir(code, designation, poids, lot, derive)}
         className="flex min-h-[52px] w-full items-center gap-2 px-3 py-2 text-left active:bg-attenue disabled:opacity-40"
       >
         <div className="min-w-0 flex-1">
           <div className={cn('text-[13px] text-texte', lot === SANS_LOT ? 'italic' : 'font-mono')}>
-            {libelleLot(lot)}
+            {libelleLot(lot)}{suffixe}
             {ancien && (
               <span className="ml-2 rounded-full bg-info/15 px-1.5 py-0.5 font-sans text-[10px] font-medium not-italic text-info">
                 le plus ancien
@@ -1023,8 +1075,9 @@ function ChoixLot({
           </div>
           <div className="divide-y divide-bordure">
             {ls.map((x, i) => (
-              <Choix key={x.lot_fournisseur} code={st.code_reference} designation={st.designation}
+              <Choix key={valeurLot(x.lot_fournisseur, x.code_derive ?? '')} code={st.code_reference} designation={st.designation}
                 poids={st.poids_bobine_kg} lot={x.lot_fournisseur} kg={x.quantite_kg}
+                derive={plusieursDerives(x) ? (x.code_derive ?? '') : ''} suffixe={suffixeDerive(x)}
                 detail={`${x.code_couleur ? `${x.code_couleur} · ` : ''}entré le ${fmtDate(x.date_premiere_entree)}`}
                 ancien={i === 0 && ls.length > 1} />
             ))}

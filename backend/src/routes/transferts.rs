@@ -196,6 +196,7 @@ pub async fn creer_transfert(
             &state.db,
             &l.code_reference,
             l.lot_fournisseur.as_deref(),
+            l.code_derive.as_deref(),
             l.quantite_saisie,
             &l.unite_saisie,
         )
@@ -205,8 +206,8 @@ pub async fn creer_transfert(
             "INSERT INTO ligne_transfert
                  (id_transfert, ligne_numero, code_reference, quantite_kg,
                   quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur,
-                  nb_bobines, nb_palettes)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+                  nb_bobines, nb_palettes, code_derive)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF(btrim($11), ''))",
         )
         .bind(&id)
         .bind((i + 1) as i64)
@@ -218,6 +219,7 @@ pub async fn creer_transfert(
         .bind(&l.lot_fournisseur)
         .bind(l.nb_bobines)
         .bind(l.nb_palettes)
+        .bind(&l.code_derive)
         .execute(&mut *tx)
         .await?;
         posees += 1;
@@ -237,6 +239,9 @@ pub struct LigneTransfert {
     pub quantite_saisie: f64,
     pub unite_saisie: String,
     pub lot_fournisseur: Option<String>,
+    /// Le derive du lot qui part (06/11/2026) : obligatoire si le lot en a plusieurs.
+    #[serde(default)]
+    pub code_derive: Option<String>,
     /// Conditionnement compte au quai, independant de la conversion en kg.
     pub nb_bobines: Option<i64>,
     pub nb_palettes: Option<f64>,
@@ -250,7 +255,7 @@ pub async fn ajouter_ligne_transfert(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
     let (kg, facteur) =
-        super::stock::vers_kg_lot(&state.db, &l.code_reference, l.lot_fournisseur.as_deref(), l.quantite_saisie, &l.unite_saisie)
+        super::stock::vers_kg_lot(&state.db, &l.code_reference, l.lot_fournisseur.as_deref(), l.code_derive.as_deref(), l.quantite_saisie, &l.unite_saisie)
             .await?;
 
     let mut tx = state.db.begin().await?;
@@ -278,8 +283,8 @@ pub async fn ajouter_ligne_transfert(
         "INSERT INTO ligne_transfert
              (id_transfert, ligne_numero, code_reference, quantite_kg,
               quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur,
-              nb_bobines, nb_palettes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+              nb_bobines, nb_palettes, code_derive)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF(btrim($11), ''))",
     )
     .bind(&id)
     .bind(numero)
@@ -291,6 +296,7 @@ pub async fn ajouter_ligne_transfert(
     .bind(&l.lot_fournisseur)
     .bind(l.nb_bobines)
     .bind(l.nb_palettes)
+    .bind(&l.code_derive)
     .execute(&mut *tx)
     .await?;
 
@@ -335,7 +341,7 @@ pub async fn modifier_transfert(
             )));
         }
         let (kg, facteur) =
-            super::stock::vers_kg_lot(&state.db, &l.code_reference, l.lot_fournisseur.as_deref(), l.quantite_saisie, &l.unite_saisie)
+            super::stock::vers_kg_lot(&state.db, &l.code_reference, l.lot_fournisseur.as_deref(), l.code_derive.as_deref(), l.quantite_saisie, &l.unite_saisie)
             .await?;
         converties.push((l, kg, facteur));
     }
@@ -391,8 +397,8 @@ pub async fn modifier_transfert(
             "INSERT INTO ligne_transfert
                  (id_transfert, ligne_numero, code_reference, quantite_kg,
                   quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur,
-                  nb_bobines, nb_palettes)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+                  nb_bobines, nb_palettes, code_derive)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF(btrim($11), ''))",
         )
         .bind(&id)
         .bind((i + 1) as i64)
@@ -404,6 +410,7 @@ pub async fn modifier_transfert(
         .bind(&l.lot_fournisseur)
         .bind(l.nb_bobines)
         .bind(l.nb_palettes)
+        .bind(&l.code_derive)
         .execute(&mut *tx)
         .await?;
         total_kg += kg;

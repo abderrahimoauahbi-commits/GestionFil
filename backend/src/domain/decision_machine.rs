@@ -55,6 +55,10 @@ pub struct Saisie {
     /// defaut celle de la fiche. Avec un OF, elle doit etre la sienne ; sans OF,
     /// elle est obligatoire au chargement. Vide : celle de l'etat.
     pub code_qualite: Option<String>,
+    /// LE DERIVE DU LOT COTE MAGASIN (06/11/2026) : celui d'ou l'on charge, ou
+    /// celui ou l'on decharge. L'etage, lui, se tient par reference et lot.
+    /// Vide : le derive unique du lot (la base l'exige s'il y en a plusieurs).
+    pub derive: Option<String>,
 }
 
 /// LE NOMBRE DE BOBINES D'UNE VOIE (22/10/2026) : capacite de l'etage / largeur
@@ -150,6 +154,8 @@ pub struct Calculee {
     pub ligne_numero: i64,
     pub code_reference: String,
     pub lot_fournisseur: String,
+    /// Le derive du lot cote magasin (06/11/2026), porte au grand livre.
+    pub code_derive: Option<String>,
     pub poids_nominal_kg: f64,
     pub nb_avant: i64,
     pub kg_avant: f64,
@@ -438,12 +444,14 @@ pub async fn calculer(
         let declare = (f.type_fiche == "CHARGE" && nominal_etage.is_none())
             .then(|| s.poids_retenu.filter(|p| *p > 0.0))
             .flatten();
-        // A DEFAUT, LE POIDS D'UNE BOBINE DU LOT (23/10/2026), puis la fiche article.
+        // A DEFAUT, LE POIDS D'UNE BOBINE DU DERIVE (06/11/2026), du lot (23/10/2026),
+        // puis la fiche article.
         let nominal: Option<f64> = match nominal_etage.or(declare) {
             Some(p) => Some(p),
-            None => sqlx::query_scalar::<_, Option<f64>>("SELECT fn_lot_poids_bobine($1, $2)::float8")
+            None => sqlx::query_scalar::<_, Option<f64>>("SELECT fn_derive_poids_unitaire($1, $2, $3)::float8")
                 .bind(&s.reference)
                 .bind(&s.lot)
+                .bind(s.derive.as_deref().filter(|d| !d.trim().is_empty()))
                 .fetch_optional(&mut *c)
                 .await?
                 .flatten()
@@ -516,6 +524,7 @@ pub async fn calculer(
             ligne_numero: i as i64 + 1,
             code_reference: s.reference.clone(),
             lot_fournisseur: s.lot.clone(),
+            code_derive: s.derive.clone().filter(|d| !d.trim().is_empty()),
             poids_nominal_kg: nominal,
             nb_avant,
             kg_avant,
@@ -1299,8 +1308,8 @@ async fn ecrire_mouvement(
         sqlx::query(
             "INSERT INTO ligne_mouvement
                  (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
-                  lot_fournisseur, nb_bobines, lot_force, motif_lot_force)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+                  lot_fournisseur, nb_bobines, lot_force, motif_lot_force, code_derive)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
         )
         .bind(&id)
         .bind(i as i64 + 1)
@@ -1311,6 +1320,7 @@ async fn ecrire_mouvement(
         .bind(l.nb_mouvementees)
         .bind(i32::from(l.lot_force))
         .bind(l.motif_lot_force.as_deref())
+        .bind(&l.code_derive)
         .execute(&mut *c)
         .await?;
     }
@@ -1768,15 +1778,17 @@ pub async fn retirer(
         .execute(&mut *c)
         .await?;
         // Les memes lignes, a la VALEUR D'ORIGINE (le CMUP fige au chargement).
-        let lignes: Vec<(i64, String, f64, Option<f64>, Option<String>, Option<i64>)> = sqlx::query_as(
+        type LigneOrigine = (i64, String, f64, Option<f64>, Option<String>, Option<i64>, Option<String>);
+        let lignes: Vec<LigneOrigine> = sqlx::query_as(
             "SELECT ligne_numero, code_reference, quantite_kg::float8, prix_kg_mad::float8,
-                    lot_fournisseur, nb_bobines
+                    lot_fournisseur, nb_bobines, code_derive
                FROM ligne_mouvement WHERE id_mouvement = $1 ORDER BY ligne_numero",
         )
         .bind(&id_origine)
         .fetch_all(&mut *c)
         .await?;
-        for (n, reference, kg, prix_origine, lot, bobines) in lignes {
+        // Le derive suit (06/11/2026) : l'annulation touche la meme forme physique.
+        for (n, reference, kg, prix_origine, lot, bobines, derive) in lignes {
             let prix = if type_annul == "ANNUL_CHARGE_MACHINE" {
                 match prix_origine {
                     Some(p) => Some(p),
@@ -1788,8 +1800,8 @@ pub async fn retirer(
             sqlx::query(
                 "INSERT INTO ligne_mouvement
                      (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
-                      lot_fournisseur, nb_bobines)
-                 VALUES ($1,$2,$3,$4,$5,$6,$7)",
+                      lot_fournisseur, nb_bobines, code_derive)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
             )
             .bind(&id)
             .bind(n)
@@ -1798,6 +1810,7 @@ pub async fn retirer(
             .bind(prix)
             .bind(&lot)
             .bind(bobines)
+            .bind(&derive)
             .execute(&mut *c)
             .await?;
         }
@@ -1934,6 +1947,7 @@ mod tests {
             id_of: None,
             largeur_voie_m: voie,
             code_qualite: None,
+            derive: None,
         }
     }
 

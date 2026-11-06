@@ -21,6 +21,8 @@ struct LigneEcart {
     id_ligne_inv: String,
     code_reference: String,
     lot_fournisseur: Option<String>,
+    /// Le derive compte (06/11/2026) : l'ajustement touche cette forme physique.
+    code_derive: Option<String>,
     ecart_kg: f64,
     cmup_mad: Option<f64>,
     /// L'ecart en bobines, quand le comptage les a donnees : il fait le poids
@@ -127,17 +129,18 @@ pub async fn preparer(tx: &mut sqlx::PgConnection, id_inventaire: &str) -> AppRe
         let res = sqlx::query(
             "INSERT INTO ligne_inventaire
                  (id_inventaire, code_reference, code_magasin, lot_fournisseur, quantite_theorique_kg,
-                  nb_bobines_theorique, poids_unitaire_theorique_kg)
+                  nb_bobines_theorique, poids_unitaire_theorique_kg, code_derive)
              SELECT $1, sl.code_reference, sl.code_magasin, sl.lot_fournisseur, sl.quantite_kg,
-                    sl.nb_bobines, fn_lot_poids_bobine(sl.code_reference, sl.lot_fournisseur)
+                    sl.nb_bobines, fn_derive_poids_unitaire(sl.code_reference, sl.lot_fournisseur, sl.code_derive),
+                    sl.code_derive
                FROM inventaire_reference s
                JOIN reference r ON r.code_reference = s.code_reference AND r.suivi_lot = 1
-               JOIN stock_lot sl ON sl.code_reference = s.code_reference
+               JOIN v_stock_lot_derive sl ON sl.code_reference = s.code_reference
                                 AND sl.code_magasin = $2 AND sl.quantite_kg > 0
               WHERE s.id_inventaire = $1
              UNION ALL
              SELECT $1, r.code_reference, $2, NULL, COALESCE(sm.quantite_kg, 0),
-                    sm.nb_bobines, NULLIF(r.poids_bobine_kg, 0)
+                    sm.nb_bobines, NULLIF(r.poids_bobine_kg, 0), NULL
                FROM inventaire_reference s
                JOIN reference r ON r.code_reference = s.code_reference AND r.suivi_lot = 0
                LEFT JOIN stock_magasin sm ON sm.code_reference = r.code_reference
@@ -153,15 +156,16 @@ pub async fn preparer(tx: &mut sqlx::PgConnection, id_inventaire: &str) -> AppRe
     let res = sqlx::query(
         "INSERT INTO ligne_inventaire
              (id_inventaire, code_reference, code_magasin, lot_fournisseur, quantite_theorique_kg,
-              nb_bobines_theorique, poids_unitaire_theorique_kg)
+              nb_bobines_theorique, poids_unitaire_theorique_kg, code_derive)
          SELECT $1, sl.code_reference, sl.code_magasin, sl.lot_fournisseur, sl.quantite_kg,
-                sl.nb_bobines, fn_lot_poids_bobine(sl.code_reference, sl.lot_fournisseur)
-           FROM stock_lot sl
+                sl.nb_bobines, fn_derive_poids_unitaire(sl.code_reference, sl.lot_fournisseur, sl.code_derive),
+                sl.code_derive
+           FROM v_stock_lot_derive sl
            JOIN reference r ON r.code_reference = sl.code_reference AND r.suivi_lot = 1
           WHERE sl.code_magasin = $2 AND sl.quantite_kg > 0
          UNION ALL
          SELECT $1, r.code_reference, $2, NULL, COALESCE(sm.quantite_kg, 0),
-                sm.nb_bobines, NULLIF(r.poids_bobine_kg, 0)
+                sm.nb_bobines, NULLIF(r.poids_bobine_kg, 0), NULL
            FROM reference r
            LEFT JOIN stock_magasin sm ON sm.code_reference = r.code_reference
                                      AND sm.code_magasin   = $2
@@ -505,7 +509,7 @@ pub async fn cloturer(
     exiger_comptage_complet(&mut tx, id_inventaire).await?;
 
     let ecarts: Vec<LigneEcart> = sqlx::query_as(
-        "SELECT li.id_ligne_inv, li.code_reference, li.lot_fournisseur,
+        "SELECT li.id_ligne_inv, li.code_reference, li.lot_fournisseur, li.code_derive,
                 li.ecart_kg::float8 AS ecart_kg, sm.cmup_mad::float8 AS cmup_mad,
                 (li.nb_bobines_comptees - li.nb_bobines_theorique) AS ecart_bobines
            FROM ligne_inventaire li
@@ -586,8 +590,8 @@ pub async fn cloturer(
             sqlx::query(
                 "INSERT INTO ligne_mouvement
                      (id_mouvement, ligne_numero, code_reference, quantite_kg,
-                      lot_fournisseur, code_motif_ligne, nb_bobines)
-                 VALUES ($1, $2, $3, $4, $5, 'R6', $6)",
+                      lot_fournisseur, code_motif_ligne, nb_bobines, code_derive)
+                 VALUES ($1, $2, $3, $4, $5, 'R6', $6, $7)",
             )
             .bind(&id_mouvement)
             .bind((i + 1) as i64)
@@ -597,6 +601,7 @@ pub async fn cloturer(
             // Les bobines ne comptent que si elles vont dans le meme sens que
             // les kilos : sinon l'ecart de poids par bobine n'a pas de sens.
             .bind(l.ecart_bobines.filter(|b| *b != 0 && (*b > 0) == (signe > 0.0)).map(|b| b.abs()))
+            .bind(&l.code_derive)
             .execute(&mut *tx)
             .await?;
 

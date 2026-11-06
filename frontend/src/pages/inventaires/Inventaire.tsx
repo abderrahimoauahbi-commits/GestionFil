@@ -32,6 +32,7 @@ import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
 import { libelleLot } from '../../lib/lots'
 import { nouvelIdentifiant } from '../../lib/identifiant'
+import { marquerPlusieursDerives } from '../../lib/derives'
 import {
   LotTrouve,
   MODULE,
@@ -159,10 +160,11 @@ function DocumentInventaire({ id }: { id: string }) {
   const listeChangee = listeServeur.length === 0 || empreinteListe(liste) !== empreinteListe(listeServeur)
   const listeTouchee = aChoisir && listeLocale !== null && empreinteListe(listeLocale) !== empreinteListe(listeDepart)
 
-  /** Chaque ligne avec sa saisie courante et ce qu'on en calcule. */
+  /** Chaque ligne avec sa saisie courante et ce qu'on en calcule. Un lot en
+      plusieurs derives (06/11/2026) : chaque ligne le sait. */
   const vues = useMemo<LigneVue[]>(
     () =>
-      (qLignes.data ?? []).map((ligne) => {
+      marquerPlusieursDerives(qLignes.data ?? []).map((ligne) => {
         const serveur = saisieServeur(ligne)
         const saisie = brouillon[ligne.id_ligne_inv] ?? serveur
         return {
@@ -198,6 +200,8 @@ function DocumentInventaire({ id }: { id: string }) {
           code_reference: ligne.code_reference,
           code_magasin: ligne.code_magasin,
           lot_fournisseur: ligne.lot_fournisseur,
+          // Le derive de la ligne comptee (06/11/2026) : un lot en plusieurs a une ligne par derive.
+          code_derive: ligne.code_derive || null,
           quantite_comptee_kg: analyse.kg,
           motif_ecart: saisie.motif.trim() || null,
           nb_bobines: analyse.bobines,
@@ -557,7 +561,7 @@ function DocumentInventaire({ id }: { id: string }) {
                   .slice(0, 3)
                   .map(
                     (v) =>
-                      `${v.ligne.code_reference}${v.ligne.lot_fournisseur ? ` (${libelleLot(v.ligne.lot_fournisseur)})` : ''} : ${v.analyse.erreurs.join(', ')}`,
+                      `${v.ligne.code_reference}${v.ligne.lot_fournisseur ? ` (${libelleLot(v.ligne.lot_fournisseur)}${v.ligne.plusieurs_derives && v.ligne.code_derive ? ` · ${v.ligne.code_derive}` : ''})` : ''} : ${v.analyse.erreurs.join(', ')}`,
                   )
                   .join(' · ')}
                 {enErreur.length > 3 && ' …'}

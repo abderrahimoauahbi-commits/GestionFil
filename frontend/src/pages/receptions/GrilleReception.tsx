@@ -33,7 +33,7 @@
  * aucun tableau a faire defiler lateralement.
  */
 import { Fragment, useEffect, useState, type MouseEvent, type ReactNode } from 'react'
-import { Check, ChevronRight, Link2, Pencil, Trash2, Unlink2 } from 'lucide-react'
+import { Check, ChevronRight, CopyPlus, Link2, Pencil, Trash2, Unlink2 } from 'lucide-react'
 import { Badge, Bouton, Champ, Selecteur } from '../../composants/ui/base'
 import { AvisColisage } from '../../composants/AvisColisage'
 import { AvisDerive } from '../../composants/AvisDerive'
@@ -43,6 +43,7 @@ import { repartirCases, useLargeurConteneur } from '../../lib/rangeeAdaptative'
 import { codesStatut, libelleStatut } from '../../lib/statuts'
 import { cn, fmt } from '../../lib/utils'
 import { useDerivesLot, type DeriveLot } from '../../lib/derives'
+import { autreParPalette, formeDe, nouvelleForme, type Forme } from '../../lib/formeDerive'
 import { useParametreNombre } from '../../lib/parametres'
 
 /** Ce que l'ecran montre et laisse saisir d'une ligne de reception. */
@@ -102,6 +103,8 @@ export interface VueLigneRec {
   cond: Conditionnement
   /** Rang de la ligne precedente du meme lot (les pesees s'additionneront), ou 0. */
   rangMemeLot?: number
+  /** La premiere ligne du meme lot dans cette reception, sa forme (07/11/2026) ; null : celle-ci. */
+  premiereDuLot?: { kg: number | null; bobines: string; palettes: string; rang: number } | null
   /** Validation a l'ecran (reception existante) : absent = pas de bouton ✓. */
   valide?: boolean
 }
@@ -173,6 +176,8 @@ export interface ProprietesGrilleRec {
   poser: (cle: string, champ: ChampRec, valeur: string | boolean) => void
   /** Retirer une ligne ; absent, pas de corbeille (au controle, rien ne se retire). */
   surRetirer?: (cle: string) => void
+  /** Dedoubler une ligne (07/11/2026) : la meme ligne de bon recue en deux lots, ou en deux formes du meme lot. */
+  surDedoubler?: (cle: string) => void
   /** Au controle (A_CONTROLER) : quantites, colis, lot, unite et derogation sont figes (regle 4). */
   peseeFigee?: boolean
   /** Valider / rouvrir une ligne a l'ecran (reception existante, comme le bon). */
@@ -508,10 +513,14 @@ function Conditionnels({
 /**
  * LE DERIVE D'UNE LIGNE DE RECEPTION (06/11/2026). Pour un lot DEJA CONNU :
  * quand il a plusieurs derives, la personne dit lequel entre (le plus proche du
- * poids mesure est propose) ; quand le poids d'une unite mesure s'ecarte de plus
- * de P_SeuilDerivePoidsPct de tous ses derives, l'ecran PROPOSE un nouveau
- * derive — meme lot, autre forme physique —, que la personne confirme. Rien
- * d'automatique. Un lot qui nait avec cette reception n'a rien a choisir.
+ * poids mesure est propose). Quand la forme de la ligne differe de toutes
+ * celles du lot, l'ecran PROPOSE un nouveau derive — meme lot, autre forme
+ * physique —, que la personne confirme ; rien d'automatique. Une forme differe
+ * par le poids d'une unite (au-dela de P_SeuilDerivePoidsPct) ou, depuis le
+ * 07/11/2026, par le nombre d'unites par palette (decision de l'utilisateur :
+ * 16 palettes de 30 bobines et 2 de 100 font deux derives). Les formes
+ * comparees : les derives connus du lot, et la premiere ligne du meme lot dans
+ * cette reception — un lot qui arrive pour la premiere fois en deux formes.
  */
 function PropositionDerive({
   l,
@@ -525,8 +534,18 @@ function PropositionDerive({
   const q = useDerivesLot(l.code_recu, l.lot)
   const seuil = useParametreNombre('P_SeuilDerivePoidsPct', 5)
   const derives = q.data ?? []
-  const bobines = Number(l.bobines)
-  const unitaire = kg != null && kg > 0 && bobines > 0 ? kg / bobines : null
+  const forme = formeDe(kg, l.bobines, l.palettes)
+  const unitaire = forme.unitaire
+  // Les formes deja la : celles des derives du lot, et la premiere ligne du lot ici.
+  const premiere = l.premiereDuLot ? formeDe(l.premiereDuLot.kg, l.premiereDuLot.bobines, l.premiereDuLot.palettes) : null
+  const formes: Forme[] = [
+    ...derives.map((d) => ({
+      nom: d.code_derive,
+      unitaire: Number(d.poids_unitaire_kg) > 0 ? Number(d.poids_unitaire_kg) : null,
+      parPalette: Number(d.unites_par_palette) > 0 ? Number(d.unites_par_palette) : null,
+    })),
+    ...(premiere && l.premiereDuLot ? [{ ...premiere, nom: `ligne ${l.premiereDuLot.rang}` }] : []),
+  ]
   const ecart = (d: DeriveLot) =>
     unitaire != null && Number(d.poids_unitaire_kg) > 0
       ? Math.abs(unitaire / Number(d.poids_unitaire_kg) - 1) * 100
@@ -534,15 +553,17 @@ function PropositionDerive({
   const proches = derives
     .map((d) => ({ d, e: ecart(d) }))
     .filter((x) => x.e != null && x.e <= seuil)
+    .filter((x) => !autreParPalette(forme.parPalette, Number(x.d.unites_par_palette) || null))
     .sort((a, b) => (a.e as number) - (b.e as number))
-  const aucunProche = unitaire != null && proches.length === 0 && derives.some((d) => Number(d.poids_unitaire_kg) > 0)
+  // Une forme differente de TOUTES celles qu'on peut comparer (07/11/2026).
+  const aucunProche = nouvelleForme(forme, formes, seuil)
   const propose = derives.length > 1 ? (proches[0]?.d.code_derive ?? '') : ''
   const choisi = l.codeDerive || propose
   // Ce que l'ecran propose est ce qui part : la proposition entre dans la ligne.
   useEffect(() => {
     if (!l.codeDerive && !l.deriveNouveau && propose) poser(l.cle, 'codeDerive', propose)
   }, [l.cle, l.codeDerive, l.deriveNouveau, propose, poser])
-  if (derives.length === 0) return null
+  if (derives.length === 0 && !aucunProche && !l.deriveNouveau) return null
   return (
     <div className="flex max-w-[30rem] flex-col gap-1">
       {derives.length > 1 && !l.deriveNouveau && (
@@ -574,14 +595,23 @@ function PropositionDerive({
             onChange={(e) => poser(l.cle, 'deriveNouveau', e.target.checked)}
           />
           <span>
-            {unitaire != null && (
+            {(unitaire != null || forme.parPalette != null) && (
               <>
-                {fmt.nombre(unitaire, 3)} kg par unité : à plus de {fmt.nombre(seuil, 1)} % des dérivés du lot (
-                {derives.map((d) => `${d.code_derive} ${d.poids_unitaire_kg ? fmt.nombre(Number(d.poids_unitaire_kg), 3) : '—'} kg`).join(', ')}
-                ).{' '}
+                Cette ligne : {unitaire != null ? `${fmt.nombre(unitaire, 3)} kg par unité` : ''}
+                {unitaire != null && forme.parPalette != null ? ', ' : ''}
+                {forme.parPalette != null ? `${fmt.nombre(forme.parPalette, 1)} unités par palette` : ''} — autre forme que{' '}
+                {formes
+                  .map(
+                    (f) =>
+                      `${f.nom} (${f.unitaire != null ? `${fmt.nombre(f.unitaire, 3)} kg` : '—'}${
+                        f.parPalette != null ? `, ${fmt.nombre(f.parPalette, 1)} par palette` : ''
+                      })`,
+                  )
+                  .join(', ')}
+                .{' '}
               </>
             )}
-            Créer un nouveau dérivé de ce lot (même lot, autre forme physique) à ce poids ?
+            Créer un nouveau dérivé de ce lot (même lot, autre forme physique) ?
           </span>
         </label>
       )}
@@ -776,9 +806,9 @@ function CelluleEcart({ l, tolerancePct }: { l: VueLigneRec; tolerancePct: numbe
 }
 
 function TableauReception(props: ProprietesGrilleRec) {
-  const { lignes, poser, surRetirer, peseeFigee = false, surBasculerValidation, tolerancePct } = props
+  const { lignes, poser, surRetirer, surDedoubler, peseeFigee = false, surBasculerValidation, tolerancePct } = props
   const avecRetenue = lignes.some((l) => l.retenue !== undefined)
-  const lActions = 8 + 28 * ((surRetirer ? 1 : 0) + (surBasculerValidation ? 1 : 0))
+  const lActions = 8 + 28 * ((surRetirer ? 1 : 0) + (surDedoubler ? 1 : 0) + (surBasculerValidation ? 1 : 0))
   const fixe =
     (avecRetenue ? L_RETENUE : 0) + L_NUMERO + L_REFERENCE_MIN + L_BL + L_PESEE + L_UNITE + L_ECART + lActions
   const [ref, largeur] = useLargeurConteneur<HTMLDivElement>()
@@ -952,6 +982,17 @@ function TableauReception(props: ProprietesGrilleRec) {
                         {verrou ? <Pencil /> : <Check />}
                       </Bouton>
                     )}
+                    {surDedoubler && !figee && (
+                      <Bouton
+                        variante="discret"
+                        taille="icone-xs"
+                        onClick={() => surDedoubler(l.cle)}
+                        aria-label="Autre lot ou autre forme"
+                        title="Ajouter une ligne pour la même ligne de bon : un autre lot, ou une autre forme du même lot (autres palettes, autres fûts)"
+                      >
+                        <CopyPlus />
+                      </Bouton>
+                    )}
                     {surRetirer && (
                       <Bouton
                         variante="discret"
@@ -1009,7 +1050,7 @@ function TableauReception(props: ProprietesGrilleRec) {
 
 /** Sous 768 px : une carte par ligne, tous les champs empiles, rien a faire defiler. */
 function CartesReception(props: ProprietesGrilleRec) {
-  const { lignes, poser, surRetirer, peseeFigee = false, surBasculerValidation, tolerancePct } = props
+  const { lignes, poser, surRetirer, surDedoubler, peseeFigee = false, surBasculerValidation, tolerancePct } = props
   const cases = casesFacultatives(props, true)
   return (
     <ul className="space-y-2 p-2">
@@ -1050,6 +1091,16 @@ function CartesReception(props: ProprietesGrilleRec) {
                   onClick={() => surBasculerValidation(l.cle)}
                 >
                   {verrou ? <Pencil /> : <Check />}
+                </Bouton>
+              )}
+              {surDedoubler && !figee && (
+                <Bouton
+                  variante="discret"
+                  taille="icone-xs"
+                  onClick={() => surDedoubler(l.cle)}
+                  aria-label="Autre lot ou autre forme"
+                >
+                  <CopyPlus />
                 </Bouton>
               )}
               {surRetirer && (

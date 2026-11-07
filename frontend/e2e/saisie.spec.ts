@@ -185,18 +185,13 @@ test('bon de commande : la direction le contrôle, saisit la réponse du fournis
   await page.getByRole('button', { name: 'Soumettre à validation', exact: true }).click()
   // L'ecart se signale a la direction, il ne bloque pas.
   await expect(page.getByText('1 écart(s) de prix')).toBeVisible()
-  await page.getByRole('button', { name: 'Valider', exact: true }).click()
-  const taux = page.locator('input[inputmode=decimal]').first()
-  await saisir(taux, '10,05')
-  await saisir(taux.locator('xpath=ancestor::div[contains(@class,"grid")]//input').nth(1), 'Taux confirmé par la banque')
+  // AUCUNE ETAPE DE TAUX (decision du 07/11/2026) : « Valider » valide au cours
+  // de reference du jour, sans encadre ni confirmation.
+  const avant = (await lireApi<Record<string, unknown>[]>(page, '/api/bons-commande')).find((b) => b.id_bc === idBc)!
   const constats = [...veille.constats, ...(await mesurer(page))]
   await page.screenshot({ path: info.outputPath('bc-validation.png') })
-  consigner(info, 'saisie : validation du bon (taux)', constats, info.outputPath('bc-validation.png'))
-  await page.getByRole('button', { name: 'Valider à ce taux' }).click()
-  // Plus de 3 % d'ecart avec le cours BAM du jour (il varie) : l'ecran demande
-  // de confirmer, comme le ferait l'utilisateur.
-  const confirmer = page.getByRole('alertdialog').getByRole('button', { name: 'Je confirme ce taux' })
-  await confirmer.click({ timeout: 3000 }).catch(() => undefined)
+  consigner(info, 'saisie : validation du bon', constats, info.outputPath('bc-validation.png'))
+  await page.getByRole('button', { name: 'Valider', exact: true }).click()
 
   await expect(page.getByRole('button', { name: 'Envoyer au fournisseur' })).toBeVisible()
   // L'ecran du bon lit la liste et y prend le sien : on fait de meme.
@@ -204,8 +199,9 @@ test('bon de commande : la direction le contrôle, saisit la réponse du fournis
   const entete = bons.find((b) => b.id_bc === idBc)!
   expect(entete.statut).toBe('VALIDE')
   numeroBc = String(entete.numero_bc)
-  expect(Number(entete.taux_change_engage)).toBeCloseTo(10.05, 4)
-  expect(entete.motif_taux_engage).toBe('Taux confirmé par la banque')
+  expect(Number(entete.taux_change_engage)).toBeCloseTo(Number(avant.taux_du_jour), 4)
+  expect(entete.source_taux_engage).toBe('REFERENCE')
+  expect(entete.motif_taux_engage ?? null).toBeNull()
 
   await page.getByRole('button', { name: 'Envoyer au fournisseur' }).click()
   await expect(page.getByText(/^Envoy[ée]$/).first()).toBeVisible()

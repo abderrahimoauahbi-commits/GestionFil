@@ -229,11 +229,10 @@ export const TUTORIEL: Tutoriel = {
           route: '/bons-commande/:id',
           acces: 'Liste des bons, filtre « En attente de validation ».',
           gestes: [
-            '« Valider ». En devise, le taux du jour est proposé ; un autre taux (celui de la banque) se retient avec son motif.',
-            '« Valider à ce taux » : le taux est figé sur le bon.',
+            '« Valider ». En devise, le taux de référence du jour est engagé d’office et figé sur le bon.',
             'L’acheteur clique ensuite « Envoyer au fournisseur ».',
           ],
-          champs: ['Taux', 'Pourquoi ce taux'],
+          champs: ['Taux'],
           resultat: 'Le bon est validé puis envoyé : il engage, et ses lignes attendent la livraison.',
           erreur:
             'Un montant au-dessus du plafond du valideur : « Valider » reste grisé. Un bon validé par erreur se dévalide (il redevient brouillon), sauf s’il a déjà été livré.',

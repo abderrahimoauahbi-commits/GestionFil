@@ -382,6 +382,39 @@ export function ReceptionNouvelle() {
     setTimeout(() => allerALaLigne(nouvelles[0].cle), 60)
   }
 
+  /**
+   * DEDOUBLER UNE LIGNE (07/11/2026) : la meme ligne de bon arrive en deux lots,
+   * ou en deux formes du meme lot — 16 palettes de 30 bobines et 2 de 100, des
+   * futs de 600 et de 1 000 kg. La copie se place juste en dessous, avec le meme
+   * lot (a changer s'il en est un autre) et rien de compte. Meme lot : l'ecran
+   * compare les deux formes et propose le nouveau derive ; sans lui, les pesees
+   * s'additionnent. L'ecart au bon ne se lit que sur la premiere ligne.
+   */
+  const dedoubler = (cle: string) => {
+    const neuve = `${cle}:autre:${Date.now()}`
+    setLignes((ls) => {
+      const i = ls.findIndex((x) => x.cle === cle)
+      if (i < 0) return ls
+      const copie: Ligne = {
+        ...ls[i],
+        cle: neuve,
+        retenue: true,
+        reste_kg: null,
+        qte: '',
+        qteBl: '',
+        palettes: '',
+        bobines: '',
+        colis: '',
+        codeDerive: '',
+        deriveNouveau: false,
+        derogation: false,
+        motifDerogation: '',
+      }
+      return [...ls.slice(0, i + 1), copie, ...ls.slice(i + 1)]
+    })
+    setTimeout(() => allerALaLigne(neuve), 60)
+  }
+
   const retirerBon = (numeroBc: string) =>
     setLignes((l) => l.filter((x) => x.numero_bc !== numeroBc))
 
@@ -543,10 +576,24 @@ export function ReceptionNouvelle() {
     !sansMotif.length &&
     !sansFacteur.length
 
+  /**
+   * LE RESTE D'UNE LIGNE DE BON, NET DE SES LIGNES DEDOUBLEES (07/11/2026) : la
+   * premiere ligne porte le reste du bon ; ce que ses copies (autre lot, autre
+   * forme) apportent s'en deduit, pour que l'ecart et l'excedent se lisent sur
+   * le total recu, pas sur la seule premiere ligne.
+   */
+  const resteNet = (l: Ligne): number | null => {
+    if (l.reste_kg == null) return null
+    const copies = lignes.filter(
+      (x) => x.retenue && x.cle !== l.cle && x.reste_kg == null && x.id_ligne_bc != null && x.id_ligne_bc === l.id_ligne_bc,
+    )
+    return l.reste_kg - copies.reduce((s, x) => s + (kgDe(x) ?? 0), 0)
+  }
   const ecartDe = (l: Ligne) => {
     const kg = kgDe(l)
-    return l.reste_kg && l.reste_kg > 0 && kg !== null
-      ? ((kg - l.reste_kg) / l.reste_kg) * 100
+    const reste = resteNet(l)
+    return l.reste_kg && l.reste_kg > 0 && reste != null && kg !== null
+      ? ((kg - reste) / l.reste_kg) * 100
       : null
   }
   /**
@@ -556,9 +603,26 @@ export function ReceptionNouvelle() {
    * serveur — ou 0. Deux lots differents restent deux lignes.
    */
   const memeLot = (l: Ligne) => {
-    const cle = (x: Ligne) => `${x.id_ligne_bc ?? ''}|${x.code_recu}|${x.lot.trim()}`
-    const i = lignes.findIndex((x) => x.retenue && cle(x) === cle(l))
+    // Une ligne « nouveau derive » est une autre forme du lot : elle reste a part
+    // (07/11/2026) ; deux derives differents aussi.
+    if (l.deriveNouveau) return 0
+    const cle = (x: Ligne) => `${x.id_ligne_bc ?? ''}|${x.code_recu}|${x.lot.trim()}|${x.codeDerive ?? ''}`
+    const i = lignes.findIndex((x) => x.retenue && !x.deriveNouveau && cle(x) === cle(l))
     return i >= 0 && lignes[i].cle !== l.cle ? i + 1 : 0
+  }
+  /**
+   * LA PREMIERE LIGNE DU MEME LOT DANS CETTE RECEPTION (07/11/2026) : sa forme
+   * (kilos, bobines, palettes). Un lot qui arrive pour la premiere fois en deux
+   * formes — 16 palettes de 30 bobines et 2 de 100 — n'a encore aucun derive a
+   * comparer : la seconde ligne se compare a la premiere.
+   */
+  const premiereDuLot = (l: Ligne) => {
+    const lot = l.lot.trim()
+    if (!lot || !l.retenue) return null
+    const p = lignes.find(
+      (x) => x.retenue && x.code_recu === l.code_recu && x.lot.trim() === lot && !x.deriveNouveau,
+    )
+    return p && p.cle !== l.cle ? { kg: kgDe(p), bobines: p.bobines, palettes: p.palettes, rang: lignes.indexOf(p) + 1 } : null
   }
   const nbMemeLot = retenues.filter((l) => memeLot(l) > 0).length
 
@@ -684,7 +748,8 @@ export function ReceptionNouvelle() {
     code_recu: l.code_recu,
     designation: l.designation,
     numero_bc: l.numero_bc,
-    reste_kg: l.reste_kg,
+    // Net des lignes dedoublees : l'ecart de la grille se lit sur le total recu.
+    reste_kg: resteNet(l),
     retard_jours: l.retard_jours,
     en_cours_kg: l.en_cours_kg,
     en_cours_dans: l.en_cours_dans,
@@ -719,6 +784,7 @@ export function ReceptionNouvelle() {
     date_promise: l.date_livraison_prevue,
     cond: condLiaison(l),
     rangMemeLot: l.retenue ? memeLot(l) : 0,
+    premiereDuLot: premiereDuLot(l),
   }))
 
   /* LES INDICATEURS DE LA BARRE (24/10/2026) : des quantites, chacune avec sa
@@ -727,11 +793,17 @@ export function ReceptionNouvelle() {
   const rang = (l: Ligne) => lignes.findIndex((x) => x.cle === l.cle) + 1
   const avecBl = retenues.filter((l) => l.qteBl.trim() !== '')
   const totalBl = avecBl.reduce((s, l) => s + Number(l.qteBl), 0)
-  const peseAvecBl = avecBl.reduce((s, l) => s + (kgDe(l) ?? 0), 0)
   const avecBc = retenues.filter((l) => l.reste_kg != null)
   const totalBc = avecBc.reduce((s, l) => s + (l.reste_kg ?? 0), 0)
-  const peseAvecBc = avecBc.reduce((s, l) => s + (kgDe(l) ?? 0), 0)
   const somme = (ls: Ligne[], f: (l: Ligne) => number | null) => ls.reduce((s, l) => s + (f(l) ?? 0), 0)
+  /* LES LIGNES DEDOUBLEES COMPTENT AVEC LEUR LIGNE DE BON (07/11/2026) : une copie
+     sans BL ni reste propre pese pour le BL et le bon de la ligne qu'elle dedouble. */
+  const avecSesCopies = (base: Ligne[]) =>
+    retenues.filter(
+      (l) => base.includes(l) || (l.reste_kg == null && l.qteBl.trim() === '' && base.some((b) => b.id_ligne_bc != null && b.id_ligne_bc === l.id_ligne_bc)),
+    )
+  const peseAvecBc = somme(avecSesCopies(avecBc), kgDe)
+  const peseAvecBl = somme(avecSesCopies(avecBl), kgDe)
   const palettesComptees = somme(retenues, (l) => (l.palettes.trim() === '' ? 0 : Number(l.palettes)))
   const bobinesComptees = somme(retenues, (l) => (l.bobines.trim() === '' ? 0 : Number(l.bobines)))
   const palettesAttendues = somme(avecBc, (l) => depuisKg(l.reste_kg, condLiaison(l)).palettes)
@@ -1078,6 +1150,7 @@ export function ReceptionNouvelle() {
                   magasins={qMag.data ?? []}
                   poser={poser}
                   surRetirer={(cle) => setLignes((x) => x.filter((y) => y.cle !== cle))}
+                  surDedoubler={dedoubler}
                   voitPrix={voitPrix}
                 />
               )}

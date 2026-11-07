@@ -333,7 +333,7 @@ export const FICHES_ACHATS: Sujet[] = [
         etapes: [
           'Bouton « Valider », pour qui a le droit de valider, n’est pas le créateur (l’ADMIN excepté) et dont le plafond couvre le montant.',
           'Bon en MAD : il passe validé aussitôt.',
-          'Bon en devise : la carte « Valider le bon : le taux engagé » propose le taux de référence du jour. Gardez-le, ou saisissez celui que la banque confirme avec son motif, puis « Valider à ce taux ».',
+          'Bon en devise : « Valider » engage le taux de référence du jour, sans autre étape (décision du 07/11/2026). Le taux réel se règle à la facture et au paiement.',
           'Un taux à plus de 3 % du cours Bank Al-Maghrib demande une confirmation (« Je confirme ce taux »).',
         ],
         resultat:
@@ -492,14 +492,7 @@ export const FICHES_ACHATS: Sujet[] = [
         nom: 'Taux',
         alias: ['Taux EUR/MAD', 'Taux USD/MAD'],
         description:
-          'À la validation d’un bon en devise : le taux engagé, proposé au taux de référence du jour. Une fois validé, il est figé sur le bon.',
-        obligatoire: true,
-      },
-      {
-        nom: 'Pourquoi ce taux',
-        description: 'Demandé seulement si le taux diffère du taux proposé : cours confirmé par la banque, couverture…',
-        obligatoire: true,
-        valeurs: 'cinq caractères au moins',
+          'À la validation d’un bon en devise : le taux de référence du jour, engagé sans étape de saisie. Une fois validé, il est figé sur le bon.',
       },
       {
         nom: 'Motif',

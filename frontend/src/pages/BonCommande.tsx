@@ -331,7 +331,6 @@ export function BonCommande() {
   const confirmationTaux = useConfirmation()
   /* LA VALIDATION D'UN BON EN DEVISE, saisie sur la page (regle 10) : le cours
      du jour est propose ; un autre taux se retient avec son motif. */
-  const [validation, setValidation] = useState<{ taux: string; motif: string } | null>(null)
   /* LE MOTIF D'UN RENVOI EN BROUILLON OU D'UNE DEMANDE DE PRIX SAUTEE
      (21/10/2026), saisi sur la page. */
   const [motifAction, setMotifAction] = useState<{
@@ -370,7 +369,6 @@ export function BonCommande() {
     onSuccess: (_r, c) => {
       const statut = typeof c === 'string' ? c : c.statut
       toast.success(`Bon passé en « ${libelleStatut('bon_commande', statut).toLowerCase()} »`)
-      setValidation(null)
       setMotifAction(null)
       rafraichir()
     },
@@ -1088,11 +1086,10 @@ export function BonCommande() {
             )}
             {droits.peutValider && bc.statut === 'EN_ATTENTE_VALIDATION' && (
               <Bouton
-                onClick={() =>
-                  bc.code_devise === 'MAD'
-                    ? changerStatut.mutate('VALIDE')
-                    : setValidation({ taux: bc.taux_du_jour != null ? String(bc.taux_du_jour) : '', motif: '' })
-                }
+                // AUCUNE ETAPE DE TAUX (decision du 07/11/2026) : le bon se valide au
+                // cours de reference du jour ; le taux reel se regle a la facture et au
+                // paiement. Le serveur garde ses gardes (cours absent ou trop ancien).
+                onClick={() => changerStatut.mutate('VALIDE')}
                 disabled={estCreateur || depassePlafond}
                 title={
                   estCreateur
@@ -1146,65 +1143,6 @@ export function BonCommande() {
         }
       />
       {confirmationTaux.element}
-
-      {validation && (
-        <Carte className="mb-3">
-          <CarteEntete>
-            <CarteTitre>Valider le bon : le taux engagé</CarteTitre>
-          </CarteEntete>
-          <CarteCorps className="space-y-2">
-            <p className="m-0 text-[12.5px] text-attenue-texte">
-              Proposé : le taux de référence du jour
-              {bc.taux_du_jour != null ? ` (${fmt.nombre(bc.taux_du_jour, 4)} ${bc.code_devise}/MAD)` : ''}. Un autre
-              taux — celui que la banque confirme — se retient avec son motif. Une fois validé, il est figé sur le bon.
-            </p>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <div>
-                <Etiq obligatoire htmlFor="ch-boncommande-1">Taux {bc.code_devise}/MAD</Etiq>
-                <Champ id="ch-boncommande-1"
-                  inputMode="decimal"
-                  className="text-right tabular-nums"
-                  value={validation.taux}
-                  onChange={(e) => setValidation({ ...validation, taux: e.target.value })}
-                />
-              </div>
-              {(lireNombre(validation.taux) ?? 0) !== Number(bc.taux_du_jour ?? NaN) && (
-                <div className="sm:col-span-2">
-                  <Etiq obligatoire htmlFor="ch-boncommande-2">Pourquoi ce taux</Etiq>
-                  <Champ id="ch-boncommande-2"
-                    value={validation.motif}
-                    onChange={(e) => setValidation({ ...validation, motif: e.target.value })}
-                    placeholder="Cours confirmé par la banque, couverture…"
-                  />
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Bouton
-                chargement={changerStatut.isPending}
-                disabled={
-                  !((lireNombre(validation.taux) ?? 0) > 0) ||
-                  ((lireNombre(validation.taux) ?? 0) !== Number(bc.taux_du_jour ?? NaN) &&
-                    validation.motif.trim().length < 5)
-                }
-                onClick={() =>
-                  changerStatut.mutate({
-                    statut: 'VALIDE',
-                    taux_saisi: (lireNombre(validation.taux) ?? 0),
-                    motif_taux: validation.motif.trim() || undefined,
-                  })
-                }
-              >
-                <ShieldCheck />
-                Valider à ce taux
-              </Bouton>
-              <Bouton variante="contour" onClick={() => setValidation(null)}>
-                Annuler
-              </Bouton>
-            </div>
-          </CarteCorps>
-        </Carte>
-      )}
 
       {motifAction && (
         <Carte className="mb-3">

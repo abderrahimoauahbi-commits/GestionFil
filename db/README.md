@@ -239,6 +239,12 @@ Les migrations du 09/10/2026 (audit v5) et du 10/10 ajoutent, tous en **signal**
 | C69 | article soumis au MRP (actif, au besoin du plan en service) sans couverture cible : aucune proposition — servi par le moteur de couverture en Rust, aucun SQL, hors `v_controles` | 27l (moteur v2) |
 | C70 | titrage de la référence (valeur en tête du libellé, unité écrite ou non) différent de celui de sa famille — le titrage reste un libellé ; un signal, jamais un refus | 2026-11-06d |
 
+**L'acquittement (07/11/2026, `2026-11-07a`).** Une ligne du détail d'un contrôle ATTENTION ou
+CRITIQUE peut être acquittée (`controle_acceptation` : empreinte md5 de la ligne en jsonb, motif,
+auteur) ; un BLOQUANT jamais (CHECK). L'acquittement vaut tant que l'anomalie existe : une lecture
+qui ne la retrouve plus le lève (`DISPARUE`) ; retiré à la main, `RETIREE`. Il ne se supprime ni ne
+se modifie (`ACQUIT-FIGE`). `v_controles` n'en tient pas compte : le compte reste brut.
+
 **Le 27/10/2026 (migration 27e, une seule source de vérité : le moteur de couverture).** **C05**
 (plan non couvert sur l'horizon, ex-« stock projeté négatif ») et **C25** (stock mobilisable face à
 un équivalent en tension) gardent leur sens mais sont **calculés par le moteur et servis par le

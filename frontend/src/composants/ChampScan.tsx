@@ -26,6 +26,11 @@ export interface EtiquetteLue {
   code_reference: string
   designation: string | null
   lot_fournisseur: string | null
+  /** Le derive de la bobine (06/11/2026) : celui de sa ligne de reception, sinon
+      le seul du lot ; vide quand le lot en a plusieurs et que l'etiquette, plus
+      ancienne, ne le dit pas — l'ecran le demande alors. */
+  code_derive: string | null
+  nb_derives: number | null
   code_magasin_dest: string | null
   numero_reception: string
   statut_reception: string
@@ -69,7 +74,8 @@ export function ChampScan({
       }
       lues.current.add(code)
       toast.success(
-        `${e.designation ?? e.code_reference} — lot ${e.lot_fournisseur ?? '—'} · ` +
+        `${e.designation ?? e.code_reference} — lot ${e.lot_fournisseur ?? '—'}` +
+          `${(e.nb_derives ?? 0) > 1 && e.code_derive ? ` ${e.code_derive}` : ''} · ` +
           `${e.nature === 'BOBINE' ? 'bobine' : 'palette'} ${e.rang}/${e.nombre}`,
       )
     } catch (err) {

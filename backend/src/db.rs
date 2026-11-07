@@ -110,6 +110,12 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // L'acquittement d'une anomalie de contrôle (07/11/2026) : la liste des
+        // contrôles lit les acquittements en cours.
+        "2026-11-07a_controle_acceptation.sql",
+        "SELECT to_regclass('public.controle_acceptation') IS NOT NULL",
+    ),
+    (
         // L'OF au métrage vide (06/11/2026) : la création accepte un OF sans
         // m², que la base refuserait sans cette migration.
         "2026-11-06a_of_metrage_facultatif.sql",

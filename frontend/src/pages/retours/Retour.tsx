@@ -66,6 +66,7 @@ interface RetourDoc {
     code_magasin: string
     lot_fournisseur: string | null
     code_derive?: string | null
+    nb_derives?: number | null
     quantite_kg: number
     prix_kg_mad?: number | null
     montant_ligne_mad?: number | null
@@ -548,7 +549,10 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                     </td>
                     <td className={td}>
                       {l.code_magasin}
-                      <div className="font-mono text-[11px] text-attenue-texte">{l.lot_fournisseur ?? 'sans lot'}</div>
+                      <div className="font-mono text-[11px] text-attenue-texte">
+                        {l.lot_fournisseur ?? 'sans lot'}
+                        {l.lot_fournisseur && (l.nb_derives ?? 0) > 1 && ` · ${l.code_derive || 'D1'}`}
+                      </div>
                     </td>
                     <td className={cn(td, 'text-right tabular-nums')}>
                       {fmt.nombre(l.quantite_kg, 2)}

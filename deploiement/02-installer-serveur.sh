@@ -97,6 +97,14 @@ CORS_ORIGINS=tauri://localhost,http://tauri.localhost
 # Dossier des sauvegardes.
 GESTIONFIL_SAUVEGARDES=/opt/gestionfil/sauvegardes
 
+# Nombre de sauvegardes gardees sur le serveur (quotidienne et fermeture) ;
+# au-dela, les plus anciennes sont purgees apres chaque sauvegarde automatique.
+GESTIONFIL_SAUVEGARDES_GARDER=10
+
+# COPIE HORS DU SERVEUR : un dossier monte depuis un autre support (NAS, partage
+# d'un autre poste, disque USB). Vide : aucune copie. Le serveur ne la purge pas.
+GESTIONFIL_COPIE_EXTERNE=
+
 # Les pieces jointes (factures, DUM) : un dossier du compte de service,
 # archive avec chaque sauvegarde.
 GESTIONFIL_PIECES=/opt/gestionfil/pieces
@@ -160,7 +168,7 @@ User=$UTILISATEUR
 Group=$UTILISATEUR
 WorkingDirectory=$RACINE
 EnvironmentFile=$RACINE/.env
-ExecStart=$RACINE/gestionfil-admin sauvegarder
+ExecStart=$RACINE/gestionfil-admin sauvegarder --automatique
 SERVICE
 
 cat > /etc/systemd/system/gestionfil-sauvegarde.timer <<'TIMER'
@@ -184,8 +192,17 @@ TIMER
 # LA PREUVE QUE LA SAUVEGARDE SE RESTAURE (10/10/2026) : chaque semaine, la plus
 # recente est restauree dans une base temporaire, controlee (schema, migrations,
 # C11), puis effacee. La base vivante n'est pas touchee. Le resultat se lit par
-# `journalctl -u gestionfil-verif-sauvegarde`. Le role de la base doit pouvoir
-# creer une base (CREATEDB) : `restaurer` en a besoin aussi.
+# `journalctl -u gestionfil-verif-sauvegarde` et, depuis le 07/11/2026, dans
+# l'ecran Configuration (derniere-verification.json, a cote des sauvegardes).
+# Le role de la base doit pouvoir creer une base (CREATEDB) : `restaurer` en a
+# besoin aussi. Il le recoit ici (07/11/2026) : accorde a la main jusque-la, une
+# reinstallation l'aurait perdu et la verification aurait echoue sans bruit.
+if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'gestionfil'" | grep -q 1; then
+    sudo -u postgres psql -q -c "ALTER ROLE gestionfil CREATEDB"
+    echo "  role gestionfil : CREATEDB (verification et restauration des sauvegardes)"
+else
+    echo "  ATTENTION : role gestionfil absent ; apres sa creation : ALTER ROLE gestionfil CREATEDB;"
+fi
 cat > /etc/systemd/system/gestionfil-verif-sauvegarde.service <<SERVICE
 [Unit]
 Description=Verification hebdomadaire : la derniere sauvegarde Gestion Fil se restaure

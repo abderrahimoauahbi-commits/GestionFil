@@ -977,6 +977,107 @@ pub async fn supprimer_bc(
     Ok(Json(json!({ "supprime": id, "lignes": lignes, "statut_avant": statut })))
 }
 
+/// Le corps de la revision de la date de livraison prevue d'un bon parti.
+#[derive(Debug, Deserialize)]
+pub struct RevisionLivraison {
+    pub date_livraison_prevue: String,
+    /// Une seule ligne ; absente, tout le bon (son en-tete et ses lignes ouvertes).
+    #[serde(default)]
+    pub id_ligne_bc: Option<String>,
+    /// La version lue par l'ecran (verrou optimiste).
+    #[serde(default)]
+    pub version: Option<i64>,
+}
+
+/// `POST /api/bons-commande/{id}/date-livraison` — REVISER LA DATE DE LIVRAISON
+/// PREVUE D'UN BON PARTI (07/11/2026). Le fournisseur annonce un retard, ou une
+/// avance : la nouvelle date remplace l'ancienne, et le moteur de couverture
+/// compte la commande a cette date — comme la date d'un transfert en route.
+/// Seulement sur un bon valide, envoye ou livre en partie : le brouillon se
+/// corrige par sa saisie, le bon solde ou annule n'attend plus rien. Une ligne
+/// seule, ou tout le bon : son en-tete et chacune de ses lignes encore ouvertes.
+/// La date ne s'efface pas. L'audit garde l'ancienne et la nouvelle date.
+pub async fn reviser_date_livraison(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(r): Json<RevisionLivraison>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::BONS_COMMANDE, Action::Ecrire).await?;
+    let version = crate::domain::concurrence::exigee(r.version)?;
+    let date = r.date_livraison_prevue.trim();
+    if date.is_empty() {
+        return Err(AppError::Invalide(
+            "La date de livraison prevue est obligatoire : elle se revise, elle ne s'efface pas.".into(),
+        ));
+    }
+
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    exiger_version(&mut tx, "bon_commande", "id_bc", &id, Some(version), "Ce bon de commande").await?;
+    let statut: String = sqlx::query_scalar("SELECT statut FROM bon_commande WHERE id_bc = $1")
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::Introuvable(format!("bon de commande {id}")))?;
+    if !matches!(statut.as_str(), "VALIDE" | "ENVOYE" | "LIVRE_PARTIEL") {
+        return Err(AppError::RegleMetier(format!(
+            "BC-DATE : la date de livraison se revise sur un bon valide, envoye ou livre en partie ;              ce bon est {statut}{}.",
+            if statut == "BROUILLON" { " : corrigez-la dans sa saisie" } else { "" }
+        )));
+    }
+    let lignes = match r.id_ligne_bc.as_deref().map(str::trim).filter(|x| !x.is_empty()) {
+        Some(ligne) => {
+            let n = sqlx::query(
+                "UPDATE ligne_bc SET date_livraison_prevue = fn_jour_casablanca($3)
+                  WHERE id_bc = $1 AND id_ligne_bc = $2",
+            )
+            .bind(&id)
+            .bind(ligne)
+            .bind(date)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+            if n == 0 {
+                return Err(AppError::Introuvable(format!("ligne {ligne} du bon de commande")));
+            }
+            n
+        }
+        None => {
+            sqlx::query("UPDATE bon_commande SET date_livraison_prevue = fn_jour_casablanca($2) WHERE id_bc = $1")
+                .bind(&id)
+                .bind(date)
+                .execute(&mut *tx)
+                .await?;
+            // Les lignes qui portent leur propre date et attendent encore du fil ;
+            // une ligne sans date suit l'en-tete.
+            sqlx::query(
+                "UPDATE ligne_bc SET date_livraison_prevue = fn_jour_casablanca($2)
+                  WHERE id_bc = $1 AND date_livraison_prevue IS NOT NULL
+                    AND COALESCE(quantite_restante_kg, 0) > 0",
+            )
+            .bind(&id)
+            .bind(date)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected()
+        }
+    };
+    let (date_entete, version): (Option<chrono::NaiveDate>, i64) = sqlx::query_as(
+        "SELECT date_livraison_prevue, version::bigint FROM bon_commande WHERE id_bc = $1",
+    )
+    .bind(&id)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({
+        "id_bc": id,
+        "date_livraison_prevue": date_entete,
+        "lignes_revisees": lignes,
+        "version": version
+    })))
+}
+
 pub async fn changer_statut_bc(
     State(state): State<AppState>,
     user: Utilisateur,

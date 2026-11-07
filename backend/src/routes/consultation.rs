@@ -815,7 +815,16 @@ pub async fn substituer_proposition(
 pub async fn controles(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::COCKPIT, Action::Lire).await?;
     let etats = super::couverture::etats(&state.db).await?;
-    let mut valeur = Value::Array(super::couverture::tous_les_controles(&state.db, &etats).await?);
+    let mut controles = super::couverture::tous_les_controles(&state.db, &etats).await?;
+    // Les anomalies deja vues et acquittees (07/11/2026) ; le compte brut reste.
+    let acquittees = super::acquittements::acquittees_par_controle(&state.db, &user, &etats).await?;
+    for c in controles.iter_mut() {
+        let code = c["code"].as_str().unwrap_or_default().to_uppercase();
+        if let Some(o) = c.as_object_mut() {
+            o.insert("acquittees".into(), json!(acquittees.get(&code).copied().unwrap_or(0)));
+        }
+    }
+    let mut valeur = Value::Array(controles);
     user.masquer(&state.db, module::COCKPIT, &mut valeur).await?;
     Ok(Json(valeur))
 }
@@ -922,43 +931,16 @@ pub async fn controle_detail(
     user.exiger(&state.db, module::COCKPIT, Action::Lire).await?;
 
     // Le code alimente un nom de vue : il est valide contre une liste blanche
-    // stricte, jamais interpole tel quel.
-    let code = code.to_lowercase();
-    let valide = code.len() == 3
-        && code.starts_with('c')
-        && code[1..].chars().all(|c| c.is_ascii_digit());
-    if !valide {
-        return Err(AppError::Invalide(format!("code de controle invalide : {code}")));
-    }
-
-    // Les controles du moteur de couverture (C05, C25) n'ont pas de vue.
-    if super::couverture::CONTROLES_MOTEUR.iter().any(|(c, _, _)| c.eq_ignore_ascii_case(&code)) {
-        let etats = super::couverture::etats(&state.db).await?;
-        let mut sortie = super::couverture::controle_moteur_detail(&state.db, &etats, &code)
-            .await?
-            .unwrap_or(Value::Array(Vec::new()));
-        user.masquer(&state.db, module::COCKPIT, &mut sortie).await?;
-        return Ok(Json(sortie));
-    }
-
-    let vue = format!("v_ctl_{code}");
-    let existe: i64 =
-        sqlx::query_scalar(
-            "SELECT COUNT(*) FROM information_schema.views
-              WHERE table_schema = 'public' AND table_name = $1",
-        )
-            .bind(&vue)
-            .fetch_one(&state.db)
-            .await?;
-    if existe == 0 {
-        return Err(AppError::Introuvable(format!("controle {code}")));
-    }
-
-    let rows = sqlx::query(&format!("SELECT * FROM {vue}"))
-        .fetch_all(&state.db)
-        .await?;
+    // stricte, jamais interpole tel quel. Les controles du moteur de couverture
+    // (C05, C25, C68, C69) n'ont pas de vue : leurs lignes viennent du moteur.
+    // Chaque ligne porte son empreinte et, s'il y a lieu, son acquittement
+    // (07/11/2026).
+    let mut lignes = super::acquittements::lignes_du_controle(&state.db, None, &code)
+        .await?
+        .ok_or_else(|| AppError::Introuvable(format!("controle {code}")))?;
+    super::acquittements::annoter(&state.db, &user, &code, &mut lignes).await?;
     // C12 et C14 listent des prix et des couts : masques comme ailleurs.
-    let mut sortie = lignes_en_json(&rows);
+    let mut sortie = Value::Array(lignes);
     user.masquer(&state.db, module::COCKPIT, &mut sortie).await?;
     Ok(Json(sortie))
 }

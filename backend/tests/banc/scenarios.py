@@ -4267,7 +4267,10 @@ def scenario_migrations_rejouables(c, infra):
                 # Phase 2 : les documents portent le derive, une ligne d'inventaire par derive.
                 "2026-11-06g_lot_derive_lignes.sql",
                 # Phase 3 : le derive nait a la reception (seuil, ligne par derive, mesure de D1).
-                "2026-11-06h_derive_reception.sql"):
+                "2026-11-06h_derive_reception.sql",
+                # 07/11 : l'acquittement des controles ; le realise par les OF clotures.
+                "2026-11-07a_controle_acceptation.sql",
+                "2026-11-07b_realise_par_of.sql"):
         try:
             infra.psql(infra.base, "-q", "-f", str(dossier / nom))
         except RuntimeError as e:
@@ -6516,6 +6519,145 @@ def scenario_derive_reception(c, infra):
     verifier(poids_lot == "3.0000", f"le lot (son D1) a fondu les deux formes dans sa mesure : {poids_lot}")
 
 
+def scenario_acquittement_controle(c, infra):
+    """L'ACQUITTEMENT D'UNE ANOMALIE DE CONTROLE (point 4, 07/11/2026) : ATTENTION / CRITIQUE seulement,
+    jamais un BLOQUANT ; droit VALIDER des controles ; motif exige ; valable tant que l'anomalie existe
+    (disparue, il est leve et ne couvre pas son retour) ; retire, il reste leve ; rien ne s'efface."""
+    ref, famille = infra.sql(
+        "SELECT r.code_reference, r.code_famille FROM reference r JOIN famille f USING (code_famille) "
+        "WHERE r.actif = 1 ORDER BY r.code_reference LIMIT 1")[0]
+    titrage_r = infra.valeur(f"SELECT COALESCE(titrage, '') FROM reference WHERE code_reference = '{ref}'")
+    titrage_f = infra.valeur(f"SELECT COALESCE(titrage, '') FROM famille WHERE code_famille = '{famille}'")
+    infra.sql(f"UPDATE famille SET titrage = '1500' WHERE code_famille = '{famille}'")
+    infra.sql(f"UPDATE reference SET titrage = '999' WHERE code_reference = '{ref}'")
+
+    def ligne():
+        lignes = c.ok("Choukri", "GET", "/api/controles/C70")
+        trouvees = [l for l in lignes if l.get("code_reference") == ref]
+        verifier(len(trouvees) == 1, f"C70 ne montre pas l'anomalie de {ref} : {len(trouvees)}")
+        verifier(len(trouvees[0].get("empreinte_anomalie") or "") == 32, f"ligne sans empreinte : {trouvees[0]}")
+        return trouvees[0]
+
+    l = ligne()
+    corps = {"empreinte": l["empreinte_anomalie"], "motif": "titrage commercial, voulu"}
+    c.refus("Magasinie", "POST", "/api/controles/C70/acquittements", corps, codes=(403,))
+    c.refus("Choukri", "POST", "/api/controles/C70/acquittements", dict(corps, motif=" "), codes=(400,))
+    c.refus("Choukri", "POST", "/api/controles/C70/acquittements", dict(corps, empreinte="0" * 32),
+            contient="ACQUIT-ABSENTE")
+    c.refus("Choukri", "POST", "/api/controles/C01/acquittements", corps, contient="ACQUIT-BLOQUANT")
+    a = c.ok("Choukri", "POST", "/api/controles/C70/acquittements", corps)
+    c.refus("Choukri", "POST", "/api/controles/C70/acquittements", corps, contient="ACQUIT-DEJA")
+    l = ligne()
+    verifier(l.get("id_acceptation") == a["id_acceptation"] and l.get("motif_acceptation") == corps["motif"]
+             and l.get("acquittee_par"), f"la ligne ne porte pas son acquittement : {l}")
+    c70 = [k for k in c.ok("Choukri", "GET", "/api/controles") if k["code"] == "C70"][0]
+    verifier(c70.get("acquittees", 0) >= 1 and c70["anomalies"] >= c70["acquittees"],
+             f"le compte des acquittees : {c70}")
+    qui = infra.valeur("SELECT count(*) FROM audit_log WHERE table_concernee = 'controle_acceptation' "
+                       "AND id_utilisateur IS NOT NULL")
+    verifier(int(qui) >= 1, "l'acquittement n'est pas au journal d'audit avec son auteur")
+    # La trace ne s'efface ni ne se reecrit.
+    refus_sql(infra, f"DELETE FROM controle_acceptation WHERE id_acceptation = '{a['id_acceptation']}'", "ACQUIT-FIGE")
+    refus_sql(infra, f"UPDATE controle_acceptation SET motif = 'autre' WHERE id_acceptation = '{a['id_acceptation']}'",
+              "ACQUIT-FIGE")
+    refus_sql(infra, "INSERT INTO controle_acceptation (code_controle, criticite, empreinte, anomalie, motif, id_utilisateur) "
+                     "SELECT 'C01', 'BLOQUANT', md5('x'), '{}'::jsonb, 'jamais', id_utilisateur FROM utilisateur LIMIT 1",
+              "check")
+
+    # L'anomalie disparait : l'acquittement est leve, et ne couvre pas son retour.
+    infra.sql(f"UPDATE reference SET titrage = '1500' WHERE code_reference = '{ref}'")
+    c.ok("Choukri", "GET", "/api/controles/C70")
+    leve = infra.valeur(f"SELECT motif_levee FROM controle_acceptation WHERE id_acceptation = '{a['id_acceptation']}'")
+    verifier(leve == "DISPARUE", f"anomalie disparue, acquittement non leve : {leve}")
+    infra.sql(f"UPDATE reference SET titrage = '999' WHERE code_reference = '{ref}'")
+    l = ligne()
+    verifier(not l.get("id_acceptation"), f"une anomalie revenue reste acquittee : {l}")
+
+    # Retirer : l'anomalie redevient a traiter ; l'acquittement reste, leve.
+    b = c.ok("Choukri", "POST", "/api/controles/C70/acquittements", {"empreinte": l["empreinte_anomalie"], "motif": "vu, laisse"})
+    c.refus("Magasinie", "POST", f"/api/acquittements/{b['id_acceptation']}/lever", {}, codes=(403,))
+    c.ok("Choukri", "POST", f"/api/acquittements/{b['id_acceptation']}/lever", {})
+    verifier(not ligne().get("id_acceptation"), "acquittement retire mais encore pose sur la ligne")
+    leve = infra.valeur(f"SELECT motif_levee || '/' || (id_utilisateur_levee IS NOT NULL)::text "
+                        f"FROM controle_acceptation WHERE id_acceptation = '{b['id_acceptation']}'")
+    verifier(leve == "RETIREE/true", f"retrait : {leve}")
+    c.refus("Choukri", "POST", f"/api/acquittements/{b['id_acceptation']}/lever", {}, codes=(404,))
+
+    infra.sql(f"UPDATE reference SET titrage = NULLIF('{titrage_r}', '') WHERE code_reference = '{ref}'")
+    infra.sql(f"UPDATE famille SET titrage = NULLIF('{titrage_f}', '') WHERE code_famille = '{famille}'")
+
+
+def scenario_bc_date_revisee(c, infra):
+    """LA DATE DE LIVRAISON D'UN BON PARTI SE REVISE (point 12, 07/11/2026) : sur un bon valide, envoye ou
+    livre en partie ; tout le bon (en-tete et lignes encore ouvertes qui portent leur date) ou une ligne ;
+    droit d'ecriture des bons ; version exigee ; jamais effacee ; l'audit garde l'avant et l'apres."""
+    A = "PLA 100 EXT"
+    id_bc, lignes = bon_envoye(c, [(A, 100, 21)], frs="FRS-012")
+    id_ligne = lignes[0]["id_ligne_bc"]
+    infra.sql(f"UPDATE ligne_bc SET date_livraison_prevue = current_date + 10 WHERE id_ligne_bc = '{id_ligne}'")
+    nouvelle = infra.valeur("SELECT to_char(current_date + 40, 'YYYY-MM-DD')")
+    v = lambda: int(infra.valeur(f"SELECT version FROM bon_commande WHERE id_bc = '{id_bc}'"))
+    chemin = f"/api/bons-commande/{id_bc}/date-livraison"
+    c.refus("Magasinie", "POST", chemin, {"date_livraison_prevue": nouvelle, "version": v()}, codes=(403,))
+    c.refus("Assistante", "POST", chemin, {"date_livraison_prevue": "", "version": v()}, codes=(400,))
+    c.refus("Assistante", "POST", chemin, {"date_livraison_prevue": nouvelle}, codes=(400,))
+    c.refus("Assistante", "POST", chemin, {"date_livraison_prevue": nouvelle, "version": v() - 1}, codes=(409,))
+    r = c.ok("Assistante", "POST", chemin, {"date_livraison_prevue": nouvelle, "version": v()})
+    verifier(r["lignes_revisees"] == 1, f"lignes revisees : {r}")
+    dates = infra.sql(f"SELECT bc.date_livraison_prevue::text, lb.date_livraison_prevue::text FROM bon_commande bc "
+                      f"JOIN ligne_bc lb USING (id_bc) WHERE bc.id_bc = '{id_bc}'")[0]
+    verifier(dates == [nouvelle, nouvelle], f"dates apres revision : {dates} au lieu de {nouvelle}")
+    trace = infra.valeur(f"SELECT count(*) FROM audit_log WHERE table_concernee = 'ligne_bc' "
+                         f"AND id_enregistrement = '{id_ligne}' AND operation = 'UPDATE' AND id_utilisateur IS NOT NULL "
+                         f"AND nouvelles_valeurs::text LIKE '%{nouvelle}%'")
+    verifier(int(trace) >= 1, "la revision de la ligne n'est pas au journal d'audit")
+    # Une ligne seule.
+    autre = infra.valeur("SELECT to_char(current_date + 55, 'YYYY-MM-DD')")
+    c.ok("Assistante", "POST", chemin, {"date_livraison_prevue": autre, "version": v(), "id_ligne_bc": id_ligne})
+    verifier(infra.valeur(f"SELECT date_livraison_prevue::text FROM ligne_bc WHERE id_ligne_bc = '{id_ligne}'") == autre
+             and infra.valeur(f"SELECT date_livraison_prevue::text FROM bon_commande WHERE id_bc = '{id_bc}'") == nouvelle,
+             "la revision d'une ligne a touche l'en-tete, ou pas la ligne")
+    # Un brouillon se corrige par sa saisie.
+    brouillon = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": "FRS-012", "lignes": [
+        {"code_reference": A, "unite_commande": "kg", "quantite_commandee_unite": 10, "prix_unitaire_devise": 21}]})
+    vb = int(infra.valeur(f"SELECT version FROM bon_commande WHERE id_bc = '{brouillon['id_bc']}'"))
+    c.refus("Assistante", "POST", f"/api/bons-commande/{brouillon['id_bc']}/date-livraison",
+            {"date_livraison_prevue": nouvelle, "version": vb}, contient="BC-DATE")
+
+
+def scenario_realise_par_of(c, infra):
+    """LE REALISE D'UNE QUALITE VIENT DES OF CLOTURES (point 11, 07/11/2026) : v_stat_qualite compte le
+    metrage des OF clotures du mois de la ligne du plan ; un OF lance ou sans metrage ne compte pas ; une
+    valeur saisie sur la ligne du plan prime."""
+    lp = infra.sql(
+        "SELECT lpp.code_qualite, lpp.id_ligne_plan FROM ligne_plan_production lpp "
+        "JOIN plan_production pp USING (id_plan) WHERE pp.statut = 'EN_COURS' AND lpp.m2_realises IS NULL "
+        "AND lpp.annee_mois = to_char(current_date, 'YYYY-MM') ORDER BY lpp.code_qualite LIMIT 1")
+    verifier(lp, "aucune ligne du plan en cours pour le mois courant : le scenario ne peut rien prouver")
+    qualite, id_ligne = lp[0]
+    realise = lambda: float(infra.valeur(f"SELECT m2_realises FROM v_stat_qualite WHERE code_qualite = '{qualite}'"))
+    avant = realise()
+    jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
+    of = c.ok("Choukri", "POST", "/api/ordres-fabrication", {"code_qualite": qualite, "metrage_m2": 321, "date_of": jour})
+    sans = c.ok("Choukri", "POST", "/api/ordres-fabrication", {"code_qualite": qualite, "date_of": jour})
+    for o in (of, sans):
+        c.ok("Choukri", "PUT", f"/api/ordres-fabrication/{o['id_of']}/statut",
+             V(infra, "ordre_fabrication", "id_of", o["id_of"], {"statut": "LANCE"}))
+    verifier(realise() == avant, f"un OF lance compte deja au realise : {avant} -> {realise()}")
+    for o in (of, sans):
+        c.ok("Choukri", "PUT", f"/api/ordres-fabrication/{o['id_of']}/statut",
+             V(infra, "ordre_fabrication", "id_of", o["id_of"], {"statut": "CLOTURE"}))
+    verifier(abs(realise() - (avant + 321)) < 0.5, f"realise {realise()} au lieu de {avant + 321}")
+    # La valeur saisie sur la ligne du plan prime.
+    du_mois = float(infra.valeur(
+        f"SELECT COALESCE(sum(metrage_m2), 0) FROM ordre_fabrication WHERE statut = 'CLOTURE' "
+        f"AND code_qualite = '{qualite}' AND to_char(date_of, 'YYYY-MM') = to_char(current_date, 'YYYY-MM')"))
+    r1 = realise()
+    infra.sql(f"UPDATE ligne_plan_production SET m2_realises = 5 WHERE id_ligne_plan = '{id_ligne}'")
+    verifier(abs(realise() - (r1 - du_mois + 5)) < 0.5, f"la saisie de la ligne ne prime pas : {realise()} au lieu de {r1 - du_mois + 5}")
+    infra.sql(f"UPDATE ligne_plan_production SET m2_realises = NULL WHERE id_ligne_plan = '{id_ligne}'")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_bon_demande_prix,
@@ -6607,5 +6749,8 @@ SCENARIOS = [
     scenario_couverture_cible,
     scenario_lot_derive,
     scenario_derive_reception,
+    scenario_acquittement_controle,
+    scenario_bc_date_revisee,
+    scenario_realise_par_of,
     scenario_controles_finaux,
 ]

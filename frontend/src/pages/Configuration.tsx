@@ -953,8 +953,59 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
 
   const liste = q.data ?? []
 
+  /* LE VERDICT DE LA VERIFICATION HEBDOMADAIRE (07/11/2026) : la plus recente
+     restauree a cote, controlee, effacee. Il n'etait lisible que dans le journal
+     systeme du serveur. */
+  const qVerif = useQuery({
+    queryKey: ['sauvegardes-verification'],
+    queryFn: ({ signal }) =>
+      api.get<{
+        verification: { date: string; fichier: string; restaurable: boolean; message: string } | null
+        garder: number
+        copie_externe: boolean
+      }>('/api/admin/sauvegardes/verification', { signal }),
+  })
+  const verif = qVerif.data?.verification ?? null
+  const garder = qVerif.data?.garder ?? 10
+
   return (
     <div className="space-y-3">
+      <Carte>
+        <CarteEntete className="flex-col items-start gap-1">
+          <CarteTitre>Dernière vérification</CarteTitre>
+        </CarteEntete>
+        <CarteCorps className="space-y-1 text-[12px] leading-relaxed">
+          {qVerif.isLoading ? (
+            <Chargement texte="Lecture du verdict…" />
+          ) : !verif ? (
+            <p className="text-attenue-texte">
+              Aucune vérification n’a encore laissé de verdict sur ce serveur. Elle tourne chaque
+              dimanche à 03 h 30 sur le serveur de production, ou à la main :{' '}
+              <span className="font-mono">gestionfil-admin verifier-sauvegarde</span>.
+            </p>
+          ) : (
+            <>
+              <p className={verif.restaurable ? 'font-medium text-succes' : 'font-medium text-danger'}>
+                {verif.restaurable ? 'Sauvegarde restaurable' : 'La sauvegarde NE SE RESTAURE PAS'} —{' '}
+                <span className="font-mono text-[11px]">{verif.fichier}</span>
+              </p>
+              <p className="text-attenue-texte">
+                Vérifiée le {fmt.dateHeure(verif.date)}
+                {!verif.restaurable && <> : {verif.message}</>}
+              </p>
+            </>
+          )}
+          <p className="text-attenue-texte">
+            Copie hors du serveur :{' '}
+            {qVerif.data?.copie_externe ? (
+              <span className="text-texte">réglée (GESTIONFIL_COPIE_EXTERNE)</span>
+            ) : (
+              <span className="text-danger">aucune — à régler sur le serveur (GESTIONFIL_COPIE_EXTERNE)</span>
+            )}
+          </p>
+        </CarteCorps>
+      </Carte>
+
       <Carte>
         <CarteEntete className="flex-col items-start gap-1">
           <CarteTitre>Sauvegarder maintenant</CarteTitre>
@@ -986,22 +1037,24 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
         <CarteCorps className="space-y-2 text-[12px] leading-relaxed text-attenue-texte">
           <p>
             Une copie est écrite <span className="text-texte">à chaque arrêt du serveur</span>,
-            puis seules les <span className="text-texte">dix plus récentes</span> sont gardées : les
+            puis seules les <span className="text-texte">{garder} plus récentes</span> sont gardées : les
             plus anciennes partent avec leur archive de pièces jointes. Un échec de sauvegarde
             n’empêche jamais le serveur de s’arrêter — il est journalisé.
           </p>
           <p>
             Sur le serveur de production, <span className="font-mono text-texte">gestionfil-sauvegarde.timer</span>
-            {' '}lance aussi <span className="font-mono text-texte">gestionfil-admin sauvegarder</span> chaque
-            jour à 02 h 30 (au démarrage suivant si la machine était éteinte). Chaque dimanche à
+            {' '}lance aussi <span className="font-mono text-texte">gestionfil-admin sauvegarder --automatique</span> chaque
+            jour à 02 h 30 (au démarrage suivant si la machine était éteinte), qui purge de même et
+            recopie la sauvegarde hors du serveur si un dossier externe est réglé. Chaque dimanche à
             03 h 30, <span className="font-mono text-texte">gestionfil-verif-sauvegarde.timer</span> restaure
             la plus récente dans une base temporaire, la contrôle, puis l’efface : la base vivante
             n’est pas touchée.
           </p>
           <p className="text-danger">
             Ces copies vivent sur le même disque que la base. Elles protègent d’une fausse
-            manœuvre, pas d’une panne de disque ni d’un vol : recopiez régulièrement le dossier
-            vers un support externe.
+            manœuvre, pas d’une panne de disque ni d’un vol : sans copie hors du serveur
+            (GESTIONFIL_COPIE_EXTERNE, un NAS ou un partage monté), recopiez régulièrement le
+            dossier vers un support externe.
           </p>
         </CarteCorps>
       </Carte>

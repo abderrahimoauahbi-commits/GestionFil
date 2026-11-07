@@ -99,16 +99,22 @@ async fn alerter_si_comptes_non_initialises(pool: &db::Db) -> anyhow::Result<()>
 /// journalise, l'arret se poursuit. Une sauvegarde manquee se rattrape ; un
 /// serveur qui refuse de s'arreter bloque la machine.
 ///
-/// Les dix dernieres sont conservees. Au-dela, une base de cinq megaoctets
-/// remplirait le disque sans que personne ne le remarque avant la panne.
+/// Les dix dernieres sont conservees (`GESTIONFIL_SAUVEGARDES_GARDER`). Au-dela,
+/// une base de cinq megaoctets remplirait le disque sans que personne ne le
+/// remarque avant la panne. La copie hors serveur suit, si elle est reglee.
 async fn sauvegarder_a_la_fermeture(pool: &db::Db, database_url: &str) {
     match domain::sauvegarde::creer(pool, database_url).await {
         Ok(s) => {
             tracing::info!(fichier = %s.fichier, octets = s.octets, "sauvegarde de fermeture");
-            match domain::sauvegarde::purger(database_url, 10) {
+            match domain::sauvegarde::purger(database_url, domain::sauvegarde::garder()) {
                 Ok(0) => {}
                 Ok(n) => tracing::info!(supprimees = n, "anciennes sauvegardes purgees"),
                 Err(e) => tracing::warn!(erreur = %e, "purge impossible"),
+            }
+            match domain::sauvegarde::copier_hors_serveur(std::path::Path::new(&s.chemin)) {
+                None => {}
+                Some(Ok(c)) => tracing::info!(copie = %c, "sauvegarde copiee hors du serveur"),
+                Some(Err(e)) => tracing::error!(erreur = %e, "COPIE HORS SERVEUR IMPOSSIBLE"),
             }
         }
         Err(e) => tracing::error!(erreur = %e, "SAUVEGARDE DE FERMETURE IMPOSSIBLE"),

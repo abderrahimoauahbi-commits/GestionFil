@@ -276,6 +276,69 @@ pub fn purger(_database_url: &str, garder: usize) -> AppResult<usize> {
     Ok(supprimees)
 }
 
+/// LE NOMBRE DE SAUVEGARDES GARDEES (07/11/2026) : `GESTIONFIL_SAUVEGARDES_GARDER`,
+/// 10 par defaut — le chiffre que la sauvegarde de fermeture appliquait seule.
+/// Il vaut desormais aussi pour la sauvegarde quotidienne.
+pub fn garder() -> usize {
+    std::env::var("GESTIONFIL_SAUVEGARDES_GARDER")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(10)
+}
+
+/// LA COPIE HORS DU SERVEUR (07/11/2026) : `GESTIONFIL_COPIE_EXTERNE`, un dossier
+/// monte depuis un autre support (NAS, partage d'un autre poste, disque USB).
+/// Vide : aucune copie (`None`). Le dump et l'archive de ses pieces y sont
+/// copies apres chaque sauvegarde automatique ; un echec est signale, il ne fait
+/// pas echouer la sauvegarde, qui reste sur le serveur. La copie externe n'est
+/// jamais purgee par l'ERP : sa duree de conservation est celle du support.
+pub fn copier_hors_serveur(dump: &std::path::Path) -> Option<Result<String, String>> {
+    let cible = std::env::var("GESTIONFIL_COPIE_EXTERNE").ok().filter(|v| !v.trim().is_empty())?;
+    let cible = PathBuf::from(cible.trim());
+    let copier = || -> Result<String, String> {
+        if !cible.is_dir() {
+            return Err(format!("dossier de copie externe absent ou non monte : {}", cible.display()));
+        }
+        let nom = dump.file_name().ok_or("nom de sauvegarde illisible")?;
+        std::fs::copy(dump, cible.join(nom)).map_err(|e| format!("copie du dump : {e}"))?;
+        let pieces = PathBuf::from(format!("{}.pieces.tar", dump.to_string_lossy()));
+        if pieces.exists() {
+            if let Some(n) = pieces.file_name() {
+                std::fs::copy(&pieces, cible.join(n)).map_err(|e| format!("copie des pieces : {e}"))?;
+            }
+        }
+        Ok(cible.join(nom).to_string_lossy().into_owned())
+    };
+    Some(copier())
+}
+
+/// Le fichier ou la verification hebdomadaire laisse son verdict, a cote des
+/// sauvegardes : l'ecran Configuration le lit (07/11/2026). Le journal systeme
+/// le garde aussi, mais personne ne le lit.
+fn fichier_verdict() -> PathBuf {
+    dossier().join("derniere-verification.json")
+}
+
+/// Ecrit le verdict de la verification d'une sauvegarde (par `gestionfil-admin
+/// verifier-sauvegarde` ; le serveur ne fait que le lire).
+#[allow(dead_code)]
+pub fn ecrire_verdict(fichier: &str, restaurable: bool, message: &str) {
+    let v = serde_json::json!({
+        "date": maintenant(),
+        "fichier": fichier,
+        "restaurable": restaurable,
+        "message": message,
+    });
+    let _ = std::fs::write(fichier_verdict(), v.to_string());
+}
+
+/// Le dernier verdict de verification ; `None` : jamais verifiee ici.
+pub fn lire_verdict() -> Option<serde_json::Value> {
+    let texte = std::fs::read_to_string(fichier_verdict()).ok()?;
+    serde_json::from_str(&texte).ok()
+}
+
 /// LES PIECES JOINTES SE SAUVEGARDENT AVEC LA BASE (audit v4). Une restauration
 /// rendait des factures et des DUM dont les fichiers n'existaient plus : la
 /// base ne garde que leur chemin. L'archive `<dump>.pieces.tar` est ecrite a

@@ -341,10 +341,27 @@ sudo -u gestionfil /opt/gestionfil/gestionfil-admin verifier-sauvegarde <fichier
 journalctl -u gestionfil-verif-sauvegarde -n 30                                   # le dernier verdict
 ```
 
-Le dernier mot doit être `SAUVEGARDE RESTAURABLE`. « impossible de créer la base
+Le dernier mot doit être `SAUVEGARDE RESTAURABLE`. Depuis le 07/11/2026, le verdict
+s'écrit aussi dans `sauvegardes/derniere-verification.json`, que l'écran
+Configuration → Sauvegardes affiche. « impossible de créer la base
 temporaire » signifie que le rôle de la base n'a pas le droit `CREATEDB` :
-`restaurer` échouerait de même le jour venu (`ALTER ROLE gestionfil CREATEDB;`
-en `postgres`).
+`restaurer` échouerait de même le jour venu. `02-installer-serveur.sh` le pose
+(`ALTER ROLE gestionfil CREATEDB;` en `postgres`).
+
+### Conservation et copie hors du serveur (07/11/2026)
+
+- `GESTIONFIL_SAUVEGARDES_GARDER` (`.env`, 10 par défaut) : nombre de sauvegardes
+  gardées. La sauvegarde quotidienne (`sauvegarder --automatique`) et celle de
+  fermeture purgent au-delà ; une sauvegarde à la main ne purge jamais.
+- `GESTIONFIL_COPIE_EXTERNE` (`.env`, vide par défaut) : un dossier monté depuis
+  un autre support (NAS, partage d'un autre poste, disque USB). Après chaque
+  sauvegarde automatique, le dump et l'archive de ses pièces y sont copiés ; une
+  copie manquée fait échouer le service du jour (`systemctl status
+  gestionfil-sauvegarde`). L'ERP ne purge jamais ce dossier. Le service tourne
+  avec `ProtectSystem=strict` : le dossier doit figurer dans `ReadWritePaths`.
+
+Un `.env` existant ne reçoit pas ces lignes à la mise à jour : les ajouter à la
+main (sans elles : 10 gardées, aucune copie externe).
 
 ### Restaurer
 
@@ -572,7 +589,7 @@ recompilation quand l'adresse change.
 | | |
 |---|---|
 | PostgreSQL | boucle locale uniquement, jamais exposé |
-| Rôle `gestionfil` | **aucun privilège** — ni superutilisateur, ni création de base, ni création de rôle |
+| Rôle `gestionfil` | `CREATEDB` seulement (vérification et restauration des sauvegardes, posé par `02-installer-serveur.sh` depuis le 07/11/2026) — ni superutilisateur, ni création de rôle |
 | Compte de service | sans shell, sans session possible |
 | `.env` | `0600`, deux secrets |
 | Sauvegardes | `0700` |

@@ -119,6 +119,9 @@ pub async fn lire(State(state): State<AppState>, user: Utilisateur, Path(id): Pa
     let lignes = sqlx::query(
         "SELECT l.ligne_numero, l.code_reference, ref.designation, l.code_magasin, l.lot_fournisseur,
                 l.code_derive,
+                -- Le nombre de derives du lot : l'ecran ne nomme le derive que s'il y en a plusieurs.
+                (SELECT count(*) FROM lot_derive d
+                  WHERE d.code_reference = l.code_reference AND d.lot_fournisseur = l.lot_fournisseur) AS nb_derives,
                 l.quantite_kg, l.prix_kg_mad, round(l.quantite_kg * l.prix_kg_mad, 2) AS montant_ligne_mad,
                 l.nb_bobines, l.code_motif_ligne, ml.libelle AS motif_libelle,
                 mv.numero_mouvement, l.cmup_avant, l.cmup_apres, l.ecart_mad

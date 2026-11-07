@@ -16,13 +16,14 @@
  * vides. On ne demande que le controle ouvert.
  */
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, ChevronDown, RefreshCw, ShieldAlert, TriangleAlert } from 'lucide-react'
-import { api } from '../api/client'
+import { toast } from 'sonner'
+import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../components/Layout'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
-import { Alerte, Badge, Bouton, Carte, CarteCorps, Chargement, EtatVide, Squelette } from '../composants/ui/base'
+import { Alerte, Badge, Bouton, Carte, CarteCorps, Champ, Chargement, EtatVide, Squelette } from '../composants/ui/base'
 import { exporterCsv } from '../lib/export'
 import { cn, fmt } from '../lib/utils'
 import { TEXTE_TON, libelleStatut, tonStatut } from '../lib/statuts'
@@ -34,11 +35,22 @@ interface Controle {
   controle: string
   criticite: 'BLOQUANT' | 'CRITIQUE' | 'ATTENTION'
   anomalies: number
+  /** Les lignes deja vues et acquittees (07/11/2026) ; `anomalies` reste le compte brut. */
+  acquittees?: number
   [k: string]: unknown
 }
 
 /** Une ligne de detail : sa forme depend du controle, d'ou l'index libre. */
 type LigneDetail = Record<string, unknown>
+
+/** Les cles techniques d'une ligne : l'empreinte et l'acquittement, hors colonnes du controle. */
+const TECHNIQUES = new Set([
+  'empreinte_anomalie',
+  'id_acceptation',
+  'motif_acceptation',
+  'acquittee_par',
+  'date_acceptation',
+])
 
 const ORDRE: Record<string, number> = { BLOQUANT: 0, CRITIQUE: 1, ATTENTION: 2 }
 
@@ -73,16 +85,111 @@ function Pastille({ c }: { c: Controle }) {
     <Badge ton={tonStatut('criticite', c.criticite)} className="tabular-nums" title={libelleStatut('criticite', c.criticite)}>
       <TriangleAlert className="size-3" />
       {fmt.nombre(c.anomalies, 0)}
+      {(c.acquittees ?? 0) > 0 && <span className="font-normal opacity-80">· {fmt.nombre(c.acquittees ?? 0, 0)} acquittée(s)</span>}
     </Badge>
   )
 }
 
+/**
+ * L'ACQUITTEMENT D'UNE LIGNE (07/11/2026) : vue, comprise, laissee — jamais pour
+ * un BLOQUANT ; droit VALIDER ; motif exige ; valable tant que l'anomalie existe.
+ * Le motif se saisit sur la ligne, pas dans une fenetre.
+ */
+function CelluleAcquittement({
+  code,
+  ligne,
+  acquittable,
+}: {
+  code: string
+  ligne: LigneDetail
+  acquittable: boolean
+}) {
+  const qc = useQueryClient()
+  const [motif, setMotif] = useState<string | null>(null)
+  const rafraichir = () => {
+    void qc.invalidateQueries({ queryKey: ['controle-detail', code] })
+    void qc.invalidateQueries({ queryKey: ['controles'] })
+  }
+  const echec = (e: unknown) => toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.')
+  const acquitter = useMutation({
+    mutationFn: () =>
+      api.post(`/api/controles/${code}/acquittements`, { empreinte: ligne.empreinte_anomalie, motif: motif ?? '' }),
+    onSuccess: () => {
+      toast.success('Anomalie acquittée')
+      setMotif(null)
+      rafraichir()
+    },
+    onError: echec,
+  })
+  const lever = useMutation({
+    mutationFn: () => api.post(`/api/acquittements/${String(ligne.id_acceptation)}/lever`, {}),
+    onSuccess: () => {
+      toast.success('Acquittement retiré : l’anomalie est de nouveau à traiter')
+      rafraichir()
+    },
+    onError: echec,
+  })
+
+  if (ligne.id_acceptation) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 truncate text-attenue-texte" title={String(ligne.motif_acceptation ?? '')}>
+          Acquittée par {String(ligne.acquittee_par ?? '—')} le {String(ligne.date_acceptation ?? '')} —{' '}
+          {String(ligne.motif_acceptation ?? '')}
+        </span>
+        {acquittable && (
+          <Bouton variante="contour" taille="xs" disabled={lever.isPending} onClick={() => lever.mutate()}>
+            Retirer
+          </Bouton>
+        )}
+      </div>
+    )
+  }
+  if (!acquittable) return null
+  if (motif === null) {
+    return (
+      <Bouton variante="contour" taille="xs" onClick={() => setMotif('')}>
+        Acquitter
+      </Bouton>
+    )
+  }
+  return (
+    <div className="flex items-center gap-1.5">
+      <Champ
+        autoFocus
+        className="h-6 w-56 text-[12px]"
+        placeholder="Motif (obligatoire)"
+        value={motif}
+        onChange={(e) => setMotif(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setMotif(null)
+          if (e.key === 'Enter' && motif.trim().length >= 3) acquitter.mutate()
+        }}
+        aria-label="Motif de l’acquittement"
+      />
+      <Bouton
+        taille="xs"
+        disabled={motif.trim().length < 3 || acquitter.isPending}
+        onClick={() => acquitter.mutate()}
+      >
+        Acquitter
+      </Bouton>
+      <Bouton variante="contour" taille="xs" onClick={() => setMotif(null)}>
+        Annuler
+      </Bouton>
+    </div>
+  )
+}
+
 /** Le detail d'un controle : les lignes reellement fautives. */
-function Detail({ code, libelle }: { code: string; libelle: string }) {
+function Detail({ code, libelle, criticite }: { code: string; libelle: string; criticite: string }) {
+  const droits = useDroits(MODULE)
   const q = useQuery({
     queryKey: ['controle-detail', code],
     queryFn: ({ signal }) => api.get<LigneDetail[]>(`/api/controles/${code}`, { signal }),
   })
+  // Un BLOQUANT ne s'acquitte jamais ; les autres, par le droit VALIDER.
+  const acquittable = criticite !== 'BLOQUANT' && !!droits.peutValider
 
   if (q.isLoading) return <Squelette className="h-24" />
   const lignes = q.data ?? []
@@ -94,7 +201,8 @@ function Detail({ code, libelle }: { code: string; libelle: string }) {
     )
   }
 
-  const colonnes = Object.keys(lignes[0])
+  const colonnes = Object.keys(lignes[0]).filter((c) => !TECHNIQUES.has(c))
+  const avecAcquittement = criticite !== 'BLOQUANT'
 
   return (
     <>
@@ -110,6 +218,7 @@ function Detail({ code, libelle }: { code: string; libelle: string }) {
                   {c.replace(/_/g, ' ')}
                 </th>
               ))}
+              {avecAcquittement && <th className="whitespace-nowrap px-2.5 py-1.5 text-left font-semibold">Acquittement</th>}
             </tr>
           </thead>
           <tbody>
@@ -136,6 +245,11 @@ function Detail({ code, libelle }: { code: string; libelle: string }) {
                     </td>
                   )
                 })}
+                {avecAcquittement && (
+                  <td className="px-2.5 py-1">
+                    <CelluleAcquittement code={code} ligne={l} acquittable={acquittable} />
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -328,7 +442,7 @@ export function Controles() {
 
                       {deplie && (
                         <CarteCorps className="border-t border-bordure p-0">
-                          <Detail code={c.code} libelle={SENS[c.criticite]} />
+                          <Detail code={c.code} libelle={SENS[c.criticite]} criticite={c.criticite} />
                         </CarteCorps>
                       )}
                     </Carte>
@@ -339,9 +453,10 @@ export function Controles() {
 
             {/* Ce que le compteur ne dit pas, et qui evite une lecture fausse. */}
             <p className="mt-3 text-[11px] leading-relaxed text-attenue-texte">
-              Les controles se recalculent a chaque ouverture : ils n ont pas de memoire. Rien ne
-              retient depuis quand une anomalie dure, ni ce qui a ete decide. C est l objet du
-              journal des alertes, qui reste a raccorder.
+              Les controles se recalculent a chaque ouverture. Une anomalie ATTENTION ou CRITIQUE
+              deja examinee s’acquitte, avec son motif : le compteur garde le total, l’acquittement
+              dit qu’elle est vue. Il vaut tant que l’anomalie existe ; disparue, il est levé. Un
+              BLOQUANT ne s’acquitte jamais.
             </p>
           </>
         )}

@@ -511,3 +511,19 @@ pub async fn lister_sauvegardes(
     let liste = sauvegarde::lister(&state.config.database_url)?;
     Ok(Json(serde_json::to_value(liste)?))
 }
+
+/// `GET /api/admin/sauvegardes/verification` — LE DERNIER VERDICT de la
+/// verification hebdomadaire (une sauvegarde restauree a cote, controlee,
+/// effacee), et les reglages de conservation (07/11/2026). `verification` nul :
+/// aucune verification n'a encore laisse de verdict sur ce serveur.
+pub async fn verification_sauvegardes(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::PARAMETRES, Action::Lire).await?;
+    Ok(Json(serde_json::json!({
+        "verification": sauvegarde::lire_verdict(),
+        "garder": sauvegarde::garder(),
+        "copie_externe": std::env::var("GESTIONFIL_COPIE_EXTERNE").ok().filter(|v| !v.trim().is_empty()).is_some(),
+    })))
+}

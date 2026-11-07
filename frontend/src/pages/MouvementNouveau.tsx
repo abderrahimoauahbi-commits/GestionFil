@@ -629,10 +629,12 @@ export function MouvementNouveau() {
   // L'identifiant du document, tire a l'ouverture : un second envoi du meme
   // formulaire rend le meme document (audit P3, 19/10/2026).
   const [idDocument] = useState(nouvelIdentifiant)
-  /** Une etiquette scannee : la ligne de sa reference et de son lot, ou une nouvelle. */
+  /** Une etiquette scannee : la ligne de sa reference, de son lot et de son derive, ou une nouvelle. */
   const surEtiquette = (e: EtiquetteLue): string | void => {
     if (e.statut_reception === 'ANNULE') return `Étiquette ${e.code} : sa réception est annulée.`
     const lot = e.lot_fournisseur ?? ''
+    // Le derive ne se pose que si le lot en a plusieurs : seul, le serveur le met d'office.
+    const derive = (e.nb_derives ?? 0) > 1 ? (e.code_derive ?? '') : ''
     const champ = e.nature === 'BOBINE' ? 'bobines' : 'palettes'
     const compter = (l: LigneSaisie): LigneSaisie => ({
       ...l,
@@ -644,7 +646,11 @@ export function MouvementNouveau() {
     })
     majLignes((prev) => {
       const i = prev.findIndex(
-        (l) => !l.valide && l.code_reference === e.code_reference && (l.extra?.lot ?? '') === lot,
+        (l) =>
+          !l.valide &&
+          l.code_reference === e.code_reference &&
+          (l.extra?.lot ?? '') === lot &&
+          deriveDeExtra(l.extra) === derive,
       )
       if (i >= 0) return prev.map((l, k) => (k === i ? compter(l) : l))
       const base = depuisReference({
@@ -656,7 +662,14 @@ export function MouvementNouveau() {
         bobines_par_lot: e.bobines_par_lot,
         densite_kg_ml: e.densite_kg_ml,
       })
-      const neuve = compter({ ...base, qte: '', palettes: '', bobines: '', extra: { ...(base.extra ?? {}), lot } })
+      const extra = { ...(base.extra ?? {}), lot }
+      const neuve = compter({
+        ...base,
+        qte: '',
+        palettes: '',
+        bobines: '',
+        extra: derive ? extraAvecDerive(extra, derive) : extra,
+      })
       // La ligne vide qui attend en bas de grille prend la place.
       const vide = prev.findIndex((l) => !l.code_reference && !l.qte)
       return vide >= 0 ? prev.map((l, k) => (k === vide ? neuve : l)) : [...prev, neuve]

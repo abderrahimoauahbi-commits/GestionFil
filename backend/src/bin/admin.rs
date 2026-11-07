@@ -73,7 +73,10 @@ async fn main() -> Result<()> {
         }
         Some("lister-comptes") => lister_comptes(&pool).await?,
         Some("verifier") => verifier(&pool).await?,
-        Some("sauvegarder") => sauvegarder(&pool).await?,
+        // `--automatique` : la sauvegarde quotidienne (minuterie) purge au-dela de
+        // GESTIONFIL_SAUVEGARDES_GARDER et copie hors du serveur ; une sauvegarde
+        // a la main ne purge jamais (07/11/2026).
+        Some("sauvegarder") => sauvegarder(&pool, args.iter().any(|a| a == "--automatique")).await?,
         Some("diagnostic") => diagnostic(&pool).await?,
         Some("reparer") => reparer(&pool).await?,
         _ => {
@@ -84,7 +87,7 @@ async fn main() -> Result<()> {
             eprintln!("  lister-comptes                 Liste les comptes et leur etat");
             eprintln!("  verifier                       Execute les controles metier");
             eprintln!();
-            eprintln!("  sauvegarder                    Ecrit une copie complete de la base");
+            eprintln!("  sauvegarder [--automatique]    Ecrit une copie complete de la base (--automatique : purge et copie externe)");
             eprintln!("  lister-sauvegardes             Liste les copies disponibles");
             eprintln!("  restaurer <fichier>            Remplace la base par une sauvegarde");
             eprintln!("  verifier-sauvegarde [fichier]  Restaure a cote, controle, efface (la base vivante n'est pas touchee)");
@@ -274,12 +277,27 @@ fn nom_base() -> String {
         .to_string()
 }
 
-async fn sauvegarder(pool: &Db) -> Result<()> {
+async fn sauvegarder(pool: &Db, automatique: bool) -> Result<()> {
     let s = sauvegarde::creer(pool, &url_base())
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     println!("Sauvegarde ecrite : {}", s.chemin);
     println!("  {} octets", s.octets);
+    if !automatique {
+        return Ok(());
+    }
+    let garder = sauvegarde::garder();
+    match sauvegarde::purger(&url_base(), garder) {
+        Ok(n) => println!("  {n} ancienne(s) sauvegarde(s) purgee(s) ; {garder} gardees"),
+        Err(e) => println!("ATTENTION : purge impossible : {e}"),
+    }
+    match sauvegarde::copier_hors_serveur(std::path::Path::new(&s.chemin)) {
+        None => println!("  pas de copie hors serveur (GESTIONFIL_COPIE_EXTERNE vide)"),
+        Some(Ok(c)) => println!("  copiee hors du serveur : {c}"),
+        // La sauvegarde est faite ; la copie manquee se dit, et fait echouer le
+        // service pour que systemd la signale.
+        Some(Err(e)) => bail!("sauvegarde faite, mais COPIE HORS SERVEUR IMPOSSIBLE : {e}"),
+    }
     Ok(())
 }
 
@@ -582,7 +600,13 @@ async fn verifier_sauvegarde(fichier: Option<&str>) -> Result<()> {
     if let Err(e) = sql(&format!("DROP DATABASE IF EXISTS {temporaire} WITH (FORCE)")) {
         println!("ATTENTION : la base temporaire `{temporaire}` n'a pas pu etre effacee : {e}");
     }
+    // Le verdict s'ecrit a cote des sauvegardes : l'ecran Configuration le montre.
+    let nom = source.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    if let Err(e) = &verdict {
+        sauvegarde::ecrire_verdict(&nom, false, &e.to_string());
+    }
     verdict?;
+    sauvegarde::ecrire_verdict(&nom, true, "SAUVEGARDE RESTAURABLE");
     println!("SAUVEGARDE RESTAURABLE : {}", source.display());
     Ok(())
 }

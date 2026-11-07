@@ -5,6 +5,7 @@
 //!   * `production`  — entites a workflow (qualites, recettes, plans)
 //!   * `operations`  — cascades et calculs (MRP, reception, transfert, ...)
 
+mod acquittements;
 mod admin;
 mod assistant;
 mod briefing;
@@ -186,6 +187,7 @@ pub fn router(state: AppState) -> Router {
                post(admin::appliquer_modele_role))
         .route("/api/admin/sauvegardes",
              get(admin::lister_sauvegardes).post(admin::sauvegarder))
+        .route("/api/admin/sauvegardes/verification", get(admin::verification_sauvegardes))
         .route("/api/admin/champs", get(admin::lister_champs))
         .route("/api/admin/roles", get(admin::lister_roles).post(roles::creer))
         // Roles et permissions (13/10/2026), reserves a l'Administrateur.
@@ -420,6 +422,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/bons-commande/{id}/lignes/{ligne}",
                patch(bons_commande::modifier_ligne_bc).delete(bons_commande::supprimer_ligne_bc))
         .route("/api/bons-commande/{id}/statut", put(bons_commande::changer_statut_bc))
+        // La date de livraison d'un bon parti, revisable (07/11/2026) : le moteur
+        // de couverture compte la commande a cette date.
+        .route("/api/bons-commande/{id}/date-livraison", post(bons_commande::reviser_date_livraison))
         .route("/api/receptions",
                get(receptions::lister_receptions).post(receptions::creer_reception))
         .route("/api/receptions/{id}", patch(receptions::modifier_reception))
@@ -497,6 +502,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/controles", get(consultation::controles))
         .route("/api/supervision", get(consultation::supervision))
         .route("/api/controles/{code}", get(consultation::controle_detail))
+        // L'acquittement d'une anomalie ATTENTION / CRITIQUE (07/11/2026).
+        .route("/api/controles/{code}/acquittements", post(acquittements::acquitter))
+        .route("/api/acquittements/{id}/lever", post(acquittements::lever))
         .route("/api/fournisseurs/scorecard", get(consultation::scorecard))
         .route("/api/stock", get(consultation::stock))
         .route("/api/etat-stock", get(consultation::etat_stock))

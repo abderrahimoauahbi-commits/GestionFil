@@ -263,12 +263,17 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
       return `Palette ${e.code} : le catalogue ne dit pas combien de bobines elle porte. Scannez ses bobines.`
     }
     const lot = e.lot_fournisseur ?? SANS_LOT
-    const l = lignes.find((x) => x.code_reference === e.code_reference && x.lot_fournisseur === lot)
+    // Le derive de l'etiquette (06/11/2026), quand le lot en a plusieurs ; seul, le serveur le pose.
+    const derive = (e.nb_derives ?? 0) > 1 ? (e.code_derive ?? '') : ''
+    const l = lignes.find(
+      (x) => x.code_reference === e.code_reference && x.lot_fournisseur === lot && (x.code_derive ?? '') === derive,
+    )
     if (l) majLigne(l.cle, 'mouvementees', l.mouvementees + n)
     else {
       ajouter({
         ...ligneNeuve(e.code_reference, e.designation ?? e.code_reference, e.poids_bobine_kg ?? 0, e.poids_bobine_kg),
         lot_fournisseur: lot,
+        code_derive: derive,
         mouvementees: n,
       })
     }

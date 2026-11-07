@@ -937,7 +937,9 @@ pub async fn controles_complementaires(
 ) -> AppResult<Vec<String>> {
     let mut refus = Vec::new();
     let futur: bool = sqlx::query_scalar(
-        "SELECT $1::text > to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')",
+        // Deux jours de Casablanca (07/11/2026), comme C06 : compare a l'instant
+        // UTC en texte, une fiche du jour paraissait future entre 0 h et 1 h.
+        "SELECT left($1::text, 10)::date > (now() AT TIME ZONE 'Africa/Casablanca')::date",
     )
     .bind(&f.date_fiche)
     .fetch_one(&mut *c)

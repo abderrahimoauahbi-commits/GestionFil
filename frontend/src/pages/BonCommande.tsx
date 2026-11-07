@@ -338,6 +338,31 @@ export function BonCommande() {
     cible: 'BROUILLON' | 'EN_ATTENTE_VALIDATION'
     motif: string
   } | null>(null)
+  /* LA DATE DE LIVRAISON D'UN BON PARTI SE REVISE (07/11/2026) : le fournisseur
+     annonce un retard ou une avance. Tout le bon — son en-tete et ses lignes
+     encore ouvertes — ; le moteur de couverture compte la commande a cette date. */
+  const dateRevisable =
+    !!droits.peutEcrire && !!bc && ['VALIDE', 'ENVOYE', 'LIVRE_PARTIEL'].includes(bc.statut)
+  // Vide tant que rien n'est tape : le champ montre la date du bon.
+  const [dateTapee, setDateTapee] = useState<string | null>(null)
+  const dateBon = bc?.date_livraison_prevue?.slice(0, 10) ?? ''
+  const dateRevisee = dateTapee ?? dateBon
+  const reviserDate = useMutation({
+    mutationFn: () =>
+      api.post<{ lignes_revisees: number }>(`/api/bons-commande/${id}/date-livraison`, {
+        date_livraison_prevue: dateRevisee,
+        version: bc?.version,
+      }),
+    onSuccess: (r) => {
+      toast.success('Date de livraison révisée', {
+        description: r.lignes_revisees > 0 ? `${r.lignes_revisees} ligne(s) datée(s) suivent.` : undefined,
+      })
+      setDateTapee(null)
+      rafraichir()
+    },
+    onError: (e) => echec(e),
+  })
+
   const changerStatut = useMutation({
     mutationFn: (
       c: string | { statut: string; taux_saisi?: number; motif_taux?: string; confirme_taux?: boolean; motif?: string },
@@ -1460,13 +1485,29 @@ export function BonCommande() {
             </div>
             <div>
               <Etiq htmlFor="livr">Livraison prévue</Etiq>
-              <Champ
-                id="livr"
-                type="date"
-                value={entete.date_livraison_prevue}
-                disabled={!modifiable}
-                onChange={(e) => setEntete({ ...entete, date_livraison_prevue: e.target.value })}
-              />
+              {dateRevisable ? (
+                <div className="flex items-center gap-2">
+                  <Champ
+                    id="livr"
+                    type="date"
+                    value={dateRevisee}
+                    onChange={(e) => setDateTapee(e.target.value)}
+                  />
+                  {dateRevisee && dateRevisee !== dateBon && (
+                    <Bouton taille="sm" disabled={reviserDate.isPending} onClick={() => reviserDate.mutate()}>
+                      Réviser
+                    </Bouton>
+                  )}
+                </div>
+              ) : (
+                <Champ
+                  id="livr"
+                  type="date"
+                  value={entete.date_livraison_prevue}
+                  disabled={!modifiable}
+                  onChange={(e) => setEntete({ ...entete, date_livraison_prevue: e.target.value })}
+                />
+              )}
             </div>
             <div>
               <Etiq htmlFor="cond">Conditions de paiement</Etiq>

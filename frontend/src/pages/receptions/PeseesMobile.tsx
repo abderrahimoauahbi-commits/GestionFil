@@ -34,6 +34,7 @@ import { lireNombre } from '../../lib/nombres'
 import { codesStatut, libelleStatut } from '../../lib/statuts'
 import { StatutBadge } from '../../composants/StatutBadge'
 import { cn, fmt } from '../../lib/utils'
+import { libelleUnite, useMotsUnite } from '../../lib/motsUnite'
 
 interface Magasin {
   code_magasin: string
@@ -530,6 +531,8 @@ function FeuilleEdition({
   surRetirer: () => void
   surFermer: () => void
 }) {
+  /** Le mot du conditionnement de la ligne (07/11/2026) : bobines, fûts, sacs… */
+  const mots = useMotsUnite()(ligne.code_reference)
   const e = ligne.extra ?? {}
   const ecart = ecartVsAttendu(ligne)
   const hors = ecart != null && ecart.pct > tolerancePct
@@ -611,7 +614,7 @@ function FeuilleEdition({
             />
           </div>
           <div>
-            <Etiq htmlFor="pm-bob">Bobines</Etiq>
+            <Etiq htmlFor="pm-bob">{mots.Des}</Etiq>
             <Champ
               id="pm-bob"
               type="number"
@@ -621,7 +624,7 @@ function FeuilleEdition({
               value={ligne.bobines}
               onChange={(ev) => poserColis('bobines', ev.target.value)}
               className="h-11 text-right text-[16px] tabular-nums"
-              aria-label="Nombre de bobines"
+              aria-label={`Nombre de ${mots.des}`}
             />
           </div>
           <label className="col-span-2 flex items-center gap-2 text-[12.5px] text-attenue-texte">
@@ -633,7 +636,7 @@ function FeuilleEdition({
               className="size-4"
               aria-label={ligne.lie ? 'Détacher le calcul' : 'Relier le calcul'}
             />
-            Poids, palettes et bobines liés (décochez pour une palette entamée)
+            Poids, palettes et {mots.des} liés (décochez pour une palette entamée)
           </label>
           {unites.length > 0 && (
             <div className="col-span-2">
@@ -648,7 +651,7 @@ function FeuilleEdition({
                 <option value="kg">kg</option>
                 {unites.map((u) => (
                   <option key={u} value={u}>
-                    {u}
+                    {libelleUnite(u, mots)}
                   </option>
                 ))}
               </Selecteur>

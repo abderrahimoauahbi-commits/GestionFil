@@ -2198,7 +2198,7 @@ def scenario_controles_finaux(c, infra):
     # Moteur v2 (27/10/2026, soir) : C68 (stock minimum franchi) et C69 (article au plan sans cible)
     # sont servis par le moteur, comme C05 (rupture inevitable) et C25.
     # C70 (06/11/2026) : le titrage de la reference contredit celui de sa famille (un signal).
-    dernier = 70
+    dernier = 71
     moteur, retires = ("C05", "C25", "C68", "C69"), ("C27", "C49")
     hors_sql = "', '".join(moteur + retires)
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
@@ -3832,11 +3832,16 @@ def scenario_taux_bon(c, infra):
     verifier(abs(float(ligne[0]) - 9.95) < 1e-6 and ligne[1] == "SAISI" and ligne[2],
              f"taux saisi mal enregistre : {ligne}")
 
-    # Regle 18 (T7) : un taux de reference de plus de 7 jours ne valide pas un bon en devise.
+    # PLUS DE TAUX EXIGE AVANT LA VALIDATION (decision du 07/11/2026, la regle 18 / T7 est retiree) :
+    # un cours de reference vieux de 10 jours valide le bon, a ce cours, source REFERENCE.
     infra.sql("UPDATE taux_change SET date_debut = current_date - 10 "
               "WHERE code_devise = 'USD' AND date_fin IS NULL")
+    vieux = float(infra.valeur("SELECT taux FROM taux_change WHERE code_devise = 'USD' AND date_fin IS NULL"))
     b3 = bon_soumis()
-    c.refus("Choukri", "PUT", f"/api/bons-commande/{b3}/statut", {"statut": "VALIDE"}, contient="7")
+    c.ok("Choukri", "PUT", f"/api/bons-commande/{b3}/statut", {"statut": "VALIDE"})
+    engage = infra.sql(f"SELECT taux_change_engage, source_taux_engage FROM bon_commande WHERE id_bc = '{b3}'")[0]
+    verifier(abs(float(engage[0]) - vieux) < 1e-6 and engage[1] == "REFERENCE",
+             f"un cours ancien n'engage pas le bon a ce cours : {engage}")
     infra.sql("UPDATE taux_change SET date_fin = current_date "
               "WHERE code_devise = 'USD' AND date_fin IS NULL")
     taux_usd_du_jour(infra)
@@ -4270,7 +4275,11 @@ def scenario_migrations_rejouables(c, infra):
                 "2026-11-06h_derive_reception.sql",
                 # 07/11 : l'acquittement des controles ; le realise par les OF clotures.
                 "2026-11-07a_controle_acceptation.sql",
-                "2026-11-07b_realise_par_of.sql"):
+                "2026-11-07b_realise_par_of.sql",
+                # 07/11 (suite) : mots du conditionnement ; lacunes de la revue (C71, droits figes).
+                "2026-11-07c_mots_conditionnement.sql",
+                "2026-11-07d_revue_lacunes.sql",
+                "2026-11-07e_recette_versions.sql"):
         try:
             infra.psql(infra.base, "-q", "-f", str(dossier / nom))
         except RuntimeError as e:
@@ -6658,6 +6667,67 @@ def scenario_realise_par_of(c, infra):
     infra.sql(f"UPDATE ligne_plan_production SET m2_realises = NULL WHERE id_ligne_plan = '{id_ligne}'")
 
 
+def scenario_revue_lacunes(c, infra):
+    """LES LACUNES DE LA REVUE DES 22 DOMAINES (07/11/2026) : seuils lies jamais inverses (PARAM-ORDRE),
+    parametre mort desactive, C71 (groupe d'equivalence a un seul membre), role FIL_SURJET au depot,
+    droits d'import figes a la cloture, designation du bon gardee par la ligne, mot du conditionnement."""
+    refus_sql(infra, "UPDATE parametre SET valeur_courante = '999' WHERE code_parametre = 'P_SeuilImminent'", "PARAM-ORDRE")
+    refus_sql(infra, "UPDATE parametre SET valeur_courante = '99' WHERE code_parametre = 'P_SeuilABCA'", "PARAM-ORDRE")
+    verifier(infra.valeur("SELECT actif FROM parametre WHERE code_parametre = 'P_BasculeReceptionGR'") in ("0", None),
+             "P_BasculeReceptionGR est encore actif")
+    verifier(infra.valeur("SELECT count(*) FROM v_controles WHERE code = 'C71'") == "1", "C71 absent de v_controles")
+    verifier(infra.valeur("SELECT count(*) FROM role_bom WHERE code_role = 'FIL_SURJET'") == "1", "FIL_SURJET absent")
+    verifier(infra.valeur("SELECT to_regclass('public.import_droits_fige') IS NOT NULL") == "t", "import_droits_fige absente")
+    # La designation du bon : celle de la ligne, meme si la fiche article est renommee.
+    A = "PLA 100 EXT"
+    avant = infra.valeur(f"SELECT designation FROM reference WHERE code_reference = '{A}'")
+    id_bc, _ = bon_envoye(c, [(A, 50, 21)], frs="FRS-012")
+    infra.sql(f"UPDATE reference SET designation = 'RENOMMEE BANC' WHERE code_reference = '{A}'")
+    lignes = c.ok("Choukri", "GET", f"/api/bons-commande/{id_bc}/lignes")
+    lignes = lignes.get("lignes", lignes) if isinstance(lignes, dict) else lignes
+    infra.sql(f"UPDATE reference SET designation = $${avant}$$ WHERE code_reference = '{A}'")
+    verifier(lignes[0]["reference_designation"] == avant,
+             f"le bon montre la designation du jour : {lignes[0]['reference_designation']} au lieu de {avant}")
+    # Le mot du conditionnement de chaque reference.
+    mots = {m["code_reference"]: m for m in c.ok("Magasinie", "GET", "/api/conditionnements/mots")}
+    verifier(A in mots, "la route des mots ne rend pas toutes les references")
+    # Compare dans la base : psql ne rend pas les accents dans l'encodage de Python sous Windows.
+    verifier(infra.valeur("SELECT unite_pluriel = U&'f\\00FBts' FROM conditionnement WHERE code_conditionnement = 'FUT'") == "t",
+             "le fut n'a pas son accent")
+    verifier(infra.valeur("SELECT count(*) FROM conditionnement WHERE code_conditionnement = 'BOX'") == "1", "BOX absent")
+
+
+def scenario_recette_versions(c, infra):
+    """LES VERSIONS DE LA RECETTE (decision du 07/11/2026 : historique a chaque modification) : une qualite
+    creee a sa V1 ; modifier composition ou densites exige un motif et pose V2 ; rien ne change, rien ne se
+    pose ; une version ne se modifie ni ne s'efface ; toute qualite existante a sa V1."""
+    verifier(infra.valeur("SELECT count(*) FROM qualite q WHERE NOT EXISTS "
+                          "(SELECT 1 FROM recette_version v WHERE v.code_qualite = q.code_qualite)") == "0",
+             "une qualite existante n'a pas sa V1")
+    ref, role = infra.sql("SELECT code_reference, code_role FROM recette ORDER BY code_qualite, ligne_numero LIMIT 1")[0]
+    q = f"VERS{int(time.time()) % 100000}"
+    corps = {"code_qualite": q, "nom": "Qualite des versions (banc)",
+             "lignes": [{"code_role": role, "densite": 1.5, "unite_densite": "kg_m2"}],
+             "composition": [{"code_reference": ref, "code_role": role, "pourcentage_composition": 100}]}
+    r = c.ok("Choukri", "PUT", "/api/qualites", corps)
+    verifier(r.get("version_recette") == 1, f"la creation ne pose pas V1 : {r}")
+    v = lambda: int(infra.valeur(f"SELECT version FROM qualite WHERE code_qualite = '{q}'"))
+    # Rien ne change : pas de version, pas de motif exige.
+    r = c.ok("Choukri", "PUT", "/api/qualites", dict(corps, version=v(), description="sans changement de recette"))
+    verifier(r.get("version_recette") is None, f"une version sans changement : {r}")
+    # La densite change : motif exige, puis V2.
+    change = dict(corps, lignes=[{"code_role": role, "densite": 1.6, "unite_densite": "kg_m2"}])
+    c.refus("Choukri", "PUT", "/api/qualites", dict(change, version=v()), codes=(400,), contient="motif")
+    r = c.ok("Choukri", "PUT", "/api/qualites", dict(change, version=v(), motif_version="Densite revue a l'essai"))
+    verifier(r.get("version_recette") == 2, f"la modification ne pose pas V2 : {r}")
+    versions = c.ok("Choukri", "GET", f"/api/qualites/{q}/versions")
+    verifier([x["numero"] for x in versions] == [2, 1] and versions[0]["motif"] == "Densite revue a l'essai"
+             and versions[0]["auteur"], f"historique faux : {[(x['numero'], x['motif']) for x in versions]}")
+    refus_sql(infra, f"UPDATE recette_version SET motif = 'autre' WHERE code_qualite = '{q}'", "RECETTE-VERSION")
+    refus_sql(infra, f"DELETE FROM recette_version WHERE code_qualite = '{q}'", "RECETTE-VERSION")
+    c.ok("Choukri", "DELETE", f"/api/qualites/{q}?version={v()}")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_bon_demande_prix,
@@ -6752,5 +6822,7 @@ SCENARIOS = [
     scenario_acquittement_controle,
     scenario_bc_date_revisee,
     scenario_realise_par_of,
+    scenario_revue_lacunes,
+    scenario_recette_versions,
     scenario_controles_finaux,
 ]

@@ -31,6 +31,7 @@ import { Badge, Bouton, Champ, Selecteur } from './ui/base'
 import { EnteteIndice } from './ui/Indice'
 import { ChampRecherche, type Suggestion } from './ChampRecherche'
 import { cn, fmt } from '../lib/utils'
+import { libelleUnite, useMotsUnite } from '../lib/motsUnite'
 import { useEstMobile } from '../lib/mediaQuery'
 import { largeurDeClasse, repartirCases, useLargeurConteneur } from '../lib/rangeeAdaptative'
 import { GrilleLignesMobile } from './GrilleLignesMobile'
@@ -759,6 +760,8 @@ function GrilleLignesBureau(props: ProprietesGrille) {
   poidsBobine,
   controleColisage = false,
   } = props
+  /** Le mot du conditionnement de chaque reference (07/11/2026) : bobines, fûts, sacs… */
+  const motsDeRef = useMotsUnite()
   const prises = doublonsReference || fusionParReference
     ? new Set<string>()
     : (dejaPrises ?? new Set(lignes.map((l) => l.code_reference).filter(Boolean)))
@@ -853,7 +856,7 @@ function GrilleLignesBureau(props: ProprietesGrille) {
   const cases: CaseLigne[] = [
     {
       cle: 'colis',
-      entete: 'Pal. · bob.',
+      entete: 'Pal. · unités',
       largeur: L_COLIS,
       rendu: (l) =>
         l.nature === 'MARCHANDISE' ? (
@@ -873,8 +876,8 @@ function GrilleLignesBureau(props: ProprietesGrille) {
               value={l.bobines}
               onChange={(e) => majColis(l.cle, 'bobines', e.target.value)}
               className="h-9 w-12 px-1.5 text-right tabular-nums"
-              placeholder="bob."
-              aria-label="Nombre de bobines"
+              placeholder={motsDeRef(l.code_reference).court}
+              aria-label={`Nombre de ${motsDeRef(l.code_reference).des}`}
             />
             {/* L'INTERRUPTEUR, AU PLUS PRES DES COLIS QU'IL RELIE. La ligne
                 arrive liee ; on la detache quand la realite s'ecarte de la
@@ -936,7 +939,7 @@ function GrilleLignesBureau(props: ProprietesGrille) {
       ? [
           {
             cle: 'poids-bobine',
-            entete: 'Poids / bobine',
+            entete: 'Poids / unité',
             largeur: L_POIDS_BOBINE,
             rendu: (l: LigneSaisie) => {
               const kgL = kgDe(l)
@@ -950,7 +953,7 @@ function GrilleLignesBureau(props: ProprietesGrille) {
               return (
                 <div
                   className="pt-1 text-[12px] tabular-nums"
-                  title={cat > 0 ? `Catalogue : ${fmt.nombre(cat, 3)} kg` : 'Pas de poids de bobine au catalogue'}
+                  title={cat > 0 ? `Catalogue : ${fmt.nombre(cat, 3)} kg` : `Pas de poids par ${motsDeRef(l.code_reference).un} au catalogue`}
                 >
                   <div className="font-medium">{fmt.nombre(reel, 3)} kg</div>
                   {pct != null && (
@@ -1307,7 +1310,7 @@ function GrilleLignesBureau(props: ProprietesGrille) {
                             <option value="kg">kg</option>
                             {unitesDe(l).filter((u) => !unitesAutorisees || unitesAutorisees.includes(u)).map((u) => (
                               <option key={u} value={u}>
-                                {u}
+                                {libelleUnite(u, motsDeRef(l.code_reference))}
                               </option>
                             ))}
                           </>
@@ -1480,7 +1483,7 @@ function GrilleLignesBureau(props: ProprietesGrille) {
                           </div>
                         ))}
                         {controleColisage && marchandise && (
-                          <AvisColisage kg={kg} bobines={l.bobines} palettes={l.palettes} cond={l.cond} className="mt-1 basis-full" />
+                          <AvisColisage kg={kg} bobines={l.bobines} palettes={l.palettes} cond={l.cond} mots={motsDeRef(l.code_reference)} className="mt-1 basis-full" />
                         )}
                       </div>
                     </td>

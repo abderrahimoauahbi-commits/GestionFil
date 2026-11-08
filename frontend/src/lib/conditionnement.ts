@@ -337,6 +337,8 @@ export function controleColisage(
   palettesV: unknown,
   c: Conditionnement,
   t: TolerancesColisage,
+  /** Le mot du conditionnement (07/11/2026) : bobine, fût, sac… */
+  m: { un: string; des: string } = { un: 'bobine', des: 'bobines' },
 ): VerdictColisage {
   const kg = nombre(kgV)
   const bob = nombre(bobinesV)
@@ -348,7 +350,7 @@ export function controleColisage(
   if (bob && bob > 0 && p && kg && kg > 0) {
     const reel = kg / bob
     const ecart = ((reel - p) / p) * 100
-    const texte = `${Math.round(bob)} bobines pour ${kg.toLocaleString('fr-FR')} kg font ${reel.toFixed(2)} kg par bobine ; la fiche dit ${p.toFixed(2)} kg (${ecart > 0 ? '+' : ''}${ecart.toFixed(0)} %).`
+    const texte = `${Math.round(bob)} ${m.des} pour ${kg.toLocaleString('fr-FR')} kg font ${reel.toFixed(2)} kg par ${m.un} ; la fiche dit ${p.toFixed(2)} kg (${ecart > 0 ? '+' : ''}${ecart.toFixed(0)} %).`
     if (Math.abs(ecart) > t.refus) return { niveau: 'incoherent', message: texte }
     if (Math.abs(ecart) > t.alerte) alerte = texte
   }
@@ -359,13 +361,13 @@ export function controleColisage(
     if (pal > min + 1) {
       return {
         niveau: 'incoherent',
-        message: `${Math.round(pal)} palettes pour ${Math.round(beff)} bobines : à ${pp} bobines par palette il en faut ${min} (${min + 1} avec une palette entamée). Des colis ont-ils été saisis comme palettes ?`,
+        message: `${Math.round(pal)} palettes pour ${Math.round(beff)} ${m.des} : à ${pp} ${m.des} par palette il en faut ${min} (${min + 1} avec une palette entamée). Des colis ont-ils été saisis comme palettes ?`,
       }
     }
     if (beff / pal > pp * (1 + t.refus / 100)) {
       return {
         niveau: 'incoherent',
-        message: `${Math.round(beff)} bobines sur ${Math.round(pal)} palette(s), soit ${Math.round(beff / pal)} par palette ; une palette en porte ${pp}. Il en faut au moins ${min}.`,
+        message: `${Math.round(beff)} ${m.des} sur ${Math.round(pal)} palette(s), soit ${Math.round(beff / pal)} par palette ; une palette en porte ${pp}. Il en faut au moins ${min}.`,
       }
     }
   }

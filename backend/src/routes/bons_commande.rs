@@ -254,10 +254,10 @@ pub async fn lignes_bc(
     // jusqu'au prochain recalcul du MRP, puis mentirait sans le signaler.
     // L'ecart n'existe donc que le temps de l'affichage, et il est toujours vrai.
     let rows = sqlx::query(
-        // LE NOM DE LA LIGNE VIENT DE LA REFERENCE, OU DE LA LIGNE ELLE-MEME.
-        // Une ligne de service n'a pas de reference : c'est son libelle qui la
-        // nomme. Sans ce COALESCE, le transport s'afficherait sans intitule.
-        "SELECT l.*, COALESCE(r.designation, l.libelle) AS reference_designation,
+        // LE NOM DE LA LIGNE : celui que la ligne a garde (07/11/2026 : un bon
+        // ne change pas de libelle quand la fiche article est renommee), sinon
+        // celui de la reference, sinon le libelle d'une ligne de service.
+        "SELECT l.*, COALESCE(NULLIF(btrim(l.designation), ''), r.designation, l.libelle) AS reference_designation,
                 r.unite_catalogue,
                 r.couleur, r.code_categorie, cat.libelle AS categorie_libelle,
                 -- LES DEUX COLONNES QUE LE FOURNISSEUR LIT EN PREMIER : son code
@@ -1225,53 +1225,17 @@ pub async fn changer_statut_bc(
             ));
         }
 
-        // UN TAUX PERIME N'ENGAGE PAS (regle 18, 08/10/2026). Le bon s'engage
-        // au taux de reference de l'ERP ; s'il date de plus de
-        // P_AncienneteTauxJours (7 j), il ne dit plus le marche : on demande le
-        // taux du jour avant de valider. Le taux de chaque facture d'import,
-        // lui, reste celui de sa facture (cours BAM du jour).
-        let (devise_bc, date_taux): (String, Option<String>) = sqlx::query_as(
-            "SELECT bc.code_devise,
-                    (SELECT t.date_debut::text FROM taux_change t
-                      WHERE t.code_devise = bc.code_devise
-                        AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
-                        AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
-                      ORDER BY t.date_debut DESC LIMIT 1)
-               FROM bon_commande bc WHERE bc.id_bc = $1",
-        )
-        .bind(&id)
-        .fetch_one(&mut *tx)
-        .await?;
-        let taux_saisi = s.taux_saisi.filter(|t| *t > 0.0);
-        if devise_bc != "MAD" && taux_saisi.is_none() {
-            let limite: i64 = sqlx::query_scalar(
-                "SELECT COALESCE((SELECT CAST(valeur_courante AS bigint) FROM parametre
-                                   WHERE code_parametre = 'P_AncienneteTauxJours'), 7)",
-            )
+        // La devise du bon ; son taux s'engage plus bas, au cours de reference.
+        let devise_bc: String = sqlx::query_scalar("SELECT code_devise FROM bon_commande WHERE id_bc = $1")
+            .bind(&id)
             .fetch_one(&mut *tx)
             .await?;
-            let age: Option<i64> = match &date_taux {
-                Some(d) => sqlx::query_scalar("SELECT (current_date - substr($1, 1, 10)::date)::bigint")
-                    .bind(d)
-                    .fetch_one(&mut *tx)
-                    .await?,
-                None => None,
-            };
-            match age {
-                None => {
-                    return Err(AppError::RegleMetier(format!(
-                        "Aucun taux {devise_bc} en vigueur : saisissez le taux du jour (cours BAM) avant de valider ce bon."
-                    )))
-                }
-                Some(a) if a > limite => {
-                    return Err(AppError::RegleMetier(format!(
-                        "Le taux {devise_bc} en vigueur date de {a} jours (au-dela de {limite}) : saisissez le taux \
-                         du jour (cours BAM, Configuration → Devises et taux) avant de valider ce bon."
-                    )))
-                }
-                _ => {}
-            }
-        }
+        let taux_saisi = s.taux_saisi.filter(|t| *t > 0.0);
+        // PLUS DE TAUX EXIGE AVANT LA VALIDATION (decision du 07/11/2026) : le bon
+        // se valide au dernier cours connu de sa devise, quel que soit son age
+        // (l'ancienne garde P_AncienneteTauxJours est retiree). Le taux reel se
+        // regle a la facture et au paiement. Seul un cours jamais saisi bloque :
+        // il n'y aurait rien pour valoriser le bon.
 
         // RG-09 : le taux retenu est celui du jour de la validation, pas celui de
         // la creation. Un bon de commande se prepare sur des semaines ; le change
@@ -1290,12 +1254,13 @@ pub async fn changer_statut_bc(
         // du cours Bank Al-Maghrib, il le confirme. Le bon garde la justification :
         // le taux, le jour du cours, sa source, le motif.
         let propose: Option<(f64, String)> = sqlx::query_as(
+            // Le cours en vigueur aujourd'hui ; a defaut, le dernier connu (07/11/2026).
             "SELECT t.taux::float8, substr(t.date_debut, 1, 10)
                FROM taux_change t JOIN bon_commande bc ON bc.code_devise = t.code_devise
               WHERE bc.id_bc = $1
                 AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
-                AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
-              ORDER BY t.date_debut DESC LIMIT 1",
+              ORDER BY (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10)) DESC,
+                       t.date_debut DESC LIMIT 1",
         )
         .bind(&id)
         .fetch_optional(&mut *tx)

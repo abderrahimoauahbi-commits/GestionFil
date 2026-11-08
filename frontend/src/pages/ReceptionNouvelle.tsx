@@ -65,6 +65,7 @@ import { PanneRequetes } from '../composants/PanneRequetes'
 import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
 import { useGelInventaire } from '../lib/inventairesOuverts'
 import { nouvelIdentifiant } from '../lib/identifiant'
+import { motsCommuns, useMotsUnite } from '../lib/motsUnite'
 
 const MODULE = 'RECEPTIONS'
 
@@ -214,6 +215,8 @@ export function ReceptionNouvelle() {
      magasinier retient ses BONS sur la fiche, et le dossier s'en deduit
      avec sa DUM et ses conteneurs. */
   const magasinDefaut = qMag.data?.[0]?.code_magasin ?? 'MP-01'
+  /** Le mot du conditionnement de chaque reference (07/11/2026). */
+  const motsDeRef = useMotsUnite()
 
   /**
    * LE CONDITIONNEMENT DES REFERENCES EN JEU, et d'elles seules.
@@ -785,6 +788,7 @@ export function ReceptionNouvelle() {
     cond: condLiaison(l),
     rangMemeLot: l.retenue ? memeLot(l) : 0,
     premiereDuLot: premiereDuLot(l),
+    mots: motsDeRef(l.code_recu),
   }))
 
   /* LES INDICATEURS DE LA BARRE (24/10/2026) : des quantites, chacune avec sa
@@ -806,6 +810,8 @@ export function ReceptionNouvelle() {
   const peseAvecBl = somme(avecSesCopies(avecBl), kgDe)
   const palettesComptees = somme(retenues, (l) => (l.palettes.trim() === '' ? 0 : Number(l.palettes)))
   const bobinesComptees = somme(retenues, (l) => (l.bobines.trim() === '' ? 0 : Number(l.bobines)))
+  // Le mot de la barre : celui des lignes s'il est commun, sinon « unités » (07/11/2026).
+  const motsBarre = motsCommuns(retenues.map((l) => motsDeRef(l.code_recu)))
   const palettesAttendues = somme(avecBc, (l) => depuisKg(l.reste_kg, condLiaison(l)).palettes)
   const bobinesAttendues = somme(avecBc, (l) => depuisKg(l.reste_kg, condLiaison(l)).bobines)
   const indicateurs: IndicateurRec[] = [
@@ -845,7 +851,7 @@ export function ReceptionNouvelle() {
       titre: 'Palettes comptées / attendues au bon (déduites du reste par le conditionnement)',
     },
     {
-      libelle: 'Bobines',
+      libelle: motsBarre.Des,
       secondaire: true,
       valeur: `${fmt.nombre(bobinesComptees, 0)} / ${fmt.nombre(bobinesAttendues, 0)}`,
       mot: sansBobines.length
@@ -858,7 +864,7 @@ export function ReceptionNouvelle() {
         : bobinesAttendues
           ? Math.abs(bobinesComptees - bobinesAttendues) < 0.5 ? 'succes' : 'alerte'
           : 'neutre',
-      titre: 'Bobines comptées / attendues au bon (déduites du reste par le conditionnement)',
+      titre: `${motsBarre.Des} comptés / attendus au bon (déduits du reste par le conditionnement)`,
     },
   ]
   const lignesHors = retenues
@@ -891,7 +897,7 @@ export function ReceptionNouvelle() {
   const avis: MessageRec[] = [
     ...(sansBobines.length
       ? [{
-          texte: `${sansBobines.length} ligne(s) suivie(s) au lot sans bobines comptées : à compter avant la soumission au contrôle — ${noms(sansBobines)}.`,
+          texte: `${sansBobines.length} ligne(s) suivie(s) au lot sans ${motsBarre.des} comptés : à compter avant la soumission au contrôle — ${noms(sansBobines)}.`,
           cle: sansBobines[0].cle,
         }]
       : []),

@@ -44,6 +44,7 @@ import {
 } from '../lib/conditionnement'
 import { Badge, Bouton, Champ, Etiq, Selecteur } from './ui/base'
 import { cn, fmt } from '../lib/utils'
+import { libelleUnite, useMotsUnite } from '../lib/motsUnite'
 import { libelleStatut } from '../lib/statuts'
 
 /** Les états d'une référence au moteur de couverture (27/10/2026). */
@@ -435,6 +436,8 @@ function FeuilleLigne(p: {
   surFermer: () => void
 }) {
   const { ligne: l } = p
+  /** Le mot du conditionnement de la ligne (07/11/2026) : bobines, fûts, sacs… */
+  const mots = useMotsUnite()(l.code_reference)
   const marchandise = l.nature === 'MARCHANDISE'
   const kg = kgDe(l)
   const prete = estPrete(l, p.sansPrix)
@@ -581,7 +584,7 @@ function FeuilleLigne(p: {
                     .filter((u) => !p.unitesAutorisees || p.unitesAutorisees.includes(u))
                     .map((u) => (
                       <option key={u} value={u}>
-                        {u}
+                        {libelleUnite(u, mots)}
                       </option>
                     ))}
                 </>
@@ -600,7 +603,7 @@ function FeuilleLigne(p: {
         {marchandise && (
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <Etiq>Palettes / bobines</Etiq>
+              <Etiq>Palettes / {mots.des}</Etiq>
               <button
                 type="button"
                 onClick={() => p.maj({ lie: !l.lie })}
@@ -629,12 +632,12 @@ function FeuilleLigne(p: {
                 value={l.bobines}
                 onChange={(e) => p.majColis('bobines', e.target.value)}
                 className="h-11 text-right tabular-nums"
-                placeholder="bobines"
-                aria-label="Nombre de bobines"
+                placeholder={mots.des}
+                aria-label={`Nombre de ${mots.des}`}
               />
             </div>
             {p.controleColisage && (
-              <AvisColisage kg={kg} bobines={l.bobines} palettes={l.palettes} cond={l.cond} className="mt-1.5" />
+              <AvisColisage kg={kg} bobines={l.bobines} palettes={l.palettes} cond={l.cond} mots={mots} className="mt-1.5" />
             )}
             {p.poidsBobine &&
               (() => {
@@ -646,7 +649,7 @@ function FeuilleLigne(p: {
                 const c = couleurEcart(pct, p.poidsBobine)
                 return (
                   <p className="mt-1 text-[11px] tabular-nums text-attenue-texte">
-                    Poids/bobine {fmt.nombre(reel, 3)} kg
+                    Poids/{mots.un} {fmt.nombre(reel, 3)} kg
                     {pct != null && (
                       <span className={cn('ml-1', classeNiveauEcart(c) ?? 'text-succes')}>
                         ({pct > 0 ? '+' : ''}

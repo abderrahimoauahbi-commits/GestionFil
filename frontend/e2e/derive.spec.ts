@@ -16,7 +16,7 @@ const URL = process.env.E2E_URL ?? 'http://127.0.0.1:8097'
 const PASSAGE = Date.now().toString(36).slice(-5).toUpperCase()
 const REF = 'PP-1500 Dtex-L.Beige 44377-Hs'
 
-async function bonEnvoye(): Promise<string> {
+async function bonEnvoye(frs = 'FRS-001', ref = REF, kg = 2064, prix = 2): Promise<string> {
   const ctx = await apiRequest.newContext({ baseURL: URL })
   const entete = (t: string) => ({ Authorization: `Bearer ${t}` })
   const jeton = async (login: string) => {
@@ -29,8 +29,8 @@ async function bonEnvoye(): Promise<string> {
   const rBc = await ctx.post('/api/bons-commande', {
     headers: entete(tAss),
     data: {
-      code_fournisseur: 'FRS-001',
-      lignes: [{ code_reference: REF, unite_commande: 'kg', quantite_commandee_unite: 2064, prix_unitaire_devise: 2 }],
+      code_fournisseur: frs,
+      lignes: [{ code_reference: ref, unite_commande: 'kg', quantite_commandee_unite: kg, prix_unitaire_devise: prix }],
     },
   })
   expect(rBc.ok(), `bon : ${rBc.status()} ${await rBc.text()}`).toBeTruthy()
@@ -49,6 +49,8 @@ async function bonEnvoye(): Promise<string> {
 }
 
 test('réception : la même ligne de bon en deux formes du même lot fait D1 et D2', async ({ browser }, info) => {
+  // La validation (lots, derives, mouvements) prend son temps sur une machine chargee.
+  test.setTimeout(180_000)
   test.skip((info.project.use.viewport?.width ?? 1366) < 768, 'grille de bureau : sous 768 px, la pesée mobile')
   const numeroBc = await bonEnvoye()
   const lot = `LOT10-${PASSAGE}`
@@ -105,7 +107,7 @@ test('réception : la même ligne de bon en deux formes du même lot fait D1 et 
         `/api/lots/derives?code_reference=${encodeURIComponent(REF)}&lot_fournisseur=${encodeURIComponent(lot)}`,
       )
       return d.map((x) => `${x.code_derive}:${Math.round(Number(x.quantite_kg))}`).sort().join(' ')
-    })
+    }, { timeout: 120_000 })
     .toBe('D1:1464 D2:600')
   const d2 = (
     await lireApi<{ code_derive: string; unites_par_palette: number | null }[]>(
@@ -117,4 +119,38 @@ test('réception : la même ligne de bon en deux formes du même lot fait D1 et 
   expect(veille.erreurs).toEqual([])
   expect(dir.veille.erreurs).toEqual([])
   await dir.page.context().close()
+})
+
+/**
+ * LE MOT DU CONDITIONNEMENT (07/11/2026) : une reference en futs se compte en
+ * « fûts » a la reception, pas en « bobines ». La fiche article passe en FUT par
+ * l'API (base jetable), le bon aussi ; l'ecran, lui, doit le dire.
+ */
+test('réception : une référence en fûts se compte en fûts, pas en bobines', async ({ browser }, info) => {
+  test.skip((info.project.use.viewport?.width ?? 1366) < 768, 'grille de bureau : sous 768 px, la pesée mobile')
+  const ref = 'PLA 100 EXT'
+  const ctx = await apiRequest.newContext({ baseURL: URL })
+  const r = await ctx.post('/api/auth/connexion', { data: { login: 'Choukri', mot_de_passe: MDP, code: null } })
+  const jeton = (await r.json()).jeton as string
+  const h = { Authorization: `Bearer ${jeton}` }
+  const fiche = await (await ctx.get(`/api/catalogue/${encodeURIComponent(ref)}`, { headers: h })).json()
+  const m = await ctx.patch(`/api/catalogue/${encodeURIComponent(ref)}`, {
+    headers: h,
+    data: { code_conditionnement: 'FUT', version: fiche.version },
+  })
+  expect(m.ok(), `fiche en FUT : ${m.status()} ${await m.text()}`).toBeTruthy()
+  await ctx.dispose()
+  const numeroBc = await bonEnvoye('FRS-012', ref, 600, 21)
+
+  const { page, veille } = await session(browser, info, 'Magasinie')
+  await page.goto('/receptions/nouvelle')
+  await choisirRecherche(page, page.locator('#frs'), 'FRS-012', /^FRS-012 — /)
+  await choisirRecherche(page, page.getByRole('combobox', { name: 'Bon de commande' }), numeroBc)
+  const futs = page.getByRole('textbox', { name: 'Nombre de fûts' }).or(page.getByRole('spinbutton', { name: 'Nombre de fûts' }))
+  await expect(futs).toHaveCount(1)
+  await expect(page.getByRole('textbox', { name: 'Nombre de bobines' }).or(page.getByRole('spinbutton', { name: 'Nombre de bobines' }))).toHaveCount(0)
+  await saisir(futs, '3')
+  await page.screenshot({ path: info.outputPath('reception-futs.png'), fullPage: true })
+  expect(veille.erreurs).toEqual([])
+  await page.context().close()
 })

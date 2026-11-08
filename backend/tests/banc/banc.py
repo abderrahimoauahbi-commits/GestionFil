@@ -187,6 +187,11 @@ class Infra:
         # remplace — les references du banc s'y rattachent.
         self.psql(self.base, "-q", "-c", "DELETE FROM famille; DELETE FROM couleur;")
         self.psql(self.base, "-q", "-f", str(ICI / "referentiel.sql"))
+        # LES MIGRATIONS QUI TRAVAILLENT SUR LES DONNEES (07/11/2026) passent, sur une vraie
+        # base, quand le referentiel y est deja ; ici il arrive apres elles. On les rejoue
+        # (elles sont rejouables) : les mots des conditionnements, la V1 de chaque recette.
+        for nom in ("2026-11-07c_mots_conditionnement.sql", "2026-11-07e_recette_versions.sql"):
+            self.psql(self.base, "-q", "-f", str(DB_PG / "migrations" / nom))
         # LA DOUBLE AUTHENTIFICATION OBLIGATOIRE (13/10/2026) se teste dans son
         # scenario (`securite`), qui la remet ; les autres se connectent au seul
         # mot de passe, comme avant.

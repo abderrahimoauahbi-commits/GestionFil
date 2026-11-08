@@ -107,12 +107,95 @@ pub struct DocumentQualite {
     pub lignes: Vec<LigneDensite>,
     /// Composition. Liste complete elle aussi. Absente = inchangee.
     pub composition: Option<Vec<LigneComposition>>,
+    /// LE MOTIF DE LA MODIFICATION (07/11/2026) : exige quand la composition ou
+    /// les densites changent — une nouvelle version de la recette est gardee.
+    #[serde(default)]
+    pub motif_version: Option<String>,
+}
+
+/// LA VERSION DE LA RECETTE (decision du 07/11/2026 : historique a chaque
+/// modification). Compare la recette telle qu'elle vient d'etre ecrite (meme
+/// transaction) a sa derniere version ; si la composition ou les densites ont
+/// change, pose la version suivante avec son auteur et son motif. Une qualite
+/// sans version recoit sa V1. Rend le numero pose, ou `None` si rien n'a change.
+/// Le motif est exige des qu'une version suit une autre.
+pub(crate) async fn noter_version_recette(
+    tx: &mut sqlx::PgConnection,
+    user: &Utilisateur,
+    code: &str,
+    motif: Option<&str>,
+) -> AppResult<Option<i32>> {
+    let (derniere, change): (Option<i32>, bool) = sqlx::query_as(
+        "WITH etat AS (SELECT * FROM fn_recette_instantane($1)),
+              derniere AS (SELECT numero, composition, densites FROM recette_version
+                            WHERE code_qualite = $1 ORDER BY numero DESC LIMIT 1)
+         SELECT (SELECT numero FROM derniere),
+                NOT EXISTS (SELECT 1 FROM derniere d, etat e
+                             WHERE d.composition = e.composition AND d.densites = e.densites)",
+    )
+    .bind(code)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !change {
+        return Ok(None);
+    }
+    let motif = motif.map(str::trim).filter(|m| !m.is_empty());
+    let motif = match (derniere, motif) {
+        (_, Some(m)) if m.chars().count() >= 3 => m.to_string(),
+        (None, _) => "Premiere version de la recette".to_string(),
+        (Some(_), _) => {
+            return Err(AppError::Invalide(
+                "La recette change (composition ou densites) : dites pourquoi, dans le motif de la modification. \
+                 Une nouvelle version sera gardee, l'ancienne reste consultable."
+                    .into(),
+            ))
+        }
+    };
+    let numero = derniere.unwrap_or(0) + 1;
+    sqlx::query(
+        "INSERT INTO recette_version (code_qualite, numero, id_utilisateur, motif, composition, densites,
+                                     poids_commercial_m2)
+         SELECT $1, $2, $3, $4, i.composition, i.densites, q.poids_commercial_m2
+           FROM fn_recette_instantane($1) i, qualite q WHERE q.code_qualite = $1",
+    )
+    .bind(code)
+    .bind(numero)
+    .bind(&user.id)
+    .bind(&motif)
+    .execute(&mut *tx)
+    .await?;
+    Ok(Some(numero))
+}
+
+/// `GET /api/qualites/{code}/versions` — LES VERSIONS DE LA RECETTE, de la plus
+/// recente a la plus ancienne : numero, date, auteur, motif, et l'instantane de
+/// la composition et des densites (07/11/2026).
+pub async fn versions_recette(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(code): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::QUALITES, Action::Lire).await?;
+    let rows = sqlx::query(
+        "SELECT v.numero::bigint AS numero, v.date_version, COALESCE(u.login, v.id_utilisateur) AS auteur,
+                v.motif, v.composition, v.densites, v.poids_commercial_m2::float8 AS poids_commercial_m2
+           FROM recette_version v
+           LEFT JOIN utilisateur u ON u.id_utilisateur = v.id_utilisateur
+          WHERE v.code_qualite = $1
+          ORDER BY v.numero DESC",
+    )
+    .bind(&code)
+    .fetch_all(&state.db)
+    .await?;
+    let mut v = lignes_en_json(&rows);
+    user.masquer(&state.db, module::QUALITES, &mut v).await?;
+    Ok(Json(v))
 }
 
 /// Enregistre l'entete, les densites ET la composition en une seule transaction.
 ///
-/// Une qualite = une composition (pas de versionnement) : les trois blocs
-/// forment un seul document et se valident ensemble. Un enregistrement par bloc
+/// Les trois blocs forment un seul document et se valident ensemble ; une
+/// recette qui change garde sa version precedente (`noter_version_recette`). Un enregistrement par bloc
 /// laisserait, en cas d'interruption, une qualite a moitie definie — et le poids
 /// commercial, calcule depuis les densites, serait faux entre-temps.
 ///
@@ -414,6 +497,9 @@ pub async fn enregistrer_qualite(
             .fetch_one(&mut *tx)
             .await?;
 
+    // La version de la recette, si elle a change (07/11/2026).
+    let version_recette = noter_version_recette(&mut tx, &user, code, d.motif_version.as_deref()).await?;
+
     tx.commit().await?;
 
     Ok(Json(json!({
@@ -424,6 +510,7 @@ pub async fn enregistrer_qualite(
         "lignes_retirees": a_retirer.len(),
         "composition_enregistree": nb_composition,
         "poids_commercial_m2": poids,
+        "version_recette": version_recette,
     })))
 }
 
@@ -774,6 +861,8 @@ pub async fn definir_densite(
     .execute(&mut *tx)
     .await?;
 
+    let motif = format!("Densite du role {} : {} {}", d.code_role, d.densite, d.unite_densite);
+    noter_version_recette(&mut tx, &user, &code, Some(&motif)).await?;
     tx.commit().await?;
     Ok(Json(json!({ "code_qualite": code, "code_role": d.code_role, "enregistre": true })))
 }
@@ -819,6 +908,7 @@ pub async fn supprimer_densite(
     if res.rows_affected() == 0 {
         return Err(AppError::Introuvable(format!("densite {code}/{role}")));
     }
+    noter_version_recette(&mut tx, &user, &code, Some(&format!("Densite du role {role} retiree"))).await?;
     tx.commit().await?;
 
     Ok(Json(json!({ "supprime": true })))

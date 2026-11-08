@@ -210,17 +210,31 @@ pub async fn valider(
                     || '-' || to_char(substr(rc.date_reception, 1, 10)::date, 'DDMMYY') AS p
                FROM reception rc JOIN fournisseur f ON f.code_fournisseur = rc.code_fournisseur
               WHERE rc.id_reception = $1
-         ), deja AS (
-             SELECT count(*) AS n FROM lot, prefixe WHERE lot.lot_fournisseur LIKE prefixe.p || '-%'
          ), cible AS (
              SELECT lr.id_ligne_reception, row_number() OVER (ORDER BY lr.ligne_numero) AS rang
                FROM ligne_reception lr JOIN reference r ON r.code_reference = lr.code_reference
               WHERE lr.id_reception = $1 AND r.suivi_lot = 1
                 AND (r.type_lot = 'GENERIQUE' OR COALESCE(btrim(lr.lot_fournisseur), '') = '')
+         ), combien AS (
+             SELECT count(*) AS n FROM cible
+         ), plancher AS (
+             SELECT count(*) AS n FROM lot, prefixe WHERE lot.lot_fournisseur LIKE prefixe.p || '-%'
+         ), reserve AS (
+             -- LE COMPTEUR, PAS LE COMPTAGE (revue du 07/11/2026) : la ligne du
+             -- compteur se verrouille ; deux validations du meme fournisseur le
+             -- meme jour ne tirent plus les memes numeros, et un lot disparu
+             -- ne libere pas le sien. Le comptage reste le plancher.
+             INSERT INTO compteur_numero (cle, valeur)
+             SELECT 'lot.genere.' || prefixe.p, plancher.n + combien.n
+               FROM prefixe, plancher, combien WHERE combien.n > 0
+             ON CONFLICT (cle) DO UPDATE
+                SET valeur = GREATEST(compteur_numero.valeur, excluded.valeur - (SELECT n FROM combien))
+                             + (SELECT n FROM combien)
+             RETURNING valeur
          )
          UPDATE ligne_reception lr
-            SET lot_fournisseur = prefixe.p || '-' || lpad((deja.n + cible.rang)::text, 2, '0')
-           FROM cible, prefixe, deja
+            SET lot_fournisseur = prefixe.p || '-' || lpad((reserve.valeur - combien.n + cible.rang)::text, 2, '0')
+           FROM cible, prefixe, reserve, combien
           WHERE lr.id_ligne_reception = cible.id_ligne_reception
       RETURNING lr.lot_fournisseur",
     )

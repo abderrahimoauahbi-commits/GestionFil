@@ -42,6 +42,7 @@ import { api } from '../api/client'
 import { EtatImprimable, TableEtat } from '../composants/Etat'
 import { Alerte, Chargement } from '../composants/ui/base'
 import { fmt } from '../lib/utils'
+import { useMotsUnite } from '../lib/motsUnite'
 import { useParamVue } from '../lib/navigation'
 
 interface Bc {
@@ -107,6 +108,8 @@ export function BonCommandeEtat() {
   const { id } = useParams<{ id: string }>()
   const auto = useParamVue('imprimer') === '1'
   const demandePrix = useParamVue('document') === 'demande-prix'
+  /** Le mot du conditionnement de chaque reference, en anglais sur le document (07/11/2026). */
+  const motsDeRef = useMotsUnite()
 
   const qBc = useQuery({
     queryKey: ['bons-commande'],
@@ -272,12 +275,12 @@ export function BonCommandeEtat() {
                         : l.unite_commande === 'Palette'
                           ? 'PLTS'
                           : l.unite_commande === 'Bobine'
-                            ? 'BOBINS'
+                            ? motsDeRef(l.code_reference).anglais
                             : l.unite_commande}
                     </div>
                     {bob !== null && l.unite_commande !== 'Bobine' && (
                       <div className="text-[9px] text-neutral-600">
-                        {fmt.nombre(bob, 0)} bobins
+                        {fmt.nombre(bob, 0)} {motsDeRef(l.code_reference).anglais.toLowerCase()}
                       </div>
                     )}
                   </>

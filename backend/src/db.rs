@@ -110,6 +110,12 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Les versions de la recette (07/11/2026) : enregistrer une qualite pose
+        // sa version par `fn_recette_instantane`.
+        "2026-11-07e_recette_versions.sql",
+        "SELECT to_regclass('public.recette_version') IS NOT NULL",
+    ),
+    (
         // L'acquittement d'une anomalie de contrôle (07/11/2026) : la liste des
         // contrôles lit les acquittements en cours.
         "2026-11-07a_controle_acceptation.sql",

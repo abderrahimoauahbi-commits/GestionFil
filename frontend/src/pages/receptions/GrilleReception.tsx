@@ -44,6 +44,7 @@ import { codesStatut, libelleStatut } from '../../lib/statuts'
 import { cn, fmt } from '../../lib/utils'
 import { useDerivesLot, type DeriveLot } from '../../lib/derives'
 import { autreParPalette, formeDe, nouvelleForme, type Forme } from '../../lib/formeDerive'
+import { libelleUnite, MOTS_BOBINE, type Mots } from '../../lib/motsUnite'
 import { useParametreNombre } from '../../lib/parametres'
 
 /** Ce que l'ecran montre et laisse saisir d'une ligne de reception. */
@@ -101,6 +102,8 @@ export interface VueLigneRec {
   date_promise?: string | null
   /** Le conditionnement qui relie kilos, palettes et bobines (celui du lot s'il est connu). */
   cond: Conditionnement
+  /** Le mot de son conditionnement (07/11/2026) : bobine, fût, sac, rouleau… */
+  mots?: Mots
   /** Rang de la ligne precedente du meme lot (les pesees s'additionneront), ou 0. */
   rangMemeLot?: number
   /** La premiere ligne du meme lot dans cette reception, sa forme (07/11/2026) ; null : celle-ci. */
@@ -228,7 +231,7 @@ function toutesLesCases({ magasins, poser }: ProprietesGrilleRec): CaseRec[] {
   return [
     {
       cle: 'colis',
-      entete: 'Pal. · bob.',
+      entete: 'Pal. · unités',
       largeur: 150,
       rendu: (l, figee) => (
         <div className="flex items-center gap-1">
@@ -253,8 +256,8 @@ function toutesLesCases({ magasins, poser }: ProprietesGrilleRec): CaseRec[] {
               'w-[3.25rem] text-right tabular-nums',
               l.suivi_lot && l.retenue !== false && !(Number(l.bobines) > 0) && Number(l.cond.poids_bobine_kg) > 0 && 'border-alerte',
             )}
-            placeholder="bob."
-            aria-label="Nombre de bobines"
+            placeholder={(l.mots ?? MOTS_BOBINE).court}
+            aria-label={`Nombre de ${(l.mots ?? MOTS_BOBINE).des}`}
           />
           {l.liaisonOfferte && !figee && (
             <button
@@ -262,7 +265,7 @@ function toutesLesCases({ magasins, poser }: ProprietesGrilleRec): CaseRec[] {
               onClick={() => poser(l.cle, 'lie', !l.lie)}
               title={
                 l.lie
-                  ? 'Pesée, palettes et bobines se répondent — cliquez pour saisir chacun séparément'
+                  ? `Pesée, palettes et ${(l.mots ?? MOTS_BOBINE).des} se répondent — cliquez pour saisir chacun séparément`
                   : 'Calcul détaché : chaque champ se saisit seul — cliquez pour relier'
               }
               aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
@@ -503,8 +506,8 @@ function Conditionnels({
           même lot que la ligne {l.rangMemeLot} : les pesées seront additionnées
         </span>
       )}
-      <AvisColisage className="max-w-[22rem]" kg={kg} bobines={l.bobines} palettes={l.palettes} cond={l.cond} />
-      {l.suivi_lot && <AvisDerive className="max-w-[22rem]" kg={kg} bobines={l.bobines} cond={l.cond} />}
+      <AvisColisage className="max-w-[22rem]" kg={kg} bobines={l.bobines} palettes={l.palettes} cond={l.cond} mots={l.mots} />
+      {l.suivi_lot && <AvisDerive className="max-w-[22rem]" kg={kg} bobines={l.bobines} cond={l.cond} mots={l.mots} />}
       {l.suivi_lot && l.lot.trim() !== '' && <PropositionDerive l={l} kg={kg} poser={poser} />}
     </>
   )
@@ -597,9 +600,9 @@ function PropositionDerive({
           <span>
             {(unitaire != null || forme.parPalette != null) && (
               <>
-                Cette ligne : {unitaire != null ? `${fmt.nombre(unitaire, 3)} kg par unité` : ''}
+                Cette ligne : {unitaire != null ? `${fmt.nombre(unitaire, 3)} kg par ${(l.mots ?? MOTS_BOBINE).un}` : ''}
                 {unitaire != null && forme.parPalette != null ? ', ' : ''}
-                {forme.parPalette != null ? `${fmt.nombre(forme.parPalette, 1)} unités par palette` : ''} — autre forme que{' '}
+                {forme.parPalette != null ? `${fmt.nombre(forme.parPalette, 1)} ${(l.mots ?? MOTS_BOBINE).des} par palette` : ''} — autre forme que{' '}
                 {formes
                   .map(
                     (f) =>
@@ -950,7 +953,7 @@ function TableauReception(props: ProprietesGrilleRec) {
                       <option value="kg">kg</option>
                       {l.unites.map((u) => (
                         <option key={u} value={u}>
-                          {u}
+                          {libelleUnite(u, l.mots ?? MOTS_BOBINE)}
                         </option>
                       ))}
                     </Selecteur>
@@ -1154,7 +1157,7 @@ function CartesReception(props: ProprietesGrilleRec) {
                   <option value="kg">kg</option>
                   {l.unites.map((u) => (
                     <option key={u} value={u}>
-                      {u}
+                      {libelleUnite(u, l.mots ?? MOTS_BOBINE)}
                     </option>
                   ))}
                 </Selecteur>

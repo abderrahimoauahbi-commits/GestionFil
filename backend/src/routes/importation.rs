@@ -185,11 +185,20 @@ const DOSSIER_CLOS: &str = "Le dossier est cloture : il est fige. Une facture ta
 /// Le numero suivant, au format du classeur : « 06/26 ».
 async fn prochain_numero(tx: &mut sqlx::PgConnection) -> AppResult<String> {
     let annee = crate::db::jour_casablanca().format("%y").to_string();
+    // LE COMPTEUR, PAS LE MAXIMUM (revue du 07/11/2026), comme `numeroter` : la
+    // ligne du compteur est verrouillee par la transaction du dossier ; deux
+    // creations simultanees ne lisent plus le meme maximum. Le maximum reste le
+    // plancher (numeros saisis a la main, dossiers repris).
     let rang: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(max(split_part(numero, '/', 1)::bigint), 0) + 1
-           FROM import_dossiers WHERE numero ~ ('^[0-9]+/' || $1 || '$')",
+        "INSERT INTO compteur_numero (cle, valeur)
+         SELECT $2, COALESCE(max(split_part(numero, '/', 1)::bigint), 0) + 1
+           FROM import_dossiers WHERE numero ~ ('^[0-9]+/' || $1 || '$')
+         ON CONFLICT (cle) DO UPDATE
+            SET valeur = GREATEST(compteur_numero.valeur + 1, excluded.valeur)
+         RETURNING valeur",
     )
     .bind(&annee)
+    .bind(format!("import_dossiers.numero.{annee}"))
     .fetch_one(&mut *tx)
     .await?;
     Ok(format!("{rang:02}/{annee}"))

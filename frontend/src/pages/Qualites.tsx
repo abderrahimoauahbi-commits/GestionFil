@@ -45,6 +45,7 @@ import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { CelluleEditable } from '../composants/CelluleEditable'
 import { SelecteurReference } from '../composants/SelecteurReference'
 import { CoherenceRecettes } from '../composants/CoherenceRecettes'
+import { VersionsRecette } from '../composants/VersionsRecette'
 import { chercherChoix } from '../composants/ChoixRecherche'
 import {
   Alerte,
@@ -238,6 +239,8 @@ export function Qualites() {
   /** Ligne dont on est en train de choisir la matiere ; `null` = panneau ferme. */
   const [choixMatiere, setChoixMatiere] = useState<string | null>(null)
   const [erreur, setErreur] = useState<string | null>(null)
+  /** Le motif d'une recette qui change (07/11/2026) : une nouvelle version est gardee. */
+  const [motifVersion, setMotifVersion] = useState('')
 
   const qQualites = useQuery({
     queryKey: ['qualites'],
@@ -375,6 +378,7 @@ export function Qualites() {
 
   function fermer() {
     rempli.current = null
+    setMotifVersion('')
     setEdition(null)
     setEnCreation(false)
     setErreur(null)
@@ -409,6 +413,7 @@ export function Qualites() {
             pourcentage_composition: c.pourcentage_composition ?? 0,
             couleur: c.couleur,
           })),
+          motif_version: motifVersion.trim() || null,
         },
       ),
     onSuccess: (r) => {
@@ -423,6 +428,7 @@ export function Qualites() {
       void qc.invalidateQueries({ queryKey: ['qualites'] })
       void qc.invalidateQueries({ queryKey: ['densites'] })
       void qc.invalidateQueries({ queryKey: ['composition'] })
+      void qc.invalidateQueries({ queryKey: ['recette-versions'] })
       setErreur(null)
       fermer()
     },
@@ -1460,9 +1466,9 @@ export function Qualites() {
               <Boxes className="size-3.5" />
               Composition
               <Aide>
-                <strong>Une qualité = une composition.</strong> Pas de versionnement : si la
-                composition doit changer, dupliquez la qualite sous un nouveau code (SH1, SH2...)
-                plutot que de modifier celle-ci. Une matiere ne figure qu'une seule fois, tous roles
+                <strong>Chaque modification garde une version.</strong> Changer la composition ou
+                les densités demande un motif ; l’ancienne recette reste consultable dans « Versions
+                de la recette », et les calculs utilisent toujours la version en cours. Une matiere ne figure qu'une seule fois, tous roles
                 confondus. Le selecteur ne propose que les matieres dont la categorie est destinee
                 au role — decochez la case pour voir tout le catalogue. La colonne kg/m² applique la
                 densite du role ; elle reste vide pour les roles en ml/m², dont la conversion depend
@@ -1540,6 +1546,7 @@ export function Qualites() {
 
           </CarteCorps>
         </Carte>
+        {!enCreation && edition && <VersionsRecette code={edition} />}
           </OngletContenu>
         </Onglets>
 
@@ -1556,7 +1563,16 @@ export function Qualites() {
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {!enCreation && (
+                <Champ
+                  className="h-8 w-72 text-[12px]"
+                  placeholder="Motif, si la recette change (obligatoire alors)"
+                  value={motifVersion}
+                  onChange={(e) => setMotifVersion(e.target.value)}
+                  aria-label="Motif de la modification de la recette"
+                />
+              )}
               <Bouton variante="contour" onClick={fermer}>
                 Annuler
               </Bouton>

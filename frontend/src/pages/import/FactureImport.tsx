@@ -791,7 +791,7 @@ export function FactureImport() {
                   <th className={cn(th1, 'text-left')} title="Libellé couleur">Coul.</th>
                   <th className={cn(th1, 'text-left')} title="Unité facturée">Unité</th>
                   <th className={cn(th1, 'text-right')} title="Poids net en kg (et quantité facturée hors kg)">Poids kg</th>
-                  <th className={cn(th1, 'text-right')} title="Bobines">Bob.</th>
+                  <th className={cn(th1, 'text-right')} title="Unités comptées : bobines, fûts, sacs, rouleaux… selon le conditionnement">Unités</th>
                   <th className={cn(th1, 'text-right')} title="Palettes">Pal.</th>
                   <th className={cn(th1, 'text-right')}>Prix unit.</th>
                   <th className={cn(th1, 'text-right')} title="Remise du fournisseur, en %">Rem. %</th>
@@ -1095,7 +1095,7 @@ export function FactureImport() {
                               ) : caseQuantite}
                             </div>
                             <div className="flex w-16 flex-col gap-0.5">
-                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Bobines</span>
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Unités</span>
                               {caseBobines}
                             </div>
                             <div className="flex w-28 flex-col gap-0.5">

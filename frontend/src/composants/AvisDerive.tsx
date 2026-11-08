@@ -13,16 +13,20 @@ import { Alerte } from './ui/base'
 import type { Conditionnement } from '../lib/conditionnement'
 import { couleurEcart, useTolerancesLot } from '../lib/lots'
 import { cn, fmt } from '../lib/utils'
+import { MOTS_BOBINE, type Mots } from '../lib/motsUnite'
 
 export function AvisDerive({
   kg,
   bobines,
   cond,
+  mots,
   className,
 }: {
   kg: unknown
   bobines: unknown
   cond: Conditionnement
+  /** Le mot du conditionnement ; a defaut, la bobine. */
+  mots?: Mots
   className?: string
 }) {
   const t = useTolerancesLot()
@@ -40,7 +44,7 @@ export function AvisDerive({
       icone={Scale}
       className={cn('mt-1', className)}
     >
-      Dérive du lot : {fmt.nombre(k / b, 3)} kg par bobine pour {fmt.nombre(p, 3)} au catalogue (
+      Dérive du lot : {fmt.nombre(k / b, 3)} kg par {(mots ?? MOTS_BOBINE).un} pour {fmt.nombre(p, 3)} au catalogue (
       {pct > 0 ? '+' : ''}
       {fmt.nombre(pct, 1)} %, au-delà du seuil {c === 'rouge' ? `rouge de ${t.rouge}` : `orange de ${t.orange}`} %).
     </Alerte>

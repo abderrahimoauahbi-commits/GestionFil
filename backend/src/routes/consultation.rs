@@ -948,6 +948,21 @@ pub async fn controle_detail(
 // Le catalogue et la liste des fournisseurs sont servis par le module
 // `referentiels`, qui porte aussi leurs endpoints de modification.
 
+/// `GET /api/conditionnements/mots` — LE MOT DU CONDITIONNEMENT DE CHAQUE
+/// REFERENCE (07/11/2026) : « bobine », « fût », « sac », « box »… Les ecrans
+/// des commandes et des receptions l'ecrivent a la place de « bobine ». Rien de
+/// sensible (du vocabulaire) : il suffit d'etre connecte.
+pub async fn mots_conditionnement(State(state): State<AppState>, _user: Utilisateur) -> AppResult<Json<Value>> {
+    let rows = sqlx::query(
+        "SELECT r.code_reference, c.code_conditionnement, c.unite_singulier, c.unite_pluriel, c.se_compte
+           FROM reference r
+           LEFT JOIN conditionnement c ON c.code_conditionnement = r.code_conditionnement",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(lignes_en_json(&rows)))
+}
+
 pub async fn scorecard(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
     lister(
         &state,

@@ -203,6 +203,9 @@ struct LigneBon {
     reste_kg: f64,
     date_ligne: Option<NaiveDate>,
     date_entete: Option<NaiveDate>,
+    /// La date d'arrivée du dossier d'import qui porte la ligne (07/11/2026) :
+    /// pour une ligne importée, la vérité du transport ; elle prime.
+    date_dossier: Option<NaiveDate>,
     /// Une ligne née d'une hypothèse de l'espace « Simulation » (« arrivage
     /// ajouté », « commande simulée ») : jamais lue de la base, jamais écrite.
     hypothese: Option<&'static str>,
@@ -479,7 +482,14 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
     for l in sqlx::query(
         "SELECT lb.code_reference, bc.id_bc, bc.numero_bc, bc.statut AS statut_bc, bc.code_fournisseur,
                 lb.id_ligne_bc, lb.ligne_numero, lb.quantite_restante_kg::float8 AS reste_kg,
-                lb.date_livraison_prevue AS date_ligne, bc.date_livraison_prevue AS date_entete
+                lb.date_livraison_prevue AS date_ligne, bc.date_livraison_prevue AS date_entete,
+                -- LA DATE DU DOSSIER D'IMPORT (revue du 07/11/2026) : une ligne de bon
+                -- facturee dans un dossier ouvert arrive quand le dossier le dit.
+                (SELECT max(d.date_arrivee)
+                   FROM import_facture_lignes fl
+                   JOIN import_factures f ON f.id_facture = fl.id_facture
+                   JOIN import_dossiers d ON d.id_dossier = f.id_dossier
+                  WHERE fl.id_ligne_bc = lb.id_ligne_bc AND d.statut <> 'CLOTURE') AS date_dossier
            FROM ligne_bc lb
            JOIN bon_commande bc ON bc.id_bc = lb.id_bc
           WHERE bc.statut NOT IN ('CLOTURE', 'ANNULE') AND lb.statut NOT IN ('ANNULE', 'SOLDE')
@@ -502,6 +512,7 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
             reste_kg: l.try_get("reste_kg")?,
             date_ligne: l.try_get("date_ligne")?,
             date_entete: l.try_get("date_entete")?,
+            date_dossier: l.try_get("date_dossier")?,
             hypothese: None,
         });
     }
@@ -872,10 +883,11 @@ fn analyser_avec<'a>(d: &'a Donnees, fiche: &'a Fiche, s: &Surcharges) -> Analys
     // ---- Les arrivages, classés -------------------------------------------------
     let mut arrivages = Vec::new();
     for b in d.bons.get(code).into_iter().flatten() {
-        let (date, source_date) = match (b.date_ligne, b.date_entete) {
-            (Some(x), _) => (Some(x), Some("ligne")),
-            (None, Some(x)) => (Some(x), Some("en-tête")),
-            (None, None) => (None, None),
+        let (date, source_date) = match (b.date_dossier, b.date_ligne, b.date_entete) {
+            (Some(x), _, _) => (Some(x), Some("dossier d'import")),
+            (None, Some(x), _) => (Some(x), Some("ligne")),
+            (None, None, Some(x)) => (Some(x), Some("en-tête")),
+            (None, None, None) => (None, None),
         };
         let valide = matches!(b.statut_bc.as_str(), "VALIDE" | "ENVOYE" | "LIVRE_PARTIEL");
         let (categorie, raison): (&'static str, String) = if !valide {
@@ -2730,6 +2742,8 @@ fn appliquer_hypotheses(d: &mut Donnees, code: &str, h: &Hypotheses) -> AppResul
                 b.hypothese = Some("modifié par l'hypothèse");
                 if let Some(x) = m.date {
                     b.date_ligne = Some(x);
+                    // L'hypothese l'emporte sur la date du dossier.
+                    b.date_dossier = None;
                     dites.push(format!("Date de {nom} : {}.", x.format("%d/%m/%Y")));
                 }
                 if let Some(k) = m.kg {
@@ -2789,6 +2803,7 @@ fn appliquer_hypotheses(d: &mut Donnees, code: &str, h: &Hypotheses) -> AppResul
                 reste_kg: a.kg,
                 date_ligne: Some(a.date),
                 date_entete: None,
+                date_dossier: None,
                 hypothese: Some(if nature == "commande simulée" { "commande simulée" } else { "arrivage ajouté" }),
             });
             let premier = nature.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
@@ -2967,6 +2982,7 @@ mod tests_simulation {
                 reste_kg: 800.0,
                 date_ligne: Some(j(25)),
                 date_entete: None,
+                date_dossier: None,
                 hypothese: None,
             }],
         )]);

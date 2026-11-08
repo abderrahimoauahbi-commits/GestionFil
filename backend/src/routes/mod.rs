@@ -226,6 +226,8 @@ pub fn router(state: AppState) -> Router {
         // La composition appartient a la qualite : elle s'enregistre avec elle
         // (PUT /api/qualites). Ici, seule la lecture.
         .route("/api/qualites/{code}/composition", get(production::composition_qualite))
+        // Les versions de la recette (07/11/2026) : un historique a chaque modification.
+        .route("/api/qualites/{code}/versions", get(production::versions_recette))
         // Vue transversale : ou telle matiere est-elle employee ?
         .route("/api/recettes", get(production::lister_recettes))
         .route("/api/plans",
@@ -506,6 +508,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/controles/{code}/acquittements", post(acquittements::acquitter))
         .route("/api/acquittements/{id}/lever", post(acquittements::lever))
         .route("/api/fournisseurs/scorecard", get(consultation::scorecard))
+        // Le mot du conditionnement de chaque reference (07/11/2026).
+        .route("/api/conditionnements/mots", get(consultation::mots_conditionnement))
         .route("/api/stock", get(consultation::stock))
         .route("/api/etat-stock", get(consultation::etat_stock))
         .route("/api/stock/projete", get(consultation::stock_projete))

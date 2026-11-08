@@ -14,6 +14,7 @@
 import type { ReactNode } from 'react'
 import { brutDe, kgDe, totalDe, type LigneSaisie } from './GrilleLignes'
 import { auCentime, fmt } from '../lib/utils'
+import { motsCommuns, useMotsUnite } from '../lib/motsUnite'
 
 export function TotauxCommande({
   lignes,
@@ -24,6 +25,7 @@ export function TotauxCommande({
   devise: string
   taux?: number | null
 }) {
+  const motsDeRef = useMotsUnite()
   if (lignes.length === 0) return null
   const somme = (f: (l: LigneSaisie) => number) => lignes.reduce((s, l) => s + f(l), 0)
   const nombre = (v: string) => {
@@ -41,7 +43,10 @@ export function TotauxCommande({
   const cases: [string, ReactNode][] = [
     ['Poids commandé', `${fmt.nombre(somme((l) => kgDe(l) ?? 0), 2)} kg`],
     ['Palettes', fmt.nombre(somme((l) => nombre(l.palettes)), 2)],
-    ['Bobines', fmt.nombre(somme((l) => nombre(l.bobines)), 0)],
+    [
+      motsCommuns(lignes.filter((l) => l.code_reference).map((l) => motsDeRef(l.code_reference))).Des,
+      fmt.nombre(somme((l) => nombre(l.bobines)), 0),
+    ],
     ['Montant brut', argent(brut)],
     ['Remise', remise > 0.005 ? <span className="text-succes">− {argent(remise)}</span> : '—'],
     ['Net HT', <span className="text-primaire">{argent(net)}</span>],

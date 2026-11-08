@@ -927,6 +927,19 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
         ));
     }
 
+    // LA V1 DES RECETTES IMPORTEES (07/11/2026) : une qualite nee du classeur a sa
+    // premiere version, comme celle creee a l'ecran ; les suivantes naitront des
+    // modifications (routes/production.rs).
+    sqlx::query(
+        "INSERT INTO recette_version (code_qualite, numero, motif, composition, densites, poids_commercial_m2)
+         SELECT q.code_qualite, 1, 'Version initiale : import du classeur', i.composition, i.densites,
+                q.poids_commercial_m2
+           FROM qualite q CROSS JOIN LATERAL fn_recette_instantane(q.code_qualite) i
+          WHERE NOT EXISTS (SELECT 1 FROM recette_version v WHERE v.code_qualite = q.code_qualite)",
+    )
+    .execute(&mut *tx)
+    .await?;
+
     if simuler {
         tx.rollback().await?;
     } else {

@@ -69,6 +69,7 @@ import {
 } from '../composants/ui/base'
 import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { MOTS_BOBINE, motsCommuns, useMotsUnite } from '../lib/motsUnite'
 import { PeseesMobile, fondrePesee } from './receptions/PeseesMobile'
 import { FraisApproche } from './receptions/FraisApproche'
 
@@ -198,6 +199,31 @@ interface LigneAttendue extends Record<string, unknown> {
  * quantite annoncee au bon de livraison, colis. La grille les range et les
  * rend ; c'est cet ecran qui sait ce qu'ils veulent dire.
  */
+/**
+ * LES LIGNES DEDOUBLEES D'UNE LIGNE DE BON (07/11/2026) : la meme ligne de bon
+ * recue en deux lots ou deux formes fait deux lignes, mais un seul attendu. La
+ * PREMIERE porte l'attendu du bon ; les autres n'en portent pas.
+ */
+function porteAttendu(l: LigneSaisie, ls: LigneSaisie[]): boolean {
+  if (l.suggere_kg == null) return false
+  const id = l.extra?.id_ligne_bc
+  return !id || ls.find((x) => x.extra?.id_ligne_bc === id)?.cle === l.cle
+}
+
+/** L'attendu de la premiere ligne, net de ce que ses lignes dedoublees apportent ; null pour les autres. */
+function attenduNet(l: LigneSaisie, ls: LigneSaisie[]): number | null {
+  if (!porteAttendu(l, ls)) return null
+  const id = l.extra?.id_ligne_bc
+  const autres = id ? ls.filter((x) => x.extra?.id_ligne_bc === id && x.cle !== l.cle) : []
+  return (l.suggere_kg ?? 0) - autres.reduce((s, x) => s + (Number(x.qte) || 0), 0)
+}
+
+/** La ligne compte-t-elle pour l'ecart au bon (elle, ou une ligne dedoublee de la meme ligne de bon) ? */
+function rattacheeAuBon(l: LigneSaisie, ls: LigneSaisie[]): boolean {
+  const id = l.extra?.id_ligne_bc
+  return porteAttendu(l, ls) || (!!id && ls.some((x) => x.extra?.id_ligne_bc === id && porteAttendu(x, ls)))
+}
+
 function depuisLigneReception(l: LigneRec): LigneSaisie {
   const cond: Conditionnement = {
     poids_bobine_kg: l.poids_bobine_kg,
@@ -365,6 +391,7 @@ function corpsReception(l: LigneSaisie) {
  * une ligne sans quantite au BL ne doit pas creuser un faux ecart au BL.
  */
 function TotauxReception({ lignes }: { lignes: LigneSaisie[] }) {
+  const motsDeRef = useMotsUnite()
   if (lignes.length === 0) return null
   const n = (v?: string) => {
     const x = Number(v)
@@ -389,10 +416,9 @@ function TotauxReception({ lignes }: { lignes: LigneSaisie[] }) {
       bl += b
       kgAvecBl += k
     }
-    if (l.suggere_kg != null) {
-      bc += l.suggere_kg
-      kgAvecBc += k
-    }
+    // Le bon une fois par ligne de bon ; ses lignes dedoublees pesent avec lui (07/11/2026).
+    if (porteAttendu(l, lignes)) bc += l.suggere_kg ?? 0
+    if (rattacheeAuBon(l, lignes)) kgAvecBc += k
     const pm = n(l.extra?.prix_mad)
     if (pm != null) valeur += k * pm
     else if (k > 0) sansValeur += 1
@@ -411,7 +437,7 @@ function TotauxReception({ lignes }: { lignes: LigneSaisie[] }) {
   const cases: [string, ReactNode][] = [
     ['Poids reçu', <>{fmt.nombre(kg, 2)} kg</>],
     ['Palettes', fmt.nombre(palettes, 2)],
-    ['Bobines', fmt.nombre(bobines, 0)],
+    [motsCommuns(lignes.map((l) => motsDeRef(l.code_reference))).Des, fmt.nombre(bobines, 0)],
     ['Annoncé au BL', bl ? <>{fmt.nombre(bl, 2)} kg · {ecart(kgAvecBl - bl)}</> : '—'],
     ['Attendu au BC', bc ? <>{fmt.nombre(bc, 2)} kg · {ecart(kgAvecBc - bc)}</> : '—'],
     ['Valeur du stock (HT)', fmt.mad(valeur)],
@@ -439,6 +465,8 @@ function TotauxReception({ lignes }: { lignes: LigneSaisie[] }) {
 
 export function Reception() {
   const { id = '' } = useParams()
+  /** Le mot du conditionnement de chaque reference (07/11/2026). */
+  const motsDeRef = useMotsUnite()
   const droits = useDroits(MODULE)
   const { moi } = useAuth()
   const qc = useQueryClient()
@@ -1011,7 +1039,7 @@ export function Reception() {
       // LES COLIS COMPTES AU QUAI (24/10/2026) : ils manquaient a la table de
       // la reception validee, alors qu'ils entrent au stock avec le lot.
       champ: 'nb_palettes',
-      entete: 'Pal. · bob.',
+      entete: 'Pal. · unités',
       numerique: true,
       largeur: '110px',
       rendu: (l) =>
@@ -1021,7 +1049,7 @@ export function Reception() {
           <div className="text-right tabular-nums">
             <div>{l.nb_palettes == null ? '—' : fmt.nombre(l.nb_palettes, 2)} pal.</div>
             <div className="text-[11px] text-attenue-texte">
-              {l.nb_bobines == null ? '—' : fmt.nombre(l.nb_bobines, 0)} bob.
+              {l.nb_bobines == null ? '—' : fmt.nombre(l.nb_bobines, 0)} {motsDeRef(l.code_reference).court}
             </div>
           </div>
         ),
@@ -1191,7 +1219,8 @@ export function Reception() {
       code_recu: l.code_reference,
       designation: l.intitule,
       numero_bc: e.numero_bc || null,
-      reste_kg: l.suggere_kg,
+      // Net des lignes dedoublees de la meme ligne de bon (07/11/2026).
+      reste_kg: attenduNet(l, nouvelles),
       suivi_lot: e.suivi_lot === '1',
       qteBl: e.bl ?? '',
       qte: l.qte,
@@ -1214,6 +1243,7 @@ export function Reception() {
       equivalents: [],
       motif_substitution: '',
       cond: condLiaison(l),
+      mots: motsDeRef(l.code_reference),
       valide: !!l.valide,
       devise: a?.code_devise ?? null,
       // Sans la ligne attendue (pas encore lue), rien : une devise devinee tromperait.
@@ -1232,11 +1262,13 @@ export function Reception() {
   const kgL = (l: LigneSaisie) => nombreDe(l.qte) ?? 0
   const avecBl = saisie.filter((l) => nombreDe(l.extra?.bl) != null)
   const ecartBl = avecBl.reduce((s, l) => s + kgL(l) - (nombreDe(l.extra?.bl) ?? 0), 0)
-  const avecBc = saisie.filter((l) => l.suggere_kg != null)
+  // Une ligne de bon compte une fois ; ses lignes dedoublees pesent avec elle (07/11/2026).
+  const avecBc = saisie.filter((l) => porteAttendu(l, saisie))
   const totalBc = avecBc.reduce((s, l) => s + (l.suggere_kg ?? 0), 0)
-  const ecartBc = avecBc.reduce((s, l) => s + kgL(l), 0) - totalBc
+  const ecartBc = saisie.filter((l) => rattacheeAuBon(l, saisie)).reduce((s, l) => s + kgL(l), 0) - totalBc
   const palettesComptees = saisie.reduce((s, l) => s + (nombreDe(l.palettes) ?? 0), 0)
   const bobinesComptees = saisie.reduce((s, l) => s + (nombreDe(l.bobines) ?? 0), 0)
+  const motsBarre = saisie.length ? motsCommuns(saisie.map((l) => motsDeRef(l.code_reference))) : MOTS_BOBINE
   const palettesAttendues = avecBc.reduce((s, l) => s + (depuisKg(l.suggere_kg, condLiaison(l)).palettes ?? 0), 0)
   const bobinesAttendues = avecBc.reduce((s, l) => s + (depuisKg(l.suggere_kg, condLiaison(l)).bobines ?? 0), 0)
   const aCompter = saisie.filter(
@@ -1245,7 +1277,7 @@ export function Reception() {
   const rangDe = (l: LigneSaisie) => saisie.findIndex((x) => x.cle === l.cle) + 1
   const noms = (ls: LigneSaisie[]) => ls.map((l) => `L${rangDe(l)} ${l.code_reference}`).join(', ')
   const lignesHors = saisie
-    .filter((l) => (ecartPct(l.qte, l.suggere_kg) ?? 0) > TOLERANCE_PCT)
+    .filter((l) => (ecartPct(l.qte, attenduNet(l, saisie)) ?? 0) > TOLERANCE_PCT)
     .map((l) => ({
       cle: l.cle,
       rang: rangDe(l),
@@ -1284,7 +1316,7 @@ export function Reception() {
       titre: 'Palettes comptées / attendues au bon (déduites de l’attendu par le conditionnement)',
     },
     {
-      libelle: 'Bobines',
+      libelle: motsBarre.Des,
       secondaire: true,
       valeur: `${fmt.nombre(bobinesComptees, 0)} / ${fmt.nombre(bobinesAttendues, 0)}`,
       mot: aCompter.length
@@ -1297,7 +1329,7 @@ export function Reception() {
         : bobinesAttendues
           ? Math.abs(bobinesComptees - bobinesAttendues) < 0.5 ? 'succes' : 'alerte'
           : 'neutre',
-      titre: 'Bobines comptées / attendues au bon (déduites de l’attendu par le conditionnement)',
+      titre: `${motsBarre.Des} comptés / attendus au bon (déduits de l’attendu par le conditionnement)`,
     },
   ]
   const sansQte = saisie.filter((l) => !(Number(l.qte) > 0))
@@ -1329,7 +1361,7 @@ export function Reception() {
       : []),
     ...(aCompter.length
       ? [{
-          texte: `${aCompter.length} ligne(s) suivie(s) au lot sans bobines comptées : à compter avant la soumission au contrôle — ${noms(aCompter)}.`,
+          texte: `${aCompter.length} ligne(s) suivie(s) au lot sans ${motsBarre.des} comptés : à compter avant la soumission au contrôle — ${noms(aCompter)}.`,
           cle: aCompter[0].cle,
         }]
       : []),

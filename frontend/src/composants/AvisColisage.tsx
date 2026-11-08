@@ -14,22 +14,26 @@ import { Alerte } from './ui/base'
 import { controleColisage, type Conditionnement } from '../lib/conditionnement'
 import { useTolerancesColisage } from '../lib/lots'
 import { cn } from '../lib/utils'
+import { MOTS_BOBINE, type Mots } from '../lib/motsUnite'
 
 export function AvisColisage({
   kg,
   bobines,
   palettes,
   cond,
+  mots,
   className,
 }: {
   kg: unknown
   bobines: unknown
   palettes: unknown
   cond: Conditionnement
+  /** Le mot du conditionnement ; a defaut, la bobine. */
+  mots?: Mots
   className?: string
 }) {
   const t = useTolerancesColisage()
-  const v = controleColisage(kg, bobines, palettes, cond, t)
+  const v = controleColisage(kg, bobines, palettes, cond, t, mots ?? MOTS_BOBINE)
   if (v.niveau === 'ok' || !v.message) return null
   return (
     <Alerte
